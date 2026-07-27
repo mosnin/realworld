@@ -14,6 +14,13 @@ Deliverables:
 - Three complete visual directions for the primary Mission Field
 - Selected direction translated into design tokens and interaction rules
 
+Design gate:
+
+- Selected base: Living Atlas
+- Proposed production revision: `design/concepts/living-atlas-realtime-hybrid.png`
+- Revision intent: Google Docs-level live presence and co-editing clarity combined with cooperative-game immediacy, shared momentum, Surge focus, tactile manipulation, and meaningful environmental feedback
+- Approval: awaiting explicit confirmation
+
 Exit gates:
 
 - The solo-to-50-person loop is specified
@@ -159,4 +166,3 @@ Exit gates:
 
 - Release matrix passes automated, source, render, interaction, role, and persistent-state evidence
 - Rollback, incident response, and data recovery are rehearsed
-

@@ -5,9 +5,9 @@
   "currentPhase": 0,
   "phaseName": "Constitution and visual language",
   "startedAt": "2026-07-27T00:00:00-04:00",
-  "lastUpdatedAt": "2026-07-27T17:55:00-04:00",
+  "lastUpdatedAt": "2026-07-27T18:07:00-04:00",
   "exactNextActions": [
-    "Select Living Atlas, Temporal Loom, Workshop, or a deliberate hybrid",
+    "Approve or refine design/concepts/living-atlas-realtime-hybrid.png",
     "Translate the selected direction into design tokens and interaction rules"
   ],
   "lanes": {
