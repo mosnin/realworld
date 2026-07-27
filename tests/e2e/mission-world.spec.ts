@@ -20,3 +20,14 @@ test("the room directory provides a non-spatial path to Workshop", async ({ page
   await page.locator(".room-directory").getByRole("button", { name: "Enter Workshop" }).click();
   await expect(page.getByRole("heading", { name: "Make room entry feel instantly useful" })).toBeVisible();
 });
+
+test("keyboard users can move between spatial landmarks without pointer input", async ({ page }) => {
+  await page.goto("/");
+
+  const workshop = page.getByRole("button", { name: /Workshop\. 4 active people/i });
+  await workshop.focus();
+  await page.keyboard.press("ArrowRight");
+
+  await expect(page.getByRole("complementary", { name: "Branch Lab" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Branch Lab\. 5 active people/i })).toBeFocused();
+});
