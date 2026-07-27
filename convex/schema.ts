@@ -1,5 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { authTables } from "@convex-dev/auth/server";
 
 const principalType = v.union(v.literal("human"), v.literal("agent"), v.literal("service"));
 const principalState = v.union(v.literal("active"), v.literal("disabled"));
@@ -22,6 +23,8 @@ const missionLifecycle = v.union(
 );
 
 export default defineSchema({
+  ...authTables,
+
   principals: defineTable({
     type: principalType,
     state: principalState,
