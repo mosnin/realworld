@@ -5,24 +5,23 @@
   "currentPhase": 0,
   "phaseName": "Constitution and visual language",
   "startedAt": "2026-07-27T00:00:00-04:00",
-  "lastUpdatedAt": "2026-07-27T18:33:00-04:00",
+  "lastUpdatedAt": "2026-07-27T18:45:00-04:00",
   "exactNextActions": [
-    "Wire Convex Auth with passkeys and verify a real round trip",
     "Create or connect a cloud Convex development deployment",
-    "Replace fixture Mission state with authenticated reactive Convex data",
+    "Replace the signed-in fixture Mission with authenticated reactive Convex data",
     "Verify two browser sessions observe the same durable Mission"
   ],
   "teams": {
     "worldNetwork": {"status":"complete","model":"gpt-5.6-terra","writeScope":"docs/program/world-network-system.md","lastMeaningfulHeartbeatAt":"2026-07-27T18:52:00-04:00","evidence":"commit 0ca7a39","exactNextAction":"Review the product contract against the room interaction specification"},
     "experienceInteraction": {"status":"review","model":"gpt-5.6-terra","writeScope":"design/ and docs/design/","lastMeaningfulHeartbeatAt":"2026-07-27T19:08:00-04:00","evidence":"commit 46a318a","exactNextAction":"Apply recommended defaults and perform concept-to-browser review"},
-    "clientPlatform": {"status":"active","model":"gpt-5.6-terra","writeScope":"app client and design system","lastMeaningfulHeartbeatAt":"2026-07-27T18:29:00-04:00","evidence":"commit 8171dac; Chromium map-to-Workshop and directory-to-Workshop journeys pass; fixture data only","exactNextAction":"Add authenticated Convex provider and replace fixture Mission data"},
-    "missionKernel": {"status":"active","model":"gpt-5.6-terra","writeScope":"convex durable domain","lastMeaningfulHeartbeatAt":"2026-07-27T18:31:33-04:00","evidence":"commit 1f15adc pushed successfully to local anonymous Convex deployment with all indexes created","exactNextAction":"Wire Convex Auth, run authorization tests, then push to cloud development deployment","blocker":"Cloud Convex device login has not been completed"},
+    "clientPlatform": {"status":"active","model":"gpt-5.6-terra","writeScope":"app client and design system","lastMeaningfulHeartbeatAt":"2026-07-27T18:44:00-04:00","evidence":"commit 26cdea4; local browser account creation, sign-out, sign-in, and protected-shell restoration passed","exactNextAction":"Replace the signed-in fixture Mission with authenticated Convex queries and mutations"},
+    "missionKernel": {"status":"active","model":"gpt-5.6-terra","writeScope":"convex durable domain","lastMeaningfulHeartbeatAt":"2026-07-27T18:44:00-04:00","evidence":"local Convex push passed; 7 authorization/idempotency/version tests pass; local auth round trip passed","exactNextAction":"Push the same schema/auth/functions to a cloud development deployment and create a durable Mission","blocker":"Cloud Convex device login has not been completed"},
     "realtimeSystems": {"status":"review","model":"gpt-5.6-terra","writeScope":"Ably and presence layer","lastMeaningfulHeartbeatAt":"2026-07-27T18:20:00-04:00","evidence":"protocol commit 143c73e; no Ably application or runtime connection yet","exactNextAction":"Wait for authenticated Mission identity, then implement scoped Ably token issuance"},
     "agentRuntime": {"status":"review","model":"gpt-5.6-terra","writeScope":"docs/program/platform-architecture.md","lastMeaningfulHeartbeatAt":"2026-07-27T18:58:00-04:00","evidence":"commit 01153f4","exactNextAction":"Qualify concrete provider APIs before implementing the adapter"},
     "artifactStudio": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"artifact domain and surfaces","exactNextAction":"Wait for client, realtime, and agent contracts"},
     "discoverySocial": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"discovery and contribution surfaces","exactNextAction":"Wait for Artifact Studio and reputation contracts"},
     "trustGovernance": {"status":"review","model":"gpt-5.6-terra","writeScope":"docs/program/trust-quality-release.md","lastMeaningfulHeartbeatAt":"2026-07-27T18:55:00-04:00","evidence":"commit c1f156b","exactNextAction":"Translate the trust contract into foundation tests"},
-    "qualityOperations": {"status":"active","model":"gpt-5.6-terra","writeScope":"CI and verification infrastructure","lastMeaningfulHeartbeatAt":"2026-07-27T18:30:00-04:00","evidence":"Vercel preview ready from commit f7d4230; local lint, typecheck, unit, build, and two Chromium journeys pass","exactNextAction":"Land CI evidence gates and keep persistent-state/auth evidence failing until verified"}
+    "qualityOperations": {"status":"active","model":"gpt-5.6-terra","writeScope":"CI and verification infrastructure","lastMeaningfulHeartbeatAt":"2026-07-27T18:39:00-04:00","evidence":"commit 7ceb53a; CI evidence gates and four Chromium foundation journeys added; Phase 1 gate still fails honestly on cloud auth, role, and persistent-state proof","exactNextAction":"Add authenticated persistent-state browser evidence after cloud deployment"}
   },
   "orchestration": {
     "preferredRuntime": "orca",
@@ -41,8 +40,8 @@
   },
   "productionReadiness": {
     "estimate": "below_1_percent",
-    "currentEvidence": ["source_review","local_automated","local_render","local_interaction","vercel_preview_build","local_convex_push"],
-    "missingCriticalEvidence": ["real_auth_round_trip","cloud_convex_push","persistent_state","two_user_sync","ably_runtime","agent_runtime","role_matrix","recovery","load"]
+    "currentEvidence": ["source_review","local_automated","local_render","local_interaction","vercel_preview_build","local_convex_push","local_auth_round_trip"],
+    "missingCriticalEvidence": ["cloud_auth_round_trip","cloud_convex_push","persistent_state","two_user_sync","ably_runtime","agent_runtime","role_matrix","recovery","load"]
   },
   "notificationPolicy": {
     "suppressNoOpUpdates": true,

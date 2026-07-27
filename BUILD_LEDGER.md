@@ -38,7 +38,9 @@ Deliverables:
 
 - Next.js application foundation: commit `a9679c0`
 - Production-quality design system: in progress
-- Convex schema, indexes, and guarded Mission functions: local anonymous deployment push passed on 2026-07-27; cloud deployment and real authentication remain unverified
+- Convex schema, indexes, guarded Mission functions, and private-alpha password authentication: local deployment push passed on 2026-07-27
+- Local browser authentication evidence: synthetic account creation, sign-out, sign-in, and protected Mission World restoration passed on 2026-07-27
+- Cloud Convex deployment and cloud authentication remain unverified; password auth is a private-alpha bridge, not the final passkey decision
 - Vercel preview: `https://realworld-4r7u1kand-mosnins-projects.vercel.app` built successfully from commit `f7d4230`; GitHub repository connected
 - Test, lint, typecheck, accessibility, and browser-test infrastructure: foundation passing locally in commit `a9679c0`
 - Observability, error boundaries, structured logs, and environment validation: shell error boundaries and safe environment-name validation started in commit `a9679c0`

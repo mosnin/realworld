@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { SessionControl } from "@/app/auth/session-control";
+
 type RoomId = "core" | "workshop" | "observatory" | "branch" | "library" | "surge";
 
 type Room = {
@@ -23,7 +25,7 @@ const rooms: Room[] = [
     id: "core",
     name: "Mission Core",
     eyebrow: "Shared outcome",
-    description: "Make a real-time music studio that people can build inside together.",
+    description: "Build Realworld into a production multiplayer work platform for humans and agents.",
     active: 5,
     agents: 2,
     accent: "blue",
@@ -281,12 +283,13 @@ export function MissionWorld() {
         <button className="icon-button" aria-label="Search" type="button">⌕</button>
         <button className="icon-button" aria-label="Notifications" type="button">♧</button>
         <PersonToken name="Priya" index={0} />
+        <SessionControl />
       </header>
 
       <section className="mission-summary" aria-labelledby="mission-title">
         <p className="eyebrow">Mission</p>
-        <h1 id="mission-title">Build an open-source multiplayer music studio</h1>
-        <p>Create a web-based digital audio workstation for real-time collaboration. Open source. Extensible. For everyone.</p>
+        <h1 id="mission-title">Build Realworld into a living multiplayer work platform</h1>
+        <p>Give humans and autonomous agents shared Missions, live rooms, durable Artifacts, and the tools to accomplish ambitious work together.</p>
         <div className="mission-summary__facts"><span><i /> Active</span><span>18 humans</span><span>7 agents</span><span>Updated 2m ago</span></div>
         <div className="summary-pulse"><strong>Pulse</strong><svg viewBox="0 0 220 34" aria-hidden="true"><path d="M1 21 C20 30 26 6 45 17 S70 26 88 11 S113 9 130 22 S155 25 169 14 S194 12 219 9" /></svg></div>
       </section>
@@ -318,8 +321,8 @@ export function MissionWorld() {
           <div className="world-map" aria-label="Spatial Mission map. Select a Room to inspect it; press Enter on the selected Room to enter it.">
             {rooms.map((room) => <RoomLandmark key={room.id} room={room} selected={selectedRoom.id === room.id} onSelect={setSelectedRoomId} onEnter={enterRoom} />)}
             <div className="map-event map-event--call"><span>⌁</span><strong>Open Call</strong><small>UI/UX critique</small><button type="button">Join Call</button></div>
-            <div className="map-event map-event--fracture"><span>◈</span><strong>Fracture</strong><small>Sample Sync Drift</small><button type="button">Review</button></div>
-            <div className="map-event map-event--proof"><span>✓</span><strong>Proof complete</strong><small>Plugin Host Layer improved by 28%</small></div>
+            <div className="map-event map-event--fracture"><span>◈</span><strong>Fracture</strong><small>Auth session restoration stalls</small><button type="button">Review</button></div>
+            <div className="map-event map-event--proof"><span>✓</span><strong>Proof complete</strong><small>Mission authorization contract verified</small></div>
           </div>
         )}
         <aside className="world-inspector" aria-live="polite" aria-labelledby="inspector-title">
@@ -329,7 +332,7 @@ export function MissionWorld() {
           <p>{selectedRoom.description}</p>
           <div className="inspector-status"><span><i /> {selectedRoom.active} active</span><span>◈ {selectedRoom.agents} agent{selectedRoom.agents === 1 ? "" : "s"}</span></div>
           <section><h3>In this room</h3><ul className="inspector-people"><li><PersonToken name="Priya" index={0} /> Priya <small>shaping flow</small></li><li><PersonToken name="SonicAgent" index={1} /> SonicAgent <small>running evals</small></li><li><PersonToken name="Marco" index={2} /> Marco <small>reviewing Proof</small></li></ul></section>
-          <section><h3>Recent artifacts</h3><ul className="artifact-list"><li>mixer-flow.tsx <small>UI component</small></li><li>sync-indicator.ts <small>interaction</small></li><li>ux-spec.md <small>experience spec</small></li></ul></section>
+          <section><h3>Recent artifacts</h3><ul className="artifact-list"><li>mission-world.tsx <small>UI component</small></li><li>realtime-room-protocol.md <small>systems contract</small></li><li>mission-kernel-contract.md <small>architecture</small></li></ul></section>
           <button className="primary-button" onClick={() => enterRoom(selectedRoom.id)} type="button">{selectedRoom.action}</button>
           <button className="secondary-button" type="button">Follow Priya</button>
         </aside>

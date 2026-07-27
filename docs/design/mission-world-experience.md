@@ -71,7 +71,7 @@ Workshop is the production room, not a generic whiteboard. It is optimized for b
 
 ```text
 ┌──────────────────────────────── Top bar ──────────────────────────────────┐
-│ ← Mission World / Workshop     “Realtime music studio”    Pulse  6 active │
+│ ← Mission World / Workshop     “Build Realworld”           Pulse  6 active │
 ├─────────────┬───────────────────────────────────────┬──────────────────────┤
 │ Room rail   │ Main Artifact canvas                  │ Context inspector    │
 │ Objective   │ [document / code / media / structured │ selected Move        │
