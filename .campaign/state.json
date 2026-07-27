@@ -30,7 +30,13 @@
     "fallbackConcurrency": 3,
     "blockedReason": "Orca worker terminals start at the macOS login prompt before the configured Claude or Codex launch command is injected. Existing provider OAuth was not changed.",
     "heartbeatIntervalMinutes": 15,
+    "heartbeatAutomationId": "realworld-a-to-z-coordinator",
     "stopCondition": "All Phase 8 exit gates pass and the coordinator marks the campaign complete"
+  },
+  "commandCenter": {
+    "notionUrl": "https://app.notion.com/p/3aaa0db630cf817d8072e3506c586733",
+    "localProgram": "PROGRAM.md",
+    "founderActions": "FOUNDER_ACTIONS.md"
   },
   "notificationPolicy": {
     "suppressNoOpUpdates": true,
