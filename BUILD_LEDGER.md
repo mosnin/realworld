@@ -9,8 +9,9 @@ Status: in progress
 Deliverables:
 
 - Product constitution and product language
-- Network-effect and fun-system specification
-- Architecture boundaries and initial decision record
+- Network-effect and fun-system specification: `docs/program/world-network-system.md`
+- Architecture boundaries and initial decision record: `docs/program/platform-architecture.md`
+- Trust, quality, and release contract: `docs/program/trust-quality-release.md`
 - Three complete visual directions for the primary Mission Field
 - Selected direction translated into design tokens and interaction rules
 
@@ -18,6 +19,7 @@ Design gate:
 
 - Selected base: Living Atlas
 - Proposed production revision: `design/concepts/living-atlas-realtime-hybrid.png`
+- Proposed world-map extension: `design/concepts/mission-world-map.png`
 - Revision intent: Google Docs-level live presence and co-editing clarity combined with cooperative-game immediacy, shared momentum, Surge focus, tactile manipulation, and meaningful environmental feedback
 - Approval: awaiting explicit confirmation
 

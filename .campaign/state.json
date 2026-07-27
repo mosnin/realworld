@@ -1,38 +1,37 @@
 {
   "campaign": "realworld-production-build",
-  "version": 1,
+  "version": 2,
   "status": "active",
   "currentPhase": 0,
   "phaseName": "Constitution and visual language",
   "startedAt": "2026-07-27T00:00:00-04:00",
-  "lastUpdatedAt": "2026-07-27T18:07:00-04:00",
+  "lastUpdatedAt": "2026-07-27T19:00:00-04:00",
   "exactNextActions": [
-    "Approve or refine design/concepts/living-atlas-realtime-hybrid.png",
-    "Translate the selected direction into design tokens and interaction rules"
+    "Integrate the Wave A product, architecture, and trust specifications",
+    "Translate Living Atlas plus Mission World rooms into design tokens and room interaction rules",
+    "Start the application, Convex, and verification foundation after Phase 0 gates pass"
   ],
-  "lanes": {
-    "productNetwork": {
-      "status": "blocked",
-      "owner": "claude",
-      "writeScope": "docs/research/product-network-effects.md"
-    },
-    "agentArchitecture": {
-      "status": "blocked",
-      "owner": "codex",
-      "writeScope": "docs/research/agent-architecture.md"
-    },
-    "trustAndFun": {
-      "status": "blocked",
-      "owner": "claude",
-      "writeScope": "docs/research/trust-and-fun.md"
-    },
-    "visualDirection": {
-      "status": "decision_required",
-      "owner": "coordinator",
-      "writeScope": "design/concepts/"
-    }
+  "teams": {
+    "worldNetwork": {"status":"complete","model":"gpt-5.6-terra","writeScope":"docs/program/world-network-system.md","lastMeaningfulHeartbeatAt":"2026-07-27T18:52:00-04:00","evidence":"commit 0ca7a39","exactNextAction":"Review the product contract against the room interaction specification"},
+    "experienceInteraction": {"status":"queued","model":"gpt-5.6-terra","writeScope":"design/ and docs/design/","exactNextAction":"Specify the Mission World map and first room interior"},
+    "clientPlatform": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"app client and design system","exactNextAction":"Wait for the visual and Mission Kernel contracts"},
+    "missionKernel": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"convex durable domain","exactNextAction":"Wait for Phase 0 product contract"},
+    "realtimeSystems": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"Ably and presence layer","exactNextAction":"Wait for client and Mission Kernel boundaries"},
+    "agentRuntime": {"status":"review","model":"gpt-5.6-terra","writeScope":"docs/program/platform-architecture.md","lastMeaningfulHeartbeatAt":"2026-07-27T18:58:00-04:00","evidence":"commit 01153f4","exactNextAction":"Qualify concrete provider APIs before implementing the adapter"},
+    "artifactStudio": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"artifact domain and surfaces","exactNextAction":"Wait for client, realtime, and agent contracts"},
+    "discoverySocial": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"discovery and contribution surfaces","exactNextAction":"Wait for Artifact Studio and reputation contracts"},
+    "trustGovernance": {"status":"review","model":"gpt-5.6-terra","writeScope":"docs/program/trust-quality-release.md","lastMeaningfulHeartbeatAt":"2026-07-27T18:55:00-04:00","evidence":"commit c1f156b","exactNextAction":"Translate the trust contract into foundation tests"},
+    "qualityOperations": {"status":"review","model":"gpt-5.6-terra","writeScope":"docs/program/trust-quality-release.md","lastMeaningfulHeartbeatAt":"2026-07-27T18:55:00-04:00","evidence":"commit c1f156b","exactNextAction":"Translate the release contract into CI and verification infrastructure"}
   },
-  "blockedReason": "Orca worker terminals start at the macOS login prompt before the configured Claude or Codex launch command is injected. Existing provider OAuth was not changed.",
+  "orchestration": {
+    "preferredRuntime": "orca",
+    "preferredRuntimeStatus": "blocked",
+    "fallbackRunner": "codex-collaboration",
+    "fallbackConcurrency": 3,
+    "blockedReason": "Orca worker terminals start at the macOS login prompt before the configured Claude or Codex launch command is injected. Existing provider OAuth was not changed.",
+    "heartbeatIntervalMinutes": 15,
+    "stopCondition": "All Phase 8 exit gates pass and the coordinator marks the campaign complete"
+  },
   "notificationPolicy": {
     "suppressNoOpUpdates": true,
     "notifyOn": [
