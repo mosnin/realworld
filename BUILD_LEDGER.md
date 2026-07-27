@@ -32,15 +32,16 @@ Exit gates:
 
 ## Phase 1 — Production foundation
 
-Status: pending
+Status: in progress
 
 Deliverables:
 
-- Next.js application and production-quality design system
+- Next.js application foundation: commit `a9679c0`
+- Production-quality design system: in progress
 - Convex project, schema, indexes, authentication, and authorization foundation
 - Vercel deployment pipeline and preview environments
-- Test, lint, typecheck, accessibility, and browser-test infrastructure
-- Observability, error boundaries, structured logs, and environment validation
+- Test, lint, typecheck, accessibility, and browser-test infrastructure: foundation passing locally in commit `a9679c0`
+- Observability, error boundaries, structured logs, and environment validation: shell error boundaries and safe environment-name validation started in commit `a9679c0`
 
 Exit gates:
 

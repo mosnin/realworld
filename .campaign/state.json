@@ -5,7 +5,7 @@
   "currentPhase": 0,
   "phaseName": "Constitution and visual language",
   "startedAt": "2026-07-27T00:00:00-04:00",
-  "lastUpdatedAt": "2026-07-27T19:00:00-04:00",
+  "lastUpdatedAt": "2026-07-27T19:16:00-04:00",
   "exactNextActions": [
     "Integrate the Wave A product, architecture, and trust specifications",
     "Translate Living Atlas plus Mission World rooms into design tokens and room interaction rules",
@@ -13,10 +13,10 @@
   ],
   "teams": {
     "worldNetwork": {"status":"complete","model":"gpt-5.6-terra","writeScope":"docs/program/world-network-system.md","lastMeaningfulHeartbeatAt":"2026-07-27T18:52:00-04:00","evidence":"commit 0ca7a39","exactNextAction":"Review the product contract against the room interaction specification"},
-    "experienceInteraction": {"status":"queued","model":"gpt-5.6-terra","writeScope":"design/ and docs/design/","exactNextAction":"Specify the Mission World map and first room interior"},
-    "clientPlatform": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"app client and design system","exactNextAction":"Wait for the visual and Mission Kernel contracts"},
-    "missionKernel": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"convex durable domain","exactNextAction":"Wait for Phase 0 product contract"},
-    "realtimeSystems": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"Ably and presence layer","exactNextAction":"Wait for client and Mission Kernel boundaries"},
+    "experienceInteraction": {"status":"review","model":"gpt-5.6-terra","writeScope":"design/ and docs/design/","lastMeaningfulHeartbeatAt":"2026-07-27T19:08:00-04:00","evidence":"commit 46a318a","exactNextAction":"Apply recommended defaults and perform concept-to-browser review"},
+    "clientPlatform": {"status":"active","model":"gpt-5.6-terra","writeScope":"app client and design system","lastMeaningfulHeartbeatAt":"2026-07-27T19:15:00-04:00","evidence":"foundation commit a9679c0; lint, typecheck, unit, build, and Chromium health test pass","exactNextAction":"Implement the Mission World shell against the experience specification"},
+    "missionKernel": {"status":"active","model":"gpt-5.6-terra","writeScope":"convex durable domain","lastMeaningfulHeartbeatAt":"2026-07-27T19:10:00-04:00","evidence":"contract commit 8ea8fe5","exactNextAction":"Implement the schema and guarded first vertical slice"},
+    "realtimeSystems": {"status":"queued","model":"gpt-5.6-terra","writeScope":"Ably and presence layer","exactNextAction":"Define the room presence and reconnect protocol against the kernel contract"},
     "agentRuntime": {"status":"review","model":"gpt-5.6-terra","writeScope":"docs/program/platform-architecture.md","lastMeaningfulHeartbeatAt":"2026-07-27T18:58:00-04:00","evidence":"commit 01153f4","exactNextAction":"Qualify concrete provider APIs before implementing the adapter"},
     "artifactStudio": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"artifact domain and surfaces","exactNextAction":"Wait for client, realtime, and agent contracts"},
     "discoverySocial": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"discovery and contribution surfaces","exactNextAction":"Wait for Artifact Studio and reputation contracts"},
