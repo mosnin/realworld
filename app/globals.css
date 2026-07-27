@@ -1,0 +1,123 @@
+:root {
+  color-scheme: dark;
+  --surface: #0d1211;
+  --surface-raised: #141c1a;
+  --text: #f3f7f2;
+  --muted: #b8c5be;
+  --focus: #d8f777;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--surface);
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background: var(--surface);
+  color: var(--text);
+  font-family: Arial, Helvetica, sans-serif;
+  line-height: 1.5;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+
+.skip-link {
+  position: fixed;
+  z-index: 10;
+  top: 0.75rem;
+  left: 0.75rem;
+  transform: translateY(-200%);
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.25rem;
+  background: var(--focus);
+  color: #12180d;
+  font-weight: 700;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+.foundation,
+.system-message {
+  display: grid;
+  align-content: center;
+  min-height: 100vh;
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: clamp(1.5rem, 5vw, 4rem);
+}
+
+.foundation {
+  gap: 1.25rem;
+}
+
+.foundation h1,
+.system-message h1 {
+  max-width: 14ch;
+  margin: 0;
+  font-size: clamp(2.25rem, 7vw, 5.5rem);
+  letter-spacing: -0.06em;
+  line-height: 0.92;
+}
+
+.foundation p,
+.system-message p {
+  max-width: 48ch;
+  margin: 0;
+  color: var(--muted);
+  font-size: 1.125rem;
+}
+
+.wordmark {
+  color: var(--focus) !important;
+  font-size: 1rem !important;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.system-message {
+  gap: 1rem;
+}
+
+.system-message button {
+  width: fit-content;
+  margin-top: 0.5rem;
+  padding: 0.7rem 1rem;
+  border: 1px solid var(--focus);
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.system-message button:hover {
+  background: var(--surface-raised);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
