@@ -1,0 +1,47 @@
+{
+  "campaign": "realworld-production-build",
+  "version": 1,
+  "status": "active",
+  "currentPhase": 0,
+  "phaseName": "Constitution and visual language",
+  "startedAt": "2026-07-27T00:00:00-04:00",
+  "lastUpdatedAt": "2026-07-27T00:00:00-04:00",
+  "exactNextActions": [
+    "Complete three non-overlapping research lanes",
+    "Generate three complete primary-screen visual directions",
+    "Present the directions for explicit selection",
+    "Translate the selected direction into design tokens and interaction rules"
+  ],
+  "lanes": {
+    "productNetwork": {
+      "status": "pending",
+      "owner": null,
+      "writeScope": "docs/research/product-network-effects.md"
+    },
+    "agentArchitecture": {
+      "status": "pending",
+      "owner": null,
+      "writeScope": "docs/research/agent-architecture.md"
+    },
+    "trustAndFun": {
+      "status": "pending",
+      "owner": null,
+      "writeScope": "docs/research/trust-and-fun.md"
+    },
+    "visualDirection": {
+      "status": "in_progress",
+      "owner": "coordinator",
+      "writeScope": "design/concepts/"
+    }
+  },
+  "blockedReason": null,
+  "notificationPolicy": {
+    "suppressNoOpUpdates": true,
+    "notifyOn": [
+      "phase_complete",
+      "decision_required",
+      "new_blocker",
+      "release_gate"
+    ]
+  }
+}
