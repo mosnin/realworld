@@ -38,10 +38,16 @@ Deliverables:
 
 - Next.js application foundation: commit `a9679c0`
 - Production-quality design system: in progress
-- Convex project, schema, indexes, authentication, and authorization foundation
-- Vercel deployment pipeline and preview environments
+- Convex schema, indexes, and guarded Mission functions: local anonymous deployment push passed on 2026-07-27; cloud deployment and real authentication remain unverified
+- Vercel preview: `https://realworld-4r7u1kand-mosnins-projects.vercel.app` built successfully from commit `f7d4230`; GitHub repository connected
 - Test, lint, typecheck, accessibility, and browser-test infrastructure: foundation passing locally in commit `a9679c0`
 - Observability, error boundaries, structured logs, and environment validation: shell error boundaries and safe environment-name validation started in commit `a9679c0`
+
+Evidence boundary:
+
+- The current Mission World and Workshop use fixture data and are a render/interaction checkpoint only.
+- They do not count as authenticated, multiplayer, persistent-state, agent-runtime, or production-readiness evidence.
+- Overall production capability remains below one percent until a signed-in user creates and reloads a durable Mission from the connected cloud backend.
 
 Exit gates:
 
