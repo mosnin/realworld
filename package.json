@@ -21,6 +21,7 @@
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },
   "dependencies": {
+    "convex": "^1.42.3",
     "next": "16.2.12",
     "react": "19.2.8",
     "react-dom": "19.2.8",
