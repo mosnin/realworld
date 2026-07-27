@@ -5,36 +5,34 @@
   "currentPhase": 0,
   "phaseName": "Constitution and visual language",
   "startedAt": "2026-07-27T00:00:00-04:00",
-  "lastUpdatedAt": "2026-07-27T00:00:00-04:00",
+  "lastUpdatedAt": "2026-07-27T17:55:00-04:00",
   "exactNextActions": [
-    "Complete three non-overlapping research lanes",
-    "Generate three complete primary-screen visual directions",
-    "Present the directions for explicit selection",
+    "Select Living Atlas, Temporal Loom, Workshop, or a deliberate hybrid",
     "Translate the selected direction into design tokens and interaction rules"
   ],
   "lanes": {
     "productNetwork": {
-      "status": "pending",
-      "owner": null,
+      "status": "blocked",
+      "owner": "claude",
       "writeScope": "docs/research/product-network-effects.md"
     },
     "agentArchitecture": {
-      "status": "pending",
-      "owner": null,
+      "status": "blocked",
+      "owner": "codex",
       "writeScope": "docs/research/agent-architecture.md"
     },
     "trustAndFun": {
-      "status": "pending",
-      "owner": null,
+      "status": "blocked",
+      "owner": "claude",
       "writeScope": "docs/research/trust-and-fun.md"
     },
     "visualDirection": {
-      "status": "in_progress",
+      "status": "decision_required",
       "owner": "coordinator",
       "writeScope": "design/concepts/"
     }
   },
-  "blockedReason": null,
+  "blockedReason": "Orca worker terminals start at the macOS login prompt before the configured Claude or Codex launch command is injected. Existing provider OAuth was not changed.",
   "notificationPolicy": {
     "suppressNoOpUpdates": true,
     "notifyOn": [
