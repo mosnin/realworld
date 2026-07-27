@@ -18,3 +18,4 @@ test-results/
 
 # TypeScript build metadata
 *.tsbuildinfo
+.vercel
