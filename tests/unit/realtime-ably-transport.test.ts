@@ -111,6 +111,36 @@ async function expectGenericProviderFailure(action: () => Promise<unknown>, prov
   expect(String(failure)).not.toContain(providerSecret);
 }
 
+function controlledTimer() {
+  let nextId = 0;
+  const pending = new Map<number, { callback: () => void; delayMs: number; cleared: boolean }>();
+  return {
+    timer: {
+      setTimeout: vi.fn((callback: () => void, delayMs: number) => {
+        const id = ++nextId;
+        pending.set(id, { callback, delayMs, cleared: false });
+        return id as unknown as ReturnType<typeof setTimeout>;
+      }),
+      clearTimeout: vi.fn((handle: ReturnType<typeof setTimeout>) => {
+        const task = pending.get(handle as unknown as number);
+        if (task) task.cleared = true;
+      }),
+    },
+    fire(delayMs: number) {
+      const task = [...pending.values()].find((candidate) => candidate.delayMs === delayMs && !candidate.cleared);
+      if (!task) throw new Error(`missing controlled timer for ${delayMs}ms`);
+      task.cleared = true;
+      task.callback();
+    },
+  };
+}
+
+function deferred<T = void>() {
+  let resolve: (value: T | PromiseLike<T>) => void = () => undefined;
+  const promise = new Promise<T>((next) => { resolve = next; });
+  return { promise, resolve };
+}
+
 describe("development Ably room transport", () => {
   it("requires an explicitly injected client factory and never falls back to an SDK or network path", async () => {
     const hostileFactoryOptions = Object.defineProperty({ environment: "preview" }, "clientFactory", {
@@ -495,6 +525,7 @@ describe("development Ably room transport", () => {
       environment: "preview",
       clientFactory: async () => ({ ...fake.client, connection: { ...fake.client.connection, on } }),
       connectionReadyTimeoutMs: 5,
+      providerOperationTimeoutMs: 5,
       timer,
       now: () => 1_000_000,
     });
@@ -522,7 +553,368 @@ describe("development Ably room transport", () => {
       expect(fake.connectionListeners).toEqual([]);
       expect(fake.listeners).toEqual(new Map());
       expect(fake.presenceListeners).toEqual(new Map());
+      await vi.waitFor(() => expect(fake.client.close).toHaveBeenCalledTimes(1));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
+  it("bounds a never-settling provider subscribe and contains its late settlement", async () => {
+    const fake = fakeClient();
+    const scheduler = controlledTimer();
+    const providerSecret = "provider-secret-timeout-subscribe";
+    const rawSubscription = deferred<void>();
+    const world = fake.get(names().world) as unknown as { subscribe: (listener: unknown) => Promise<void> };
+    const eagerSubscribe = world.subscribe;
+    world.subscribe = vi.fn(async (listener) => {
+      await eagerSubscribe(listener as never);
+      await rawSubscription.promise;
+      await eagerSubscribe(listener as never);
+    });
+    const adapter = createDevelopmentAblyRoomTransport({
+      environment: "preview",
+      clientFactory: async () => fake.client,
+      timer: scheduler.timer,
+      connectionReadyTimeoutMs: 50,
+      providerOperationTimeoutMs: 7,
+      now: () => 1_000_000,
+    } as never);
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      const pending = adapter.connect({
+        scope,
+        token: tokenRequest({ [names().world]: ["subscribe"] }),
+        connectionEpoch: 1,
+        onMessage: vi.fn(),
+        onFailure: vi.fn(),
+      });
+      await vi.waitFor(() => expect(world.subscribe).toHaveBeenCalledTimes(1));
+      scheduler.fire(7);
+      const failure = await pending.catch((error: unknown) => error);
+      expect(failure).toEqual(expect.objectContaining({ message: "Realtime subscription is unavailable" }));
+      expect(String(failure)).not.toContain(providerSecret);
+      expect(fake.listeners.get(names().world) ?? []).toEqual([]);
+      expect(fake.presenceListeners).toEqual(new Map());
+      expect((fake.channels.get(names().world)!.unsubscribe as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
       expect(fake.client.close).toHaveBeenCalledTimes(1);
+
+      rawSubscription.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(fake.listeners.get(names().world) ?? []).toEqual([]);
+      expect(fake.presenceListeners).toEqual(new Map());
+      expect((fake.channels.get(names().world)!.unsubscribe as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(2);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
+  it("bounds never-settling publish and presence operations without mutating late local state", async () => {
+    const scheduler = controlledTimer();
+    const providerSecret = "provider-secret-timeout-publish";
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      const publishFake = fakeClient();
+      const publishDeferred = deferred<unknown>();
+      const world = publishFake.get(names().world) as unknown as { publish: (name: string, data: unknown) => Promise<unknown> };
+      world.publish = vi.fn(() => publishDeferred.promise);
+      const publishAdapter = createDevelopmentAblyRoomTransport({
+        environment: "preview", clientFactory: async () => publishFake.client, timer: scheduler.timer,
+        connectionReadyTimeoutMs: 50, providerOperationTimeoutMs: 7, now: () => 1_000_000,
+      } as never);
+      const publishSubscription = await publishAdapter.connect({
+        scope, token: tokenRequest({ [names().world]: ["publish"] }), connectionEpoch: 1, onMessage: vi.fn(), onFailure: vi.fn(),
+      });
+      const pendingPublish = Promise.resolve(publishSubscription.publish!(envelope("world.transition", "timeout-publish")));
+      await vi.waitFor(() => expect(world.publish).toHaveBeenCalledTimes(1));
+      scheduler.fire(7);
+      const publishFailure = await pendingPublish.catch((error: unknown) => error);
+      expect(publishFailure).toEqual(expect.objectContaining({ message: "Realtime publish is unavailable" }));
+      expect(String(publishFailure)).not.toContain(providerSecret);
+      publishDeferred.resolve(undefined);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await publishSubscription.unsubscribe();
+
+      const presenceFake = fakeClient();
+      const enterDeferred = deferred<void>();
+      const presence = presenceFake.get(names().presence).presence as unknown as {
+        enter: (data?: unknown) => Promise<void>;
+        leave: (data?: unknown) => Promise<void>;
+      };
+      const eagerEnter = presence.enter;
+      const eagerLeave = presence.leave;
+      presence.enter = vi.fn(async (data?: unknown) => {
+        await eagerEnter(data);
+        await enterDeferred.promise;
+        await eagerEnter(data);
+      });
+      const presenceAdapter = createDevelopmentAblyRoomTransport({
+        environment: "preview", clientFactory: async () => presenceFake.client, timer: scheduler.timer,
+        connectionReadyTimeoutMs: 50, providerOperationTimeoutMs: 7, now: () => 1_000_000,
+      } as never);
+      const presenceSubscription = await presenceAdapter.connect({
+        scope, token: tokenRequest({ [names().presence]: ["presence"] }), connectionEpoch: 1, onMessage: vi.fn(), onFailure: vi.fn(),
+      });
+      const pendingEnter = Promise.resolve(presenceSubscription.publish!(envelope("presence.heartbeat", "timeout-enter")));
+      await vi.waitFor(() => expect(presence.enter).toHaveBeenCalledTimes(1));
+      scheduler.fire(7);
+      const enterFailure = await pendingEnter.catch((error: unknown) => error);
+      expect(enterFailure).toEqual(expect.objectContaining({ message: "Realtime publish is unavailable" }));
+      expect(String(enterFailure)).not.toContain(providerSecret);
+      expect(eagerLeave).toHaveBeenCalledTimes(1);
+      enterDeferred.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(eagerLeave).toHaveBeenCalledTimes(2);
+      await presenceSubscription.publish!(envelope("presence.leave", "timeout-enter-late-leave"));
+      expect(eagerLeave).toHaveBeenCalledTimes(2);
+      await presenceSubscription.unsubscribe();
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
+  it("bounds cleanup despite a never-settling provider unsubscribe and keeps the closed session inert after late settlement", async () => {
+    const fake = fakeClient();
+    const scheduler = controlledTimer();
+    const providerSecret = "provider-secret-timeout-cleanup";
+    const rawUnsubscribe = deferred<void>();
+    const received = vi.fn();
+    const order: string[] = [];
+    const world = fake.get(names().world) as unknown as {
+      unsubscribe: (listener: unknown) => void;
+      detach: () => Promise<void>;
+    };
+    const presenceChannel = fake.get(names().presence) as unknown as {
+      detach: () => Promise<void>;
+      presence: unknown;
+    };
+    const presence = presenceChannel.presence as {
+      unsubscribe: (listener: unknown) => void;
+      leave: (data?: unknown) => Promise<void>;
+    };
+    const eagerUnsubscribe = world.unsubscribe;
+    world.unsubscribe = vi.fn((listener) => {
+      order.push("world.unsubscribe");
+      eagerUnsubscribe(listener as never);
+      return rawUnsubscribe.promise as never;
+    });
+    const eagerPresenceUnsubscribe = presence.unsubscribe;
+    presence.unsubscribe = vi.fn((listener) => {
+      order.push("presence.unsubscribe");
+      eagerPresenceUnsubscribe(listener as never);
+    });
+    const eagerPresenceLeave = presence.leave;
+    presence.leave = vi.fn(async (data?: unknown) => {
+      order.push("presence.leave");
+      await eagerPresenceLeave(data);
+    });
+    const eagerWorldDetach = world.detach;
+    world.detach = vi.fn(async () => {
+      order.push("world.detach");
+      await eagerWorldDetach();
+    });
+    const eagerPresenceDetach = presenceChannel.detach;
+    presenceChannel.detach = vi.fn(async () => {
+      order.push("presence.detach");
+      await eagerPresenceDetach();
+    });
+    fake.off.mockImplementation((_events, listener) => {
+      order.push("off");
+      const index = fake.connectionListeners.findIndex((item) => item.listener === listener);
+      if (index >= 0) fake.connectionListeners.splice(index, 1);
+    });
+    const close = vi.fn(() => {
+      order.push("close");
+      fake.client.close();
+    });
+    const adapter = createDevelopmentAblyRoomTransport({
+      environment: "preview", clientFactory: async () => ({ ...fake.client, close }), timer: scheduler.timer,
+      connectionReadyTimeoutMs: 50, providerOperationTimeoutMs: 7, now: () => 1_000_000,
+    } as never);
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      const subscription = await adapter.connect({
+        scope,
+        token: tokenRequest({ [names().world]: ["subscribe"], [names().presence]: ["presence", "subscribe"] }),
+        connectionEpoch: 1,
+        onMessage: received,
+        onFailure: vi.fn(),
+      });
+      await subscription.publish?.(envelope("presence.heartbeat", "cleanup-timeout-presence"));
+      order.length = 0;
+      const pendingCleanup = Promise.resolve(subscription.unsubscribe());
+      await vi.waitFor(() => expect(world.unsubscribe).toHaveBeenCalledTimes(1));
+      expect(order).toEqual(["off", "world.unsubscribe", "presence.unsubscribe"]);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      scheduler.fire(7);
+      const cleanupFailure = await pendingCleanup.catch((error: unknown) => error);
+      expect(cleanupFailure).toEqual(expect.objectContaining({ message: "Realtime cleanup failed" }));
+      expect(String(cleanupFailure)).not.toContain(providerSecret);
+      expect(order).toEqual([
+        "off",
+        "world.unsubscribe",
+        "presence.unsubscribe",
+        "presence.leave",
+        "world.detach",
+        "presence.detach",
+        "close",
+      ]);
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(world.detach).toHaveBeenCalledTimes(1);
+      expect(presenceChannel.detach).toHaveBeenCalledTimes(1);
+
+      for (const listener of fake.listeners.get(names().world) ?? []) listener({ data: envelope("world.transition", "cleanup-timeout-late"), clientId: "rw_test" });
+      expect(received).not.toHaveBeenCalled();
+      rawUnsubscribe.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await expect(subscription.unsubscribe()).resolves.toBeUndefined();
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
+  it("retries an explicit timed-out presence leave during cleanup before detach and close", async () => {
+    const fake = fakeClient();
+    const scheduler = controlledTimer();
+    const providerSecret = "provider-secret-timeout-explicit-leave";
+    const firstLeave = deferred<void>();
+    const presenceChannel = fake.get(names().presence) as unknown as {
+      detach: () => Promise<void>;
+      presence: unknown;
+    };
+    const presence = presenceChannel.presence as { leave: (data?: unknown) => Promise<void> };
+    let leaveCalls = 0;
+    presence.leave = vi.fn(() => {
+      leaveCalls += 1;
+      return leaveCalls === 1 ? firstLeave.promise : Promise.resolve();
+    });
+    const order: string[] = [];
+    const detach = presenceChannel.detach;
+    presenceChannel.detach = vi.fn(async () => {
+      order.push("detach");
+      await detach();
+    });
+    const close = vi.fn(() => {
+      order.push("close");
+      fake.client.close();
+    });
+    const adapter = createDevelopmentAblyRoomTransport({
+      environment: "preview",
+      clientFactory: async () => ({ ...fake.client, close }),
+      timer: scheduler.timer,
+      connectionReadyTimeoutMs: 50,
+      providerOperationTimeoutMs: 7,
+      now: () => 1_000_000,
+    } as never);
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      const subscription = await adapter.connect({
+        scope,
+        token: tokenRequest({ [names().presence]: ["presence"] }),
+        connectionEpoch: 1,
+        onMessage: vi.fn(),
+        onFailure: vi.fn(),
+      });
+      await subscription.publish?.(envelope("presence.heartbeat", "explicit-leave-enter"));
+      const pendingLeave = Promise.resolve(subscription.publish!(envelope("presence.leave", "explicit-leave-timeout")));
+      await vi.waitFor(() => expect(presence.leave).toHaveBeenCalledTimes(1));
+      scheduler.fire(7);
+      const leaveFailure = await pendingLeave.catch((error: unknown) => error);
+      expect(leaveFailure).toEqual(expect.objectContaining({ message: "Realtime publish is unavailable" }));
+      expect(String(leaveFailure)).not.toContain(providerSecret);
+
+      await subscription.unsubscribe();
+      expect(presence.leave).toHaveBeenCalledTimes(2);
+      expect(order).toEqual(["detach", "close"]);
+      expect(close).toHaveBeenCalledTimes(1);
+      firstLeave.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(presence.leave).toHaveBeenCalledTimes(2);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
+  it("retries leave during cleanup when a timed-out update's compensating leave never settles", async () => {
+    const fake = fakeClient();
+    const scheduler = controlledTimer();
+    const providerSecret = "provider-secret-timeout-update-compensation";
+    const rawUpdate = deferred<void>();
+    const rawCompensationLeave = deferred<void>();
+    const presenceChannel = fake.get(names().presence) as unknown as {
+      detach: () => Promise<void>;
+      presence: unknown;
+    };
+    const presence = presenceChannel.presence as {
+      update: (data?: unknown) => Promise<void>;
+      leave: (data?: unknown) => Promise<void>;
+    };
+    const order: string[] = [];
+    presence.update = vi.fn(() => rawUpdate.promise);
+    let leaveCalls = 0;
+    presence.leave = vi.fn(() => {
+      leaveCalls += 1;
+      order.push(`leave-${leaveCalls}`);
+      return leaveCalls === 1 ? rawCompensationLeave.promise : Promise.resolve();
+    });
+    const detach = presenceChannel.detach;
+    presenceChannel.detach = vi.fn(async () => {
+      order.push("detach");
+      await detach();
+    });
+    const close = vi.fn(() => {
+      order.push("close");
+      fake.client.close();
+    });
+    const adapter = createDevelopmentAblyRoomTransport({
+      environment: "preview",
+      clientFactory: async () => ({ ...fake.client, close }),
+      timer: scheduler.timer,
+      connectionReadyTimeoutMs: 50,
+      providerOperationTimeoutMs: 7,
+      now: () => 1_000_000,
+    } as never);
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      const subscription = await adapter.connect({
+        scope,
+        token: tokenRequest({ [names().presence]: ["presence"] }),
+        connectionEpoch: 1,
+        onMessage: vi.fn(),
+        onFailure: vi.fn(),
+      });
+      await subscription.publish?.(envelope("presence.heartbeat", "update-timeout-enter"));
+      const pendingUpdate = Promise.resolve(subscription.publish!(envelope("presence.heartbeat", "update-timeout")));
+      await vi.waitFor(() => expect(presence.update).toHaveBeenCalledTimes(1));
+      scheduler.fire(7);
+      const updateFailure = await pendingUpdate.catch((error: unknown) => error);
+      expect(updateFailure).toEqual(expect.objectContaining({ message: "Realtime publish is unavailable" }));
+      expect(String(updateFailure)).not.toContain(providerSecret);
+      await vi.waitFor(() => expect(presence.leave).toHaveBeenCalledTimes(1));
+
+      await subscription.unsubscribe();
+      expect(presence.leave).toHaveBeenCalledTimes(2);
+      expect(order).toEqual(["leave-1", "leave-2", "detach", "close"]);
+      expect(close).toHaveBeenCalledTimes(1);
+      rawUpdate.resolve();
+      rawCompensationLeave.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(presence.leave).toHaveBeenCalledTimes(3);
       expect(unhandled).toEqual([]);
     } finally {
       process.off("unhandledRejection", observeUnhandled);

@@ -67,6 +67,7 @@ export type DevelopmentAblyRoomTransportOptions = Readonly<{
   environment: AblyAdapterEnvironment;
   clientFactory: AblyClientFactory;
   connectionReadyTimeoutMs?: number;
+  providerOperationTimeoutMs?: number;
   timer?: AblyConnectionTimer;
   now?: () => number;
   publishGovernor?: Pick<RealtimePublishGovernor, "acquire">;
@@ -91,6 +92,8 @@ const maximumOperationsByChannel: Readonly<Record<ChannelKind, ReadonlySet<AblyO
 };
 const defaultConnectionReadyTimeoutMs = 10_000;
 const maximumConnectionReadyTimeoutMs = 30_000;
+const defaultProviderOperationTimeoutMs = 10_000;
+const maximumProviderOperationTimeoutMs = 30_000;
 const defaultTimer: AblyConnectionTimer = {
   setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
   clearTimeout: (timer) => clearTimeout(timer),
@@ -220,6 +223,63 @@ async function awaitProvider<Return>(operation: ProviderOperation, callback: () 
   }
 }
 
+async function awaitBoundedProvider<Return>(
+  operation: ProviderOperation,
+  callback: () => Return | Promise<Return>,
+  options: Readonly<{
+    timer: AblyConnectionTimer;
+    timeoutMs: number;
+    undoLateSuccess?: () => void | Promise<void>;
+  }>,
+): Promise<Return> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let settled = false;
+  let timedOut = false;
+  const undoLateSuccess = () => {
+    if (!options.undoLateSuccess) return;
+    void (async () => {
+      try {
+        await awaitBoundedProvider("cleanup", options.undoLateSuccess!, {
+          timer: options.timer,
+          timeoutMs: options.timeoutMs,
+        });
+      } catch {
+        // The original operation is already failed or has settled elsewhere.
+      }
+    })();
+  };
+  try {
+    return await new Promise<Return>((resolve, reject) => {
+      const finish = (error?: unknown, value?: Return) => {
+        if (settled) return;
+        settled = true;
+        if (error === undefined) resolve(value as Return);
+        else reject(error);
+      };
+      timer = options.timer.setTimeout(() => {
+        timedOut = true;
+        finish(providerOperationError(operation));
+        undoLateSuccess();
+      }, options.timeoutMs);
+      void (async () => {
+        try {
+          const value = await awaitProvider(operation, callback);
+          if (settled) {
+            if (timedOut) undoLateSuccess();
+            return;
+          }
+          finish(undefined, value);
+        } catch (error) {
+          if (!settled) undoLateSuccess();
+          finish(error);
+        }
+      })();
+    });
+  } finally {
+    if (timer !== undefined) options.timer.clearTimeout(timer);
+  }
+}
+
 /**
  * The provider client is supplied by application code. Check its complete
  * surface, including every granted channel, before it can register a listener
@@ -326,6 +386,12 @@ function normalizedConnectionReadyTimeout(value: number | undefined) {
     : Math.max(1, Math.min(maximumConnectionReadyTimeoutMs, value));
 }
 
+function normalizedProviderOperationTimeout(value: number | undefined) {
+  return value === undefined || !Number.isFinite(value)
+    ? defaultProviderOperationTimeoutMs
+    : Math.max(1, Math.min(maximumProviderOperationTimeoutMs, value));
+}
+
 /**
  * Uses only non-production, exact token capabilities. A client factory is
  * required and injected; no provider object is constructed until connect().
@@ -335,6 +401,7 @@ export class DevelopmentAblyRoomTransport implements RealtimeTransportAdapter {
   private readonly clientFactory: AblyClientFactory;
   private readonly timer: AblyConnectionTimer;
   private readonly connectionReadyTimeoutMs: number;
+  private readonly providerOperationTimeoutMs: number;
   private readonly publishGovernor: Pick<RealtimePublishGovernor, "acquire">;
   private readonly telemetry: PrivacySafeRealtimeTelemetry;
 
@@ -350,6 +417,7 @@ export class DevelopmentAblyRoomTransport implements RealtimeTransportAdapter {
     this.clientFactory = clientFactory as AblyClientFactory;
     this.timer = options.timer ?? defaultTimer;
     this.connectionReadyTimeoutMs = normalizedConnectionReadyTimeout(options.connectionReadyTimeoutMs);
+    this.providerOperationTimeoutMs = normalizedProviderOperationTimeout(options.providerOperationTimeoutMs);
     this.publishGovernor = options.publishGovernor ?? createRealtimePublishGovernor({
       clock: { now: options.now ?? (() => Date.now()) },
     });
@@ -397,6 +465,15 @@ export class DevelopmentAblyRoomTransport implements RealtimeTransportAdapter {
     }
     const client = validatedProvider.client;
     const channels = validatedProvider.channels;
+    const awaitProviderOperation = <Return>(
+      operation: ProviderOperation,
+      callback: () => Return | Promise<Return>,
+      undoLateSuccess?: () => void | Promise<void>,
+    ) => awaitBoundedProvider(operation, callback, {
+      timer: this.timer,
+      timeoutMs: this.providerOperationTimeoutMs,
+      undoLateSuccess,
+    });
     const listeners: Array<Readonly<{ channel: AblyRoomChannel; listener: (message: AblyInboundMessage) => void; presence: boolean }>> = [];
     const enteredPresence = new Set<AblyRoomChannel>();
     let closed = false;
@@ -521,17 +598,21 @@ export class DevelopmentAblyRoomTransport implements RealtimeTransportAdapter {
       const errors: unknown[] = [];
       const capture = async (operation: () => void | Promise<void>) => {
         try {
-          await awaitProvider("cleanup", operation);
+          await awaitProviderOperation("cleanup", operation);
         } catch {
           errors.push(providerOperationError("cleanup"));
         }
       };
-      await capture(() => client.connection.off(connectionFailureEvents, connectionFailure));
+      const listenerCleanupOperations: Array<() => void | Promise<void>> = [
+        () => client.connection.off(connectionFailureEvents, connectionFailure),
+      ];
       for (const { channel, listener, presence } of listeners) {
-        await capture(() => presence ? channel.presence.unsubscribe(listener) : channel.unsubscribe(listener));
+        listenerCleanupOperations.push(() => presence ? channel.presence.unsubscribe(listener) : channel.unsubscribe(listener));
       }
-      for (const channel of enteredPresence) await capture(() => channel.presence.leave());
-      for (const channel of channels.values()) await capture(() => channel.detach());
+      await Promise.all(listenerCleanupOperations.map(capture));
+
+      await Promise.all([...enteredPresence].map((channel) => capture(() => channel.presence.leave())));
+      await Promise.all([...channels.values()].map((channel) => capture(() => channel.detach())));
       await capture(() => client.close());
       this.emitTelemetry({ event: "cleanup", state: "stopped", subscriptions: listeners.length });
       if (errors[0] !== undefined) throw errors[0];
@@ -556,10 +637,18 @@ export class DevelopmentAblyRoomTransport implements RealtimeTransportAdapter {
           }
         };
         if (grant.kind === "presence") {
-          await awaitProvider("subscription", () => channel.presence.subscribe(listener));
+          await awaitProviderOperation(
+            "subscription",
+            () => channel.presence.subscribe(listener),
+            () => channel.presence.unsubscribe(listener),
+          );
           listeners.push({ channel, listener, presence: true });
         } else {
-          await awaitProvider("subscription", () => channel.subscribe(listener));
+          await awaitProviderOperation(
+            "subscription",
+            () => channel.subscribe(listener),
+            () => channel.unsubscribe(listener),
+          );
           listeners.push({ channel, listener, presence: false });
         }
       }
@@ -621,21 +710,35 @@ export class DevelopmentAblyRoomTransport implements RealtimeTransportAdapter {
         }
         if (target === "presence") {
           if (message.kind === "presence.leave") {
-            if (enteredPresence.delete(channel)) {
-              await awaitProvider("publish", () => channel.presence.leave(message));
+            if (enteredPresence.has(channel)) {
+              await awaitProviderOperation("publish", () => channel.presence.leave(message));
+              enteredPresence.delete(channel);
               this.emitTelemetry({ event: "signal_published", kind: message.kind, family: target });
             }
             return;
           }
-          if (enteredPresence.has(channel)) await awaitProvider("publish", () => channel.presence.update(message));
-          else {
-            await awaitProvider("publish", () => channel.presence.enter(message));
+          if (enteredPresence.has(channel)) {
+            try {
+              await awaitProviderOperation(
+                "publish",
+                () => channel.presence.update(message),
+                () => channel.presence.leave(),
+              );
+            } catch (error) {
+              throw error;
+            }
+          } else {
+            await awaitProviderOperation(
+              "publish",
+              () => channel.presence.enter(message),
+              () => channel.presence.leave(),
+            );
             enteredPresence.add(channel);
           }
           this.emitTelemetry({ event: "signal_published", kind: message.kind, family: target });
           return;
         }
-        await awaitProvider("publish", () => channel.publish(message.kind, message));
+        await awaitProviderOperation("publish", () => channel.publish(message.kind, message));
         this.emitTelemetry({ event: "signal_published", kind: message.kind, family: target });
       },
     };
