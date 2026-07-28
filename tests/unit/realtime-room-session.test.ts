@@ -4042,6 +4042,58 @@ describe("RealtimeRoomSession", () => {
     } finally { process.off("unhandledRejection", observeUnhandled); }
   });
 
+  it("contains synchronous transient expiry handles and preserves a reentrant same-id replacement timer", async () => {
+    const baseClock = new FakeClock();
+    let synchronousExpiry = true;
+    let heldExpiryCallback: (() => void) | undefined;
+    const clearedHandles: number[] = [];
+    const clock = {
+      now: () => baseClock.now(),
+      setTimeout: (callback: () => void, delayMs: number) => {
+        if (synchronousExpiry && delayMs === 5) {
+          synchronousExpiry = false;
+          callback();
+          heldExpiryCallback = callback;
+          return 5_555 as unknown as ReturnType<typeof setTimeout>;
+        }
+        return baseClock.setTimeout(callback, delayMs);
+      },
+      clearTimeout: (timer: ReturnType<typeof setTimeout>) => {
+        if (timer === (5_555 as unknown as ReturnType<typeof setTimeout>)) { clearedHandles.push(5_555); return; }
+        baseClock.clearTimeout(timer);
+      },
+    };
+    const { transport, connections } = createTransport();
+    const expired: RealtimeEnvelope[] = [];
+    let replacement: RealtimeEnvelope | undefined;
+    const session = new RealtimeRoomSession({
+      tokenProvider: async () => token(baseClock.now() + 300_000),
+      transport,
+      clock,
+      onTransientMessageExpired: (value) => {
+        expired.push(value);
+        if (!replacement) {
+          replacement = message(baseClock, { messageId: value.messageId, clientSeq: value.clientSeq + 1, expiresAtMs: baseClock.now() + 5 });
+          connections[0]!.input.onMessage(replacement);
+        }
+      },
+    });
+    await session.start({ missionId: "mission-a", roomId: "room-a" });
+    const original = message(baseClock, { messageId: "sync-expiry", expiresAtMs: baseClock.now() + 5 });
+    connections[0]!.input.onMessage(original);
+    expect(expired).toEqual([original]);
+    expect(clearedHandles).toEqual([5_555]);
+    expect(heldExpiryCallback).toBeTypeOf("function");
+    expect(replacement?.messageId).toBe(original.messageId);
+    expect(replacement?.expiresAtMs).toBe(original.expiresAtMs);
+    heldExpiryCallback?.();
+    await flush();
+    expect(expired).toEqual([original]);
+    baseClock.advance(5);
+    expect(expired).toEqual([original, replacement]);
+    await session.stop();
+  });
+
   it("snapshots recovery policy getters and receivers once, ignoring later replacements", async () => {
     const providerSecret = "recovery-policy-replacement-secret";
     for (const policy of ["random", "reconnect"] as const) {

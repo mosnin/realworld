@@ -856,6 +856,7 @@ export class RealtimeRoomSession {
   private readonly disposalObservations = new WeakMap<RealtimeTransportSubscription, Promise<void>>();
   private readonly seenMessageExpiry = new Map<string, number>();
   private readonly messageExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly messageExpirySchedules = new Map<string, object>();
   private readonly senderEpoch = new Map<string, number>();
   private readonly senderSequence = new Map<string, number>();
   private isNotifyingTransientClear = false;
@@ -968,6 +969,7 @@ export class RealtimeRoomSession {
     for (const timer of this.messageExpiryTimers.values()) this.clock.clearTimeout(timer);
     this.seenMessageExpiry.clear();
     this.messageExpiryTimers.clear();
+    this.messageExpirySchedules.clear();
     this.senderEpoch.clear();
     this.senderSequence.clear();
     if (this.isNotifyingTransientClear) return;
@@ -1305,12 +1307,22 @@ export class RealtimeRoomSession {
 
   private scheduleMessageExpiry(message: RealtimeEnvelope) {
     const delay = Math.max(0, message.expiresAtMs - this.clock.now());
+    const schedule = {};
+    this.messageExpirySchedules.set(message.messageId, schedule);
+    let expired = false;
     const timer = this.clock.setTimeout(() => {
-      if (this.seenMessageExpiry.get(message.messageId) !== message.expiresAtMs) return;
+      if (this.messageExpirySchedules.get(message.messageId) !== schedule
+        || this.seenMessageExpiry.get(message.messageId) !== message.expiresAtMs) return;
       this.seenMessageExpiry.delete(message.messageId);
       this.messageExpiryTimers.delete(message.messageId);
+      this.messageExpirySchedules.delete(message.messageId);
+      expired = true;
       this.onTransientMessageExpired?.(message);
     }, delay);
+    if (expired || this.messageExpirySchedules.get(message.messageId) !== schedule) {
+      this.clock.clearTimeout(timer);
+      return;
+    }
     this.messageExpiryTimers.set(message.messageId, timer);
   }
 
@@ -1321,6 +1333,7 @@ export class RealtimeRoomSession {
         const timer = this.messageExpiryTimers.get(messageId);
         if (timer) this.clock.clearTimeout(timer);
         this.messageExpiryTimers.delete(messageId);
+        this.messageExpirySchedules.delete(messageId);
       }
     }
   }
