@@ -42,6 +42,8 @@ export default defineSchema({
     slug: v.string(),
     title: v.string(),
     summary: v.string(),
+    constitution: v.optional(v.string()),
+    desiredOutcomes: v.optional(v.array(v.string())),
     visibility: missionVisibility,
     lifecycle: missionLifecycle,
     currentVersion: v.number(),
@@ -125,7 +127,7 @@ export default defineSchema({
   missionEvents: defineTable({
     missionId: v.id("missions"),
     missionSequence: v.number(),
-    type: v.union(v.literal("mission.created"), v.literal("mission.updated"), v.literal("mission.archived"), v.literal("mission.restored"), v.literal("membership.invited"), v.literal("membership.joined"), v.literal("invite.revoked"), v.literal("room.created"), v.literal("room.renamed"), v.literal("room.archived"), v.literal("room.layoutUpdated")),
+    type: v.union(v.literal("mission.created"), v.literal("mission.updated"), v.literal("mission.constitutionUpdated"), v.literal("mission.archived"), v.literal("mission.restored"), v.literal("membership.invited"), v.literal("membership.joined"), v.literal("invite.revoked"), v.literal("room.created"), v.literal("room.renamed"), v.literal("room.archived"), v.literal("room.layoutUpdated")),
     aggregateType: v.literal("mission"),
     aggregateId: v.id("missions"),
     actorPrincipalId: v.id("principals"),
