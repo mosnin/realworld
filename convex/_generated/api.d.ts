@@ -21,6 +21,8 @@ import type * as missions from "../missions.js";
 import type * as moves from "../moves.js";
 import type * as proofs from "../proofs.js";
 import type * as pulse from "../pulse.js";
+import type * as realtime from "../realtime.js";
+import type * as realtime_authorization from "../realtime_authorization.js";
 
 import type {
   ApiFromModules,
@@ -42,6 +44,8 @@ declare const fullApi: ApiFromModules<{
   moves: typeof moves;
   proofs: typeof proofs;
   pulse: typeof pulse;
+  realtime: typeof realtime;
+  realtime_authorization: typeof realtime_authorization;
 }>;
 
 /**
