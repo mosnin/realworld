@@ -68,6 +68,7 @@ export type RoomSessionOptions = Readonly<{
   onTransportFailure?: (error: unknown) => void;
   clock?: RealtimeClock;
   tokenAcquisitionTimeoutMs?: number;
+  transportConnectionTimeoutMs?: number;
   refreshSkewMs?: number;
   minimumRefreshDelayMs?: number;
   reconnectDelayMs?: (attempt: number) => number;
@@ -92,6 +93,8 @@ const defaultRefreshSkewMs = 30_000;
 const defaultMinimumRefreshDelayMs = 1_000;
 const defaultTokenAcquisitionTimeoutMs = 10_000;
 const maximumTokenAcquisitionTimeoutMs = 30_000;
+const defaultTransportConnectionTimeoutMs = 10_000;
+const maximumTransportConnectionTimeoutMs = 30_000;
 const maximumReconnectDelayMs = 30_000;
 const defaultMaxReconnectAttempts = 5;
 const defaultMaxMessageTtlMs = 45_000;
@@ -160,6 +163,63 @@ function snapshotRealtimeToken(value: unknown): RealtimeToken | undefined {
     return { tokenRequest, expiresAt, authorizationVersion };
   } catch {
     return undefined;
+  }
+}
+
+function snapshotTransportSubscription(value: unknown): RealtimeTransportSubscription | undefined {
+  try {
+    if (!isRecord(value)) return undefined;
+    const unsubscribe = value.unsubscribe;
+    if (typeof unsubscribe !== "function") return undefined;
+    let disposed = false;
+    const dispose = () => {
+      if (disposed) return Promise.resolve();
+      disposed = true;
+      try {
+        return Promise.resolve(Reflect.apply(unsubscribe, value, [])).catch(() => {
+          throw new Error("Realtime transport disposal failed");
+        });
+      } catch {
+        return Promise.reject(new Error("Realtime transport disposal failed"));
+      }
+    };
+    let publish: unknown;
+    try {
+      publish = value.publish;
+    } catch {
+      void dispose().catch(() => undefined);
+      return undefined;
+    }
+    if (publish !== undefined && typeof publish !== "function") {
+      void dispose().catch(() => undefined);
+      return undefined;
+    }
+    return {
+      unsubscribe: dispose,
+      publish: publish === undefined
+        ? undefined
+        : (message) => {
+          try {
+            return Promise.resolve(Reflect.apply(publish, value, [message])).catch((error: unknown) => {
+              if (error instanceof RealtimePublishRateLimitError) throw error;
+              throw new Error("Realtime transport publish failed");
+            });
+          } catch (error) {
+            if (error instanceof RealtimePublishRateLimitError) throw error;
+            return Promise.reject(new Error("Realtime transport publish failed"));
+          }
+        },
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function disposeLateTransportSubscription(subscription: RealtimeTransportSubscription) {
+  try {
+    void Promise.resolve(subscription.unsubscribe()).catch(() => undefined);
+  } catch {
+    // A late subscription is never active and provider disposal stays contained.
   }
 }
 
@@ -240,6 +300,7 @@ function parseEnvelopeUnchecked(
 export class RealtimeRoomSession {
   private readonly clock: RealtimeClock;
   private readonly tokenAcquisitionTimeoutMs: number;
+  private readonly transportConnectionTimeoutMs: number;
   private readonly refreshSkewMs: number;
   private readonly minimumRefreshDelayMs: number;
   private readonly reconnectDelayMs: (attempt: number) => number;
@@ -260,6 +321,7 @@ export class RealtimeRoomSession {
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private connectInFlight: Promise<void> | undefined;
   private cancelTokenAcquisition: (() => void) | undefined;
+  private cancelTransportConnection: (() => void) | undefined;
   private readonly seenMessageExpiry = new Map<string, number>();
   private readonly messageExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly senderEpoch = new Map<string, number>();
@@ -271,6 +333,11 @@ export class RealtimeRoomSession {
       options.tokenAcquisitionTimeoutMs,
       defaultTokenAcquisitionTimeoutMs,
       maximumTokenAcquisitionTimeoutMs,
+    );
+    this.transportConnectionTimeoutMs = normalizedBoundedPositive(
+      options.transportConnectionTimeoutMs,
+      defaultTransportConnectionTimeoutMs,
+      maximumTransportConnectionTimeoutMs,
     );
     this.refreshSkewMs = normalizedNonNegative(options.refreshSkewMs, defaultRefreshSkewMs);
     this.minimumRefreshDelayMs = normalizedPositive(options.minimumRefreshDelayMs, defaultMinimumRefreshDelayMs);
@@ -370,6 +437,7 @@ export class RealtimeRoomSession {
 
   private async stopInternal(reason: "scope-changed" | "stopped", nextState: RoomSessionState) {
     this.cancelTokenAcquisition?.();
+    this.cancelTransportConnection?.();
     this.generation += 1;
     // A prior token/connect promise may still settle, but its generation is
     // invalid. Do not let it monopolize the next room's connection slot.
@@ -434,6 +502,49 @@ export class RealtimeRoomSession {
     });
   }
 
+  private acquireTransportSubscription(input: Parameters<RealtimeTransportAdapter["connect"]>[0]): Promise<RealtimeTransportSubscription> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let settled = false;
+    return new Promise<RealtimeTransportSubscription>((resolve, reject) => {
+      const finish = (error?: Error, subscription?: RealtimeTransportSubscription) => {
+        if (settled) return;
+        settled = true;
+        if (timer !== undefined) this.clock.clearTimeout(timer);
+        if (this.cancelTransportConnection === cancel) this.cancelTransportConnection = undefined;
+        if (error) reject(error);
+        else resolve(subscription as RealtimeTransportSubscription);
+      };
+      const cancel = () => finish(new Error("Realtime transport connection cancelled"));
+      this.cancelTransportConnection = cancel;
+      timer = this.clock.setTimeout(
+        () => finish(new Error("Realtime transport connection timed out")),
+        this.transportConnectionTimeoutMs,
+      );
+      let connectionPromise: Promise<RealtimeTransportSubscription>;
+      try {
+        connectionPromise = Promise.resolve(this.options.transport.connect(input));
+      } catch {
+        finish(new Error("Realtime transport connection failed"));
+        return;
+      }
+      void connectionPromise.then(
+        (candidate) => {
+          const subscription = snapshotTransportSubscription(candidate);
+          if (settled) {
+            if (subscription) disposeLateTransportSubscription(subscription);
+            return;
+          }
+          if (!subscription) {
+            finish(new Error("Realtime transport connection failed"));
+            return;
+          }
+          finish(undefined, subscription);
+        },
+        () => finish(new Error("Realtime transport connection failed")),
+      );
+    });
+  }
+
   private async connect(nextState: "connecting" | "reconnecting") {
     const scope = this.scopeValue;
     if (!scope) return;
@@ -452,7 +563,7 @@ export class RealtimeRoomSession {
       const authorizationChanged = this.token !== undefined && this.token.authorizationVersion !== token.authorizationVersion;
       this.token = token;
       if (authorizationChanged) this.clearTransient("authorization-changed");
-      const subscription = await this.options.transport.connect({
+      const subscription = await this.acquireTransportSubscription({
         scope,
         token,
         connectionEpoch: generation,
