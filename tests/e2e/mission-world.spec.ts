@@ -730,7 +730,7 @@ test("an owner and contributor reactively coordinate a capacity-limited Call", a
 
     await contributorDialog.getByLabel(`Response to ${title}`).fill(firstResponse);
     await contributorDialog.getByRole("button", { name: `Respond to ${title}` }).click();
-    await expect(contributorParticipants.getByText(firstResponse, { exact: true })).toBeVisible();
+    await expect(contributorParticipants.locator("li > small")).toHaveText(firstResponse);
     const contributorHistory = contributorDialog.getByLabel(`Response history for ${title}`);
     await expect(contributorHistory.getByText(firstResponse, { exact: true })).toBeVisible();
     await expect(contributorHistory.getByText(/Revision 1/)).toBeVisible();
