@@ -79,11 +79,16 @@ function fakeClient(autoConnect = true) {
     channels.set(name, channel);
     return channel;
   });
+  const on = vi.fn((events: string | string[], listener: (state: { current?: string; reason?: unknown }) => void) => connectionListeners.push({ events, listener }));
+  const off = vi.fn((_events: string | string[], listener: (state: { current?: string; reason?: unknown }) => void) => {
+    const index = connectionListeners.findIndex((item) => item.listener === listener);
+    if (index >= 0) connectionListeners.splice(index, 1);
+  });
   const client: AblyRealtimeClient = {
     channels: { get },
     connection: {
-      on: vi.fn((events, listener) => connectionListeners.push({ events, listener })),
-      off: vi.fn((_events, listener) => { const index = connectionListeners.findIndex((item) => item.listener === listener); if (index >= 0) connectionListeners.splice(index, 1); }),
+      on,
+      off,
     },
     connect: vi.fn(() => {
       if (!autoConnect) return;
@@ -97,7 +102,7 @@ function fakeClient(autoConnect = true) {
       if ((Array.isArray(item.events) ? item.events : [item.events]).includes(current)) item.listener({ current, reason });
     }
   };
-  return { client, channels, listeners, presenceListeners, connectionListeners, get, emit };
+  return { client, channels, listeners, presenceListeners, connectionListeners, get, on, off, emit };
 }
 
 describe("development Ably room transport", () => {
@@ -144,6 +149,209 @@ describe("development Ably room transport", () => {
     await subscription.unsubscribe();
   });
 
+  it("rejects malformed or hostile injected clients before listeners, subscriptions, or presence work", async () => {
+    const capability = {
+      [names().world]: ["subscribe"],
+      [names().presence]: ["subscribe"],
+    };
+    const connect = async (candidate: unknown, fake?: ReturnType<typeof fakeClient>) => {
+      const factory = vi.fn(async () => candidate as AblyRealtimeClient);
+      const adapter = createDevelopmentAblyRoomTransport({ environment: "preview", clientFactory: factory, now: () => 1_000_000 });
+
+      await expect(adapter.connect({
+        scope,
+        token: tokenRequest(capability),
+        connectionEpoch: 1,
+        onMessage: vi.fn(),
+        onFailure: vi.fn(),
+      })).rejects.toThrow("Realtime client contract is invalid");
+      expect(factory).toHaveBeenCalledTimes(1);
+      if (!fake) return;
+      expect(fake.connectionListeners).toEqual([]);
+      expect(fake.listeners).toEqual(new Map());
+      expect(fake.presenceListeners).toEqual(new Map());
+      for (const channel of fake.channels.values()) {
+        expect(channel.subscribe as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+        expect(channel.presence.subscribe as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+        expect(channel.presence.enter as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+      }
+    };
+
+    await connect({});
+    await connect(new Proxy({}, {
+      get: (_target, key) => {
+        if (key === "then") return undefined;
+        throw new Error("hostile client getter");
+      },
+    }));
+
+    const malformedChannels = fakeClient();
+    await connect({ ...malformedChannels.client, channels: {} }, malformedChannels);
+    const hostileChannels = fakeClient();
+    await connect(Object.defineProperty({ ...hostileChannels.client }, "channels", {
+      get: () => { throw new Error("hostile channels getter"); },
+    }), hostileChannels);
+
+    const malformedChannel = fakeClient();
+    await connect({ ...malformedChannel.client, channels: { get: vi.fn(() => ({})) } }, malformedChannel);
+    const hostileChannel = fakeClient();
+    await connect({ ...hostileChannel.client, channels: { get: vi.fn(() => new Proxy({}, {
+      get: () => { throw new Error("hostile channel getter"); },
+    })) } }, hostileChannel);
+
+    const malformedPresence = fakeClient();
+    const channelWithoutPresence = {
+      subscribe: vi.fn(async () => undefined),
+      unsubscribe: vi.fn(),
+      publish: vi.fn(async () => undefined),
+      detach: vi.fn(async () => undefined),
+      presence: {},
+    };
+    await connect({ ...malformedPresence.client, channels: { get: vi.fn(() => channelWithoutPresence) } }, malformedPresence);
+    expect(channelWithoutPresence.subscribe).not.toHaveBeenCalled();
+
+    const hostilePresence = fakeClient();
+    const channelWithHostilePresence = {
+      subscribe: vi.fn(async () => undefined),
+      unsubscribe: vi.fn(),
+      publish: vi.fn(async () => undefined),
+      detach: vi.fn(async () => undefined),
+      get presence() { throw new Error("hostile presence getter"); },
+    };
+    await connect({ ...hostilePresence.client, channels: { get: vi.fn(() => channelWithHostilePresence) } }, hostilePresence);
+    expect(channelWithHostilePresence.subscribe).not.toHaveBeenCalled();
+
+    const malformedConnection = fakeClient();
+    await connect({ ...malformedConnection.client, connection: {} }, malformedConnection);
+    const hostileConnection = fakeClient();
+    await connect(Object.defineProperty({ ...hostileConnection.client }, "connection", {
+      get: () => { throw new Error("hostile connection getter"); },
+    }), hostileConnection);
+  });
+
+  it("turns an immediate preflight getter failure into a generic error without leaking provider text or starting live work", async () => {
+    const fake = fakeClient();
+    const providerSecret = "provider-secret-preflight";
+    const candidate = Object.defineProperty({ ...fake.client }, "connection", {
+      get: () => { throw new Error(providerSecret); },
+    });
+    const adapter = createDevelopmentAblyRoomTransport({
+      environment: "preview",
+      clientFactory: async () => candidate as AblyRealtimeClient,
+      now: () => 1_000_000,
+    });
+
+    const failure = await adapter.connect({
+      scope,
+      token: tokenRequest({ [names().world]: ["subscribe"], [names().presence]: ["subscribe"] }),
+      connectionEpoch: 1,
+      onMessage: vi.fn(),
+      onFailure: vi.fn(),
+    }).catch((error: unknown) => error);
+
+    expect(failure).toEqual(expect.objectContaining({ message: "Realtime client contract is invalid" }));
+    expect(String(failure)).not.toContain(providerSecret);
+    expect(fake.connectionListeners).toEqual([]);
+    expect(fake.listeners).toEqual(new Map());
+    expect(fake.presenceListeners).toEqual(new Map());
+  });
+
+  it("uses the preflight-captured client, connection, channel, and presence methods through connect and cleanup", async () => {
+    const fake = fakeClient();
+    const world = fake.get(names().world);
+    const presence = fake.get(names().presence);
+    const reads = new Map<string, number>();
+    const providerSecret = "provider-secret-after-preflight";
+    const once = <T,>(value: T, name: string): PropertyDescriptor => ({
+      enumerable: true,
+      get: () => {
+        const count = (reads.get(name) ?? 0) + 1;
+        reads.set(name, count);
+        if (count > 1) throw new Error(`${providerSecret}:${name}`);
+        return value;
+      },
+    });
+    const unstablePresence = (source: AblyRoomChannel["presence"], name: string) => Object.defineProperties({}, {
+      subscribe: once(source.subscribe, `${name}.subscribe`),
+      unsubscribe: once(source.unsubscribe, `${name}.unsubscribe`),
+      enter: once(source.enter, `${name}.enter`),
+      update: once(source.update, `${name}.update`),
+      leave: once(source.leave, `${name}.leave`),
+    });
+    const unstableChannel = (source: AblyRoomChannel, name: string) => Object.defineProperties({}, {
+      subscribe: once(source.subscribe, `${name}.subscribe`),
+      unsubscribe: once(source.unsubscribe, `${name}.unsubscribe`),
+      publish: once(source.publish, `${name}.publish`),
+      detach: once(source.detach, `${name}.detach`),
+      presence: once(unstablePresence(source.presence, `${name}.presence`), `${name}.presence`),
+    });
+    const channels = {
+      get: vi.fn((name: string) => name === names().world
+        ? unstableChannel(world, "world")
+        : name === names().presence
+          ? unstableChannel(presence, "presence")
+          : undefined),
+    };
+    const connection = Object.defineProperties({}, {
+      on: once(fake.on, "connection.on"),
+      off: once(fake.off, "connection.off"),
+    });
+    const candidate = Object.defineProperties({}, {
+      channels: once(channels, "client.channels"),
+      connection: once(connection, "client.connection"),
+      connect: once(fake.client.connect, "client.connect"),
+      close: once(fake.client.close, "client.close"),
+    });
+    const adapter = createDevelopmentAblyRoomTransport({
+      environment: "preview",
+      clientFactory: async () => candidate as AblyRealtimeClient,
+      now: () => 1_000_000,
+    });
+
+    const subscription = await adapter.connect({
+      scope,
+      token: tokenRequest({ [names().world]: ["publish", "subscribe"], [names().presence]: ["presence", "subscribe"] }),
+      connectionEpoch: 1,
+      onMessage: vi.fn(),
+      onFailure: vi.fn(),
+    });
+    await subscription.publish?.(envelope("world.transition", "toctou-world"));
+    await subscription.publish?.(envelope("presence.heartbeat", "toctou-presence"));
+    await subscription.publish?.(envelope("presence.leave", "toctou-leave"));
+    await subscription.unsubscribe();
+
+    expect(Object.fromEntries(reads)).toEqual(expect.objectContaining({
+      "client.channels": 1,
+      "client.connection": 1,
+      "client.connect": 1,
+      "client.close": 1,
+      "connection.on": 1,
+      "connection.off": 1,
+      "world.subscribe": 1,
+      "world.unsubscribe": 1,
+      "world.publish": 1,
+      "world.detach": 1,
+      "world.presence": 1,
+      "world.presence.subscribe": 1,
+      "world.presence.unsubscribe": 1,
+      "world.presence.enter": 1,
+      "world.presence.update": 1,
+      "world.presence.leave": 1,
+      "presence.subscribe": 1,
+      "presence.unsubscribe": 1,
+      "presence.publish": 1,
+      "presence.detach": 1,
+      "presence.presence": 1,
+      "presence.presence.subscribe": 1,
+      "presence.presence.unsubscribe": 1,
+      "presence.presence.enter": 1,
+      "presence.presence.update": 1,
+      "presence.presence.leave": 1,
+    }));
+    expect(JSON.stringify([...reads])).not.toContain(providerSecret);
+    expect(fake.client.close).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects a failed connection before readiness and cleans up its fake client", async () => {
     const fake = fakeClient(false);
     const adapter = createDevelopmentAblyRoomTransport({ environment: "preview", clientFactory: async () => fake.client, now: () => 1_000_000 });
@@ -156,7 +364,7 @@ describe("development Ably room transport", () => {
     });
     await vi.waitFor(() => expect(fake.client.connect).toHaveBeenCalledTimes(1));
     fake.emit("suspended", new Error("network suspended"));
-    await expect(pending).rejects.toThrow("network suspended");
+    await expect(pending).rejects.toThrow("Realtime connection is unavailable");
     expect(fake.client.close).toHaveBeenCalledTimes(1);
   });
 
@@ -215,7 +423,7 @@ describe("development Ably room transport", () => {
     for (const listener of fake.listeners.get(channelNames.world) ?? []) listener({ data: { ...envelope("world.transition", "invalid"), payload: { sourceRoomId: "room_a" } }, clientId: "rw_test" });
     expect(received).toHaveBeenCalledTimes(1);
     fake.emit("failed", new Error("lost"));
-    expect(failed).toHaveBeenCalledWith(expect.objectContaining({ message: "lost" }));
+    expect(failed).toHaveBeenCalledWith(expect.objectContaining({ message: "Realtime connection is unavailable" }));
     await subscription.unsubscribe();
     await subscription.unsubscribe();
     for (const listener of fake.listeners.get(channelNames.world) ?? []) listener({ data: envelope("world.transition", "after-close"), clientId: "rw_test" });

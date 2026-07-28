@@ -75,6 +75,10 @@ export type DevelopmentAblyRoomTransportOptions = Readonly<{
 
 type ChannelKind = "world" | "presence" | "interaction" | "surge" | "agent-status";
 type GrantedChannel = Readonly<{ name: string; kind: ChannelKind; operations: ReadonlySet<AblyOperation> }>;
+type ValidatedProviderClient = Readonly<{
+  client: AblyRealtimeClient;
+  channels: ReadonlyMap<ChannelKind, AblyRoomChannel>;
+}>;
 
 const connectionFailureEvents = ["failed", "suspended", "closed"];
 const knownOperations = new Set<AblyOperation>(["publish", "subscribe", "presence"]);
@@ -186,7 +190,115 @@ function targetForMessage(message: RealtimeEnvelope): ChannelKind | undefined {
 }
 
 function errorFromConnectionState(state: AblyConnectionState): unknown {
-  return state.reason ?? new Error(`Realtime connection entered ${state.current ?? "a failed"} state`);
+  void state;
+  return new Error("Realtime connection is unavailable");
+}
+
+function bindProviderMethod<Arguments extends unknown[], Result>(
+  receiver: object,
+  method: (...args: Arguments) => Result,
+): (...args: Arguments) => Result {
+  return (...args) => Reflect.apply(method, receiver, args) as Result;
+}
+
+/**
+ * The provider client is supplied by application code. Check its complete
+ * surface, including every granted channel, before it can register a listener
+ * or mutate presence.
+ */
+function validateProviderClientContract(
+  candidate: unknown,
+  granted: readonly GrantedChannel[],
+): ValidatedProviderClient | undefined {
+  try {
+    if (!isRecord(candidate)) return undefined;
+
+    const channels = candidate.channels;
+    const connection = candidate.connection;
+    const connect = candidate.connect;
+    const close = candidate.close;
+    if (!isRecord(channels) || !isRecord(connection)
+      || typeof connect !== "function"
+      || typeof close !== "function") {
+      return undefined;
+    }
+
+    const get = channels.get;
+    const on = connection.on;
+    const off = connection.off;
+    if (typeof get !== "function" || typeof on !== "function" || typeof off !== "function") return undefined;
+
+    const validatedChannels = new Map<ChannelKind, AblyRoomChannel>();
+    for (const grant of granted) {
+      const channel = bindProviderMethod(channels, get as AblyRealtimeClient["channels"]["get"])(grant.name);
+      if (!isRecord(channel)) return undefined;
+
+      const subscribe = channel.subscribe;
+      const unsubscribe = channel.unsubscribe;
+      const publish = channel.publish;
+      const detach = channel.detach;
+      const presence = channel.presence;
+      if (!isRecord(presence)
+        || typeof subscribe !== "function"
+        || typeof unsubscribe !== "function"
+        || typeof publish !== "function"
+        || typeof detach !== "function") {
+        return undefined;
+      }
+
+      const presenceSubscribe = presence.subscribe;
+      const presenceUnsubscribe = presence.unsubscribe;
+      const presenceEnter = presence.enter;
+      const presenceUpdate = presence.update;
+      const presenceLeave = presence.leave;
+      if (typeof presenceSubscribe !== "function"
+        || typeof presenceUnsubscribe !== "function"
+        || typeof presenceEnter !== "function"
+        || typeof presenceUpdate !== "function"
+        || typeof presenceLeave !== "function") {
+        return undefined;
+      }
+
+      validatedChannels.set(grant.kind, {
+        subscribe: bindProviderMethod(channel, subscribe as AblyRoomChannel["subscribe"]),
+        unsubscribe: bindProviderMethod(channel, unsubscribe as AblyRoomChannel["unsubscribe"]),
+        publish: bindProviderMethod(channel, publish as AblyRoomChannel["publish"]),
+        detach: bindProviderMethod(channel, detach as AblyRoomChannel["detach"]),
+        presence: {
+          subscribe: bindProviderMethod(presence, presenceSubscribe as AblyRoomChannel["presence"]["subscribe"]),
+          unsubscribe: bindProviderMethod(presence, presenceUnsubscribe as AblyRoomChannel["presence"]["unsubscribe"]),
+          enter: bindProviderMethod(presence, presenceEnter as AblyRoomChannel["presence"]["enter"]),
+          update: bindProviderMethod(presence, presenceUpdate as AblyRoomChannel["presence"]["update"]),
+          leave: bindProviderMethod(presence, presenceLeave as AblyRoomChannel["presence"]["leave"]),
+        },
+      });
+    }
+
+    return {
+      client: {
+        channels: {
+          get: (name) => {
+            for (const grant of granted) {
+              if (grant.name === name) {
+                const channel = validatedChannels.get(grant.kind);
+                if (channel) return channel;
+              }
+            }
+            throw new Error("Realtime client contract is invalid");
+          },
+        },
+        connection: {
+          on: bindProviderMethod(connection, on as AblyRealtimeClient["connection"]["on"]),
+          off: bindProviderMethod(connection, off as AblyRealtimeClient["connection"]["off"]),
+        },
+        connect: bindProviderMethod(candidate, connect as AblyRealtimeClient["connect"]),
+        close: bindProviderMethod(candidate, close as AblyRealtimeClient["close"]),
+      },
+      channels: validatedChannels,
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 function normalizedConnectionReadyTimeout(value: number | undefined) {
@@ -252,24 +364,28 @@ export class DevelopmentAblyRoomTransport implements RealtimeTransportAdapter {
       this.emitTelemetry({ event: "connect_failed", reason: "capability_denied", state: "unauthorized" });
       throw error;
     }
-    let client: AblyRealtimeClient;
+    let unvalidatedClient: unknown;
     try {
-      client = await this.clientFactory(tokenRequest);
-    } catch (error) {
+      unvalidatedClient = await this.clientFactory(tokenRequest);
+    } catch {
       this.emitTelemetry({ event: "connect_failed", reason: "connection_unavailable", state: "degraded" });
-      throw error;
+      throw new Error("Realtime client contract is invalid");
     }
-    const channels = new Map<ChannelKind, AblyRoomChannel>();
+    const validatedProvider = validateProviderClientContract(unvalidatedClient, granted);
+    if (!validatedProvider) {
+      this.emitTelemetry({ event: "connect_failed", reason: "connection_unavailable", state: "degraded" });
+      throw new Error("Realtime client contract is invalid");
+    }
+    const client = validatedProvider.client;
+    const channels = validatedProvider.channels;
     const listeners: Array<Readonly<{ channel: AblyRoomChannel; listener: (message: AblyInboundMessage) => void; presence: boolean }>> = [];
     const enteredPresence = new Set<AblyRoomChannel>();
     let closed = false;
     let ready = false;
 
     const getChannel = (grant: GrantedChannel) => {
-      const existing = channels.get(grant.kind);
-      if (existing) return existing;
-      const channel = client.channels.get(grant.name);
-      channels.set(grant.kind, channel);
+      const channel = channels.get(grant.kind);
+      if (!channel) throw new Error("Realtime client contract is invalid");
       return channel;
     };
     const connectionFailure = (state: AblyConnectionState) => {
