@@ -5,23 +5,23 @@
   "currentPhase": 1,
   "phaseName": "Production foundation",
   "startedAt": "2026-07-27T00:00:00-04:00",
-  "lastUpdatedAt": "2026-07-27T20:53:10-04:00",
+  "lastUpdatedAt": "2026-07-27T21:08:40-04:00",
   "exactNextActions": [
     "Create or connect a cloud Convex development deployment and verify the current preview creates and reloads a durable Mission",
-    "Replace browser-local room layouts with Mission-scoped reactive Convex canvas queries and mutations",
-    "Add a mobile authenticated Mission World journey and correct any responsive interaction failures"
+    "Add a two-context browser journey proving one member observes another member's durable room layout update",
+    "Define and enforce whether room-scoped contributors may discover rooms outside their invitation scope"
   ],
   "teams": {
     "worldNetwork": {"status":"complete","model":"gpt-5.6-terra","writeScope":"docs/program/world-network-system.md","lastMeaningfulHeartbeatAt":"2026-07-27T18:52:00-04:00","evidence":"commit 0ca7a39","exactNextAction":"Review the product contract against the room interaction specification"},
-    "experienceInteraction": {"status":"review","model":"gpt-5.6-terra","writeScope":"design/ and docs/design/","lastMeaningfulHeartbeatAt":"2026-07-27T20:50:00-04:00","evidence":"commits ddfacd3, 6d66216, and eec1dae; customizable canvas, saved preferences, keyboard controls, reduced-motion path, deliberate icon system, and eight authenticated Chromium journeys pass locally","exactNextAction":"Add a mobile viewport journey and replace browser-local canvas storage with Mission-scoped Convex state"},
-    "clientPlatform": {"status":"active","model":"gpt-5.6-terra","writeScope":"app client and design system","lastMeaningfulHeartbeatAt":"2026-07-27T20:50:00-04:00","evidence":"commits 51c86cf, 23b6172, 04f0483, and eec1dae; authenticated Mission launch, reactive title and role, owner invitation UI, and two-context acceptance pass locally","exactNextAction":"Connect the customizable canvas to Mission-scoped reactive Convex room layouts"},
-    "missionKernel": {"status":"active","model":"gpt-5.6-terra","writeScope":"convex durable domain","lastMeaningfulHeartbeatAt":"2026-07-27T20:50:00-04:00","evidence":"commits 8c7d594, dcdc19c, 51c86cf, 04f0483, and c2543b4; local Convex push and typecheck passed; 12 focused invitation, membership, canvas authorization, idempotency, and OCC tests pass","exactNextAction":"Push the schema, auth, and functions to a cloud development deployment and create a durable Mission","blocker":"Cloud Convex device login has not been completed"},
+    "experienceInteraction": {"status":"review","model":"gpt-5.6-terra","writeScope":"design/ and docs/design/","lastMeaningfulHeartbeatAt":"2026-07-27T21:08:00-04:00","evidence":"commits ddfacd3, 6d66216, eec1dae, and 2149261; customizable canvas, keyboard and reduced-motion paths, mobile room entry, and nine authenticated Chromium journeys pass locally","exactNextAction":"Add simultaneous two-context canvas observation and visible conflict recovery evidence"},
+    "clientPlatform": {"status":"active","model":"gpt-5.6-terra","writeScope":"app client and design system","lastMeaningfulHeartbeatAt":"2026-07-27T21:08:00-04:00","evidence":"commits 51c86cf, 23b6172, 04f0483, eec1dae, 04c9e66, and 2149261; authenticated Mission launch, reactive membership, invitations, and durable responsive room canvas pass locally","exactNextAction":"Prove a reactive room update crosses two authenticated browser contexts"},
+    "missionKernel": {"status":"active","model":"gpt-5.6-terra","writeScope":"convex durable domain","lastMeaningfulHeartbeatAt":"2026-07-27T21:08:00-04:00","evidence":"commits 8c7d594, dcdc19c, 51c86cf, 04f0483, c2543b4, and 04c9e66; local Convex push and typecheck passed; 13 focused invitation, membership, room lifecycle, canvas authorization, idempotency, event-sequence, and OCC tests pass","exactNextAction":"Push the schema, auth, and functions to a cloud development deployment and create a durable Mission","blocker":"Cloud Convex development authentication and preview environment setup require founder action"},
     "realtimeSystems": {"status":"review","model":"gpt-5.6-terra","writeScope":"Ably and presence layer","lastMeaningfulHeartbeatAt":"2026-07-27T18:20:00-04:00","evidence":"protocol commit 143c73e; no Ably application or runtime connection yet","exactNextAction":"Wait for authenticated Mission identity, then implement scoped Ably token issuance"},
     "agentRuntime": {"status":"review","model":"gpt-5.6-terra","writeScope":"docs/program/platform-architecture.md","lastMeaningfulHeartbeatAt":"2026-07-27T18:58:00-04:00","evidence":"commit 01153f4","exactNextAction":"Qualify concrete provider APIs before implementing the adapter"},
     "artifactStudio": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"artifact domain and surfaces","exactNextAction":"Wait for client, realtime, and agent contracts"},
     "discoverySocial": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"discovery and contribution surfaces","exactNextAction":"Wait for Artifact Studio and reputation contracts"},
     "trustGovernance": {"status":"review","model":"gpt-5.6-terra","writeScope":"docs/program/trust-quality-release.md","lastMeaningfulHeartbeatAt":"2026-07-27T18:55:00-04:00","evidence":"commit c1f156b","exactNextAction":"Translate the trust contract into foundation tests"},
-    "qualityOperations": {"status":"review","model":"gpt-5.6-terra","writeScope":"CI and verification infrastructure","lastMeaningfulHeartbeatAt":"2026-07-27T20:53:00-04:00","evidence":"GitHub Actions run 30318560377 passed install, lint, typecheck, 13 Vitest tests, Convex validation, production build, eight authenticated Chromium journeys including a second browser context, and foundation evidence","exactNextAction":"Add mobile interaction evidence and extend the two-context journey when shared canvas state lands"}
+    "qualityOperations": {"status":"active","model":"gpt-5.6-terra","writeScope":"CI and verification infrastructure","lastMeaningfulHeartbeatAt":"2026-07-27T21:08:00-04:00","evidence":"GitHub Actions run 30318666783 passed the prior eight-journey gate; current local gate passes lint, typecheck, 14 Vitest tests, production build, and nine authenticated Chromium journeys including mobile and durable canvas lifecycle","exactNextAction":"Push and reproduce the nine-journey durable-canvas gate in GitHub Actions"}
   },
   "orchestration": {
     "preferredRuntime": "orca",
@@ -40,8 +40,8 @@
   },
   "productionReadiness": {
     "estimate": "below_1_percent",
-    "currentEvidence": ["source_review","local_automated","local_render","local_interaction","vercel_preview_build","local_convex_push","local_auth_round_trip","local_durable_mission","local_two_user_membership"],
-    "missingCriticalEvidence": ["cloud_auth_round_trip","cloud_convex_push","cloud_two_user_sync","shared_canvas_persistence","ably_runtime","agent_runtime","role_matrix","recovery","load"]
+    "currentEvidence": ["source_review","local_automated","local_render","local_interaction","vercel_preview_build","local_convex_push","local_auth_round_trip","local_durable_mission","local_two_user_membership","local_shared_canvas_persistence","mobile_interaction"],
+    "missingCriticalEvidence": ["cloud_auth_round_trip","cloud_convex_push","cloud_two_user_sync","simultaneous_canvas_sync","ably_runtime","agent_runtime","role_matrix","recovery","load"]
   },
   "notificationPolicy": {
     "suppressNoOpUpdates": true,
