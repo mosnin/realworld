@@ -5,11 +5,11 @@
   "currentPhase": 1,
   "phaseName": "Production foundation",
   "startedAt": "2026-07-27T00:00:00-04:00",
-  "lastUpdatedAt": "2026-07-27T21:22:30-04:00",
+  "lastUpdatedAt": "2026-07-27T21:26:42-04:00",
   "exactNextActions": [
     "Create or connect a cloud Convex development deployment and verify the current preview creates and reloads a durable Mission",
-    "Push and reproduce the scoped reactive canvas assertions in GitHub Actions",
-    "Add reconnect and concurrent layout-conflict recovery evidence for two authorized editors"
+    "Add reconnect and concurrent layout-conflict recovery evidence for two authorized editors",
+    "Expand the automated role matrix across Mission and room lifecycle mutations"
   ],
   "teams": {
     "worldNetwork": {"status":"complete","model":"gpt-5.6-terra","writeScope":"docs/program/world-network-system.md","lastMeaningfulHeartbeatAt":"2026-07-27T18:52:00-04:00","evidence":"commit 0ca7a39","exactNextAction":"Review the product contract against the room interaction specification"},
@@ -21,7 +21,7 @@
     "artifactStudio": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"artifact domain and surfaces","exactNextAction":"Wait for client, realtime, and agent contracts"},
     "discoverySocial": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"discovery and contribution surfaces","exactNextAction":"Wait for Artifact Studio and reputation contracts"},
     "trustGovernance": {"status":"review","model":"gpt-5.6-terra","writeScope":"docs/program/trust-quality-release.md","lastMeaningfulHeartbeatAt":"2026-07-27T21:22:00-04:00","evidence":"commits c1f156b and e90d1ee; durable room scope is deny-by-default and has focused owner/contributor isolation coverage","exactNextAction":"Expand the role matrix across Mission and room lifecycle mutations"},
-    "qualityOperations": {"status":"active","model":"gpt-5.6-terra","writeScope":"CI and verification infrastructure","lastMeaningfulHeartbeatAt":"2026-07-27T21:22:00-04:00","evidence":"GitHub Actions run 30319454840 passed the prior nine-journey gate; current local gate passes lint, typecheck, 15 Vitest tests, production build, and nine authenticated Chromium journeys with scoped live cross-context movement","exactNextAction":"Push and reproduce the expanded reactive-canvas assertions in GitHub Actions"}
+    "qualityOperations": {"status":"review","model":"gpt-5.6-terra","writeScope":"CI and verification infrastructure","lastMeaningfulHeartbeatAt":"2026-07-27T21:26:00-04:00","evidence":"GitHub Actions run 30320163658 passed install, lint, typecheck, 15 Vitest tests, Convex validation, production build, nine authenticated Chromium journeys with scoped live cross-context movement, and foundation evidence","exactNextAction":"Add reconnect, concurrent conflict, and broader role-matrix evidence"}
   },
   "orchestration": {
     "preferredRuntime": "orca",
