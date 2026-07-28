@@ -70,7 +70,6 @@ describe("missions", () => {
         visibility: "private",
         lifecycle: "active",
         currentVersion: 1,
-        eventSequence: 1,
       });
 
       const owner = await ctx.db.get(mission!.ownerPrincipalId);
@@ -95,7 +94,7 @@ describe("missions", () => {
 
       const event = await ctx.db
         .query("missionEvents")
-        .withIndex("by_mission_and_sequence", (q) => q.eq("missionId", result.missionId).eq("missionSequence", 1))
+        .withIndex("by_mission", (q) => q.eq("missionId", result.missionId))
         .unique();
       expect(event).toMatchObject({
         type: "mission.created",
@@ -213,16 +212,15 @@ describe("missions", () => {
 
     await t.run(async (ctx) => {
       const mission = await ctx.db.get(result.missionId);
-      expect(mission).toMatchObject({ lifecycle: "archived", currentVersion: 2, eventSequence: 2 });
+      expect(mission).toMatchObject({ lifecycle: "archived", currentVersion: 2 });
+      expect(mission?.eventSequence).toBeUndefined();
 
       const events = await ctx.db
         .query("missionEvents")
-        .withIndex("by_mission_and_sequence", (q) => q.eq("missionId", result.missionId))
+        .withIndex("by_mission", (q) => q.eq("missionId", result.missionId))
         .collect();
-      expect(events.map((event) => [event.missionSequence, event.type])).toEqual([
-        [1, "mission.created"],
-        [2, "mission.archived"],
-      ]);
+      expect(events.map((event) => event.type)).toEqual(["mission.created", "mission.archived"]);
+      expect(events.every((event) => event.missionSequence === undefined)).toBe(true);
 
       const archiveReceipt = await ctx.db
         .query("operationReceipts")
@@ -242,7 +240,7 @@ describe("missions", () => {
     const archived = await asOwner.mutation(api.missions.archivePrivateMission, { missionId: result.missionId, expectedVersion: 2, idempotencyKey: "archive-after-edit", correlationId: "archive-c" });
     const restored = await asOwner.mutation(api.missions.restorePrivateMission, { missionId: result.missionId, expectedVersion: archived.currentVersion, idempotencyKey: "restore-1", correlationId: "restore-c" });
     expect(restored.currentVersion).toBe(4);
-    await t.run(async (ctx) => { const mission = await ctx.db.get(result.missionId); const events = await ctx.db.query("missionEvents").withIndex("by_mission_and_sequence", (query) => query.eq("missionId", result.missionId)).collect(); expect(mission).toMatchObject({ title: "Living world", lifecycle: "active", currentVersion: 4 }); expect(events.map((event) => event.type)).toEqual(["mission.created", "mission.updated", "mission.archived", "mission.restored"]); });
+    await t.run(async (ctx) => { const mission = await ctx.db.get(result.missionId); const events = await ctx.db.query("missionEvents").withIndex("by_mission", (query) => query.eq("missionId", result.missionId)).collect(); expect(mission).toMatchObject({ title: "Living world", lifecycle: "active", currentVersion: 4 }); expect(events.map((event) => event.type)).toEqual(["mission.created", "mission.updated", "mission.archived", "mission.restored"]); });
   });
 
   it("denies expired memberships across Mission discovery, historical reads, and writes", async () => {
@@ -362,9 +360,9 @@ describe("invites and durable canvas", () => {
     await expect(asOwner.mutation(api.canvas.updateRoomLayout, { roomId, expectedLayoutVersion: 1, layout: { x: 21, y: 30, width: 300, height: 200 }, idempotencyKey: "layout-stale" })).rejects.toThrow("Room layout version conflict");
     await t.run(async (ctx) => {
       const mission = await ctx.db.get(result.missionId);
-      const events = await ctx.db.query("missionEvents").withIndex("by_mission_and_sequence", (query) => query.eq("missionId", result.missionId)).collect();
-      expect(mission?.eventSequence).toBe(2);
-      expect(events.map((event) => [event.missionSequence, event.type])).toEqual([[1, "mission.created"], [2, "room.layoutUpdated"]]);
+      const events = await ctx.db.query("missionEvents").withIndex("by_mission", (query) => query.eq("missionId", result.missionId)).collect();
+      expect(mission?.eventSequence).toBeUndefined();
+      expect(events.map((event) => event.type)).toEqual(["mission.created", "room.layoutUpdated"]);
     });
   });
 
@@ -456,7 +454,7 @@ describe("invites and durable canvas", () => {
       const room = await ctx.db.get(created.roomId);
       const mission = await ctx.db.get(result.missionId);
       expect(room).toMatchObject({ title: "Audio check", state: "archived", currentVersion: 3 });
-      expect(mission?.eventSequence).toBe(4);
+      expect(mission?.eventSequence).toBeUndefined();
     });
   });
 });

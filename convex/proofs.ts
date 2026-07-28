@@ -121,11 +121,8 @@ async function recordProofEvent(
   const mission = await ctx.db.get(proof.missionId);
   if (!mission) throw new Error("Not found");
   const now = Date.now();
-  const sequence = mission.eventSequence + 1;
-  await ctx.db.patch(mission._id, { eventSequence: sequence, updatedAt: now });
   const eventId = await ctx.db.insert("missionEvents", {
     missionId: mission._id,
-    missionSequence: sequence,
     roomId: proof.roomId,
     type,
     aggregateType: "mission",

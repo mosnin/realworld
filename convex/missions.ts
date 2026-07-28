@@ -115,7 +115,6 @@ export const createPrivateMission = mutation({
       visibility: "private",
       lifecycle: "active",
       currentVersion: 1,
-      eventSequence: 1,
       createdAt: now,
       updatedAt: now,
       schemaVersion: 1,
@@ -133,7 +132,6 @@ export const createPrivateMission = mutation({
     });
     const eventId = await ctx.db.insert("missionEvents", {
       missionId,
-      missionSequence: 1,
       type: "mission.created",
       aggregateType: "mission",
       aggregateId: missionId,
@@ -249,8 +247,8 @@ export const editPrivateMission = mutation({
     const prior = await ctx.db.query("operationReceipts").withIndex("by_scope_and_idempotency_key", (index) => index.eq("scope", scope).eq("idempotencyKey", args.idempotencyKey)).unique();
     if (prior) { if (prior.commandFingerprint !== commandFingerprint) throw new Error("Idempotency key reuse with a different command"); return { missionId: prior.missionId, eventId: prior.eventId, operationReceiptId: prior._id, currentVersion: prior.resultVersion }; }
     const mission = await ctx.db.get(args.missionId); if (!mission || mission.visibility !== "private" || mission.lifecycle !== "active") throw new Error("Not found"); if (mission.currentVersion !== args.expectedVersion) throw new Error("Mission version conflict");
-    const now = Date.now(); const nextVersion = mission.currentVersion + 1; const sequence = mission.eventSequence + 1; await ctx.db.patch(mission._id, { title, summary, currentVersion: nextVersion, eventSequence: sequence, updatedAt: now });
-    const eventId = await ctx.db.insert("missionEvents", { missionId: mission._id, missionSequence: sequence, type: "mission.updated", aggregateType: "mission", aggregateId: mission._id, actorPrincipalId: membership.principalId, effectiveRole: membership.role, correlationId: args.correlationId, idempotencyKey: args.idempotencyKey, publicSummary: "Mission details updated", beforeVersion: mission.currentVersion, afterVersion: nextVersion, createdAt: now, schemaVersion: 1 });
+    const now = Date.now(); const nextVersion = mission.currentVersion + 1; await ctx.db.patch(mission._id, { title, summary, currentVersion: nextVersion, updatedAt: now });
+    const eventId = await ctx.db.insert("missionEvents", { missionId: mission._id, type: "mission.updated", aggregateType: "mission", aggregateId: mission._id, actorPrincipalId: membership.principalId, effectiveRole: membership.role, correlationId: args.correlationId, idempotencyKey: args.idempotencyKey, publicSummary: "Mission details updated", beforeVersion: mission.currentVersion, afterVersion: nextVersion, createdAt: now, schemaVersion: 1 });
     const operationReceiptId = await ctx.db.insert("operationReceipts", { scope, idempotencyKey: args.idempotencyKey, commandFingerprint, state: "complete", missionId: mission._id, eventId, resultVersion: nextVersion, correlationId: args.correlationId, createdAt: now, expiresAt: now + receiptRetentionMs, schemaVersion: 1 }); return { missionId: mission._id, eventId, operationReceiptId, currentVersion: nextVersion };
   },
 });
@@ -269,8 +267,8 @@ export const updateConstitution = mutation({
     const scope = `mission:${args.missionId}:constitution`; const commandFingerprint = JSON.stringify({ command: "updateConstitution", constitution, desiredOutcomes, expectedVersion: args.expectedVersion }); const prior = await ctx.db.query("operationReceipts").withIndex("by_scope_and_idempotency_key", (index) => index.eq("scope", scope).eq("idempotencyKey", idempotencyKey)).unique();
     if (prior) { if (prior.commandFingerprint !== commandFingerprint) throw new Error("Idempotency key reuse with a different command"); return { missionId: prior.missionId, eventId: prior.eventId, operationReceiptId: prior._id, currentVersion: prior.resultVersion }; }
     const mission = await ctx.db.get(args.missionId); if (!mission || mission.lifecycle !== "active" || mission.visibility !== "private") throw new Error("Mission is not active"); if (mission.currentVersion !== args.expectedVersion) throw new Error("Mission version conflict");
-    const now = Date.now(); const currentVersion = mission.currentVersion + 1; const eventSequence = mission.eventSequence + 1; await ctx.db.patch(mission._id, { constitution, desiredOutcomes, currentVersion, eventSequence, updatedAt: now });
-    const eventId = await ctx.db.insert("missionEvents", { missionId: mission._id, missionSequence: eventSequence, type: "mission.constitutionUpdated", aggregateType: "mission", aggregateId: mission._id, actorPrincipalId: membership.principalId, effectiveRole: membership.role, correlationId, idempotencyKey, publicSummary: "Mission Constitution updated", beforeVersion: mission.currentVersion, afterVersion: currentVersion, createdAt: now, schemaVersion: 1 });
+    const now = Date.now(); const currentVersion = mission.currentVersion + 1; await ctx.db.patch(mission._id, { constitution, desiredOutcomes, currentVersion, updatedAt: now });
+    const eventId = await ctx.db.insert("missionEvents", { missionId: mission._id, type: "mission.constitutionUpdated", aggregateType: "mission", aggregateId: mission._id, actorPrincipalId: membership.principalId, effectiveRole: membership.role, correlationId, idempotencyKey, publicSummary: "Mission Constitution updated", beforeVersion: mission.currentVersion, afterVersion: currentVersion, createdAt: now, schemaVersion: 1 });
     const operationReceiptId = await ctx.db.insert("operationReceipts", { scope, idempotencyKey, commandFingerprint, state: "complete", missionId: mission._id, eventId, resultVersion: currentVersion, correlationId, createdAt: now, expiresAt: now + receiptRetentionMs, schemaVersion: 1 }); return { missionId: mission._id, eventId, operationReceiptId, currentVersion };
   },
 });
@@ -283,8 +281,8 @@ export const restorePrivateMission = mutation({
     const scope = `mission:${args.missionId}:restore`; const commandFingerprint = JSON.stringify({ command: "restorePrivateMission", expectedVersion: args.expectedVersion }); const prior = await ctx.db.query("operationReceipts").withIndex("by_scope_and_idempotency_key", (index) => index.eq("scope", scope).eq("idempotencyKey", args.idempotencyKey)).unique();
     if (prior) { if (prior.commandFingerprint !== commandFingerprint) throw new Error("Idempotency key reuse with a different command"); return { missionId: prior.missionId, eventId: prior.eventId, operationReceiptId: prior._id, currentVersion: prior.resultVersion }; }
     const mission = await ctx.db.get(args.missionId); if (!mission || mission.visibility !== "private" || mission.lifecycle !== "archived") throw new Error("Not found"); if (mission.currentVersion !== args.expectedVersion) throw new Error("Mission version conflict");
-    const now = Date.now(); const nextVersion = mission.currentVersion + 1; const sequence = mission.eventSequence + 1; await ctx.db.patch(mission._id, { lifecycle: "active", currentVersion: nextVersion, eventSequence: sequence, updatedAt: now });
-    const eventId = await ctx.db.insert("missionEvents", { missionId: mission._id, missionSequence: sequence, type: "mission.restored", aggregateType: "mission", aggregateId: mission._id, actorPrincipalId: membership.principalId, effectiveRole: membership.role, correlationId: args.correlationId, idempotencyKey: args.idempotencyKey, publicSummary: "Mission restored", beforeVersion: mission.currentVersion, afterVersion: nextVersion, createdAt: now, schemaVersion: 1 });
+    const now = Date.now(); const nextVersion = mission.currentVersion + 1; await ctx.db.patch(mission._id, { lifecycle: "active", currentVersion: nextVersion, updatedAt: now });
+    const eventId = await ctx.db.insert("missionEvents", { missionId: mission._id, type: "mission.restored", aggregateType: "mission", aggregateId: mission._id, actorPrincipalId: membership.principalId, effectiveRole: membership.role, correlationId: args.correlationId, idempotencyKey: args.idempotencyKey, publicSummary: "Mission restored", beforeVersion: mission.currentVersion, afterVersion: nextVersion, createdAt: now, schemaVersion: 1 });
     const operationReceiptId = await ctx.db.insert("operationReceipts", { scope, idempotencyKey: args.idempotencyKey, commandFingerprint, state: "complete", missionId: mission._id, eventId, resultVersion: nextVersion, correlationId: args.correlationId, createdAt: now, expiresAt: now + receiptRetentionMs, schemaVersion: 1 }); return { missionId: mission._id, eventId, operationReceiptId, currentVersion: nextVersion };
   },
 });
@@ -338,16 +336,13 @@ export const archivePrivateMission = mutation({
 
     const now = Date.now();
     const nextVersion = mission.currentVersion + 1;
-    const nextSequence = mission.eventSequence + 1;
     await ctx.db.patch(args.missionId, {
       lifecycle: "archived",
       currentVersion: nextVersion,
-      eventSequence: nextSequence,
       updatedAt: now,
     });
     const eventId = await ctx.db.insert("missionEvents", {
       missionId: mission._id,
-      missionSequence: nextSequence,
       type: "mission.archived",
       aggregateType: "mission",
       aggregateId: mission._id,

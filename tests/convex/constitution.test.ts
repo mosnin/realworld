@@ -54,10 +54,11 @@ describe("Mission Constitution", () => {
 
     await t.run(async (ctx) => {
       const stored = await ctx.db.get(mission.missionId);
-      expect(stored).toMatchObject({ eventSequence: 2, currentVersion: 2 });
+      expect(stored).toMatchObject({ currentVersion: 2 });
+      expect(stored?.eventSequence).toBeUndefined();
       const events = await ctx.db
         .query("missionEvents")
-        .withIndex("by_mission_and_sequence", (query) => query.eq("missionId", mission.missionId))
+        .withIndex("by_mission", (query) => query.eq("missionId", mission.missionId))
         .collect();
       expect(events).toHaveLength(2);
       expect(events[1]).toMatchObject({

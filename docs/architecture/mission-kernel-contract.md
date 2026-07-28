@@ -55,7 +55,7 @@ All records include `_id`, `_creationTime`, `createdAt`, `updatedAt` where mutab
 | `artifactVersions` | artifactId, missionId, parentVersionId?, author principal, content ref/hash, change summary, status, evidence refs | `by_artifact_and_creation`, `by_mission_and_creation`, `by_parent_version` | Immutable. Concurrent writes produce separate versions/proposals. |
 | `branches` | missionId, parentBranchId?, source refs, question, state, owner, base event/version, merge criteria, currentVersion | `by_mission_and_state`, `by_parent_branch`, `by_owner_and_state` | State: `active`, `proposedForMerge`, `merged`, `retired`, `archived`. |
 | `proofs` | missionId, branchId?, related outcome/move/artifact refs, statement, evidence refs, verifier, state, visibility | `by_mission_and_state`, `by_artifact`, `by_visibility_and_state` | Proof is a verifiable claim, not a task checkbox. |
-| `missionEvents` | missionId, missionSequence/order key, type, aggregate type/id, actor, effectiveAuth ref, correlation id, idempotency key, public summary, private/evidence refs, schema version | `by_mission_and_sequence`, `by_aggregate_and_sequence`, `by_correlation_id`, `by_idempotency_key` | Append-only. The event contains safe summaries and references, never secrets or private reasoning. |
+| `missionEvents` | missionId, type, aggregate type/id, actor, effectiveAuth ref, correlation id, idempotency key, public summary, private/evidence refs, schema version | `by_mission`, `by_correlation_id`, `by_idempotency_key`; legacy sequence indexes remain during migration | Append-only. Convex creation order is the canonical stable Mission cursor; new writes never contend on a Mission counter. The event contains safe summaries and references, never secrets or private reasoning. |
 | `operationReceipts` | scope, idempotency key, command digest, state, result refs, correlation id, expiry | `by_scope_and_idempotency_key`, `by_expiry` | Deduplicates client/server retries. |
 | `retentionHolds` | missionId/object ref, reason, authority, started/endsAt?, state | `by_object_and_state`, `by_expiry` | Prevents automated purge where legal/security policy requires. |
 
@@ -94,7 +94,7 @@ The event ledger is an audit and replay log, not a second mutable object store. 
 
 Every event records:
 
-- a unique id and Mission-scoped order key/sequence;
+- a unique id and immutable Convex creation cursor within the Mission;
 - event type and versioned payload schema;
 - Mission and aggregate reference;
 - actor principal, delegated-by principal when applicable, and operation origin (`human`, `agent`, `system`);
@@ -136,7 +136,7 @@ Initial query families:
 - `missionBySlug` / `missionSummary` returns only public, unlisted-with-access, or member-visible fields.
 - `fieldSnapshot(mission, viewport/semantic level)` returns bounded Room, Move, Call, Fracture, Artifact-head, and Pulse projection records; it is not an unbounded full graph read.
 - `roomContext(room)` returns room-allowed objects and a cursor-paginated activity segment.
-- `activity(mission, cursor)` returns permission-redacted events in stable Mission sequence.
+- `activity(mission, cursor)` returns permission-redacted events in stable indexed creation order.
 - `artifactHistory(artifact, cursor)` returns visible immutable versions and lineage.
 - `branchComparison(branch)` returns authorized source/target references and explicit conflict state.
 - `myMemberships`, `myCalls`, and `myPendingReviews` are indexed by principal and state.

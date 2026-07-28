@@ -119,16 +119,13 @@ describe("Pulse kernel", () => {
     const workshopMove = await asBuilder.mutation(api.moves.createMove, createMoveArgs(missionId, workshopId, "workshop-move"));
     const restrictedMove = await asOwner.mutation(api.moves.createMove, createMoveArgs(missionId, restrictedId, "restricted-move"));
     const legacyEventId = await t.run(async (ctx) => {
-      const mission = await ctx.db.get(missionId);
       const principal = await ctx.db.query("principals")
         .withIndex("by_token_identifier", (index) => index.eq("tokenIdentifier", owner.tokenIdentifier))
         .unique();
-      if (!mission || !principal) throw new Error("Test setup failed");
-      const missionSequence = mission.eventSequence + 1;
-      await ctx.db.patch(missionId, { eventSequence: missionSequence, updatedAt: Date.now() });
+      if (!principal) throw new Error("Test setup failed");
       return await ctx.db.insert("missionEvents", {
         missionId,
-        missionSequence,
+        missionSequence: 1,
         type: "move.created",
         aggregateType: "mission",
         aggregateId: missionId,
@@ -144,7 +141,8 @@ describe("Pulse kernel", () => {
     });
 
     const ownerPulse = await asOwner.query(api.pulse.listMissionPulse, { missionId, limit: 50 });
-    expect(ownerPulse.map((entry) => entry.missionSequence)).toEqual([...ownerPulse.map((entry) => entry.missionSequence)].sort((left, right) => right - left));
+    const repeatedOwnerPulse = await asOwner.query(api.pulse.listMissionPulse, { missionId, limit: 50 });
+    expect(ownerPulse.map((entry) => entry._id)).toEqual(repeatedOwnerPulse.map((entry) => entry._id));
     expect(ownerPulse).toEqual(expect.arrayContaining([
       expect.objectContaining({ _id: workshopMove.eventId, roomId: workshopId, roomTitle: "Workshop", actorDisplayName: "Pulse builder", actorType: "human", eventType: "move.created" }),
       expect.objectContaining({ _id: restrictedMove.eventId, roomId: restrictedId, roomTitle: "Restricted" }),
@@ -161,6 +159,57 @@ describe("Pulse kernel", () => {
       expect.objectContaining({ _id: workshopMove.eventId, roomTitle: "Workshop" }),
     ]);
     await expect(asBuilder.query(api.pulse.listMissionPulse, { missionId, roomId: restrictedId })).rejects.toThrow("Not found");
+  });
+
+  it("keeps concurrent aggregate writes off the Mission counter and orders tied timestamps stably", async () => {
+    const { t, asOwner, missionId, workshopId } = await setup();
+    const before = await t.run(async (ctx) => ctx.db.get(missionId));
+    const inputs = Array.from({ length: 50 }, (_, index) => createMoveArgs(missionId, workshopId, `parallel-move-${index}`));
+    const created = await Promise.all(inputs.map((args) => asOwner.mutation(api.moves.createMove, args)));
+    expect(await asOwner.mutation(api.moves.createMove, inputs[0]!)).toEqual(created[0]);
+
+    const [firstTie, secondTie] = await t.run(async (ctx) => {
+      const principal = await ctx.db.query("principals")
+        .withIndex("by_token_identifier", (index) => index.eq("tokenIdentifier", owner.tokenIdentifier))
+        .unique();
+      if (!principal) throw new Error("Test setup failed");
+      const createdAt = 1_700_000_000_000;
+      const common = {
+        missionId,
+        roomId: workshopId,
+        type: "move.created" as const,
+        aggregateType: "mission" as const,
+        aggregateId: missionId,
+        actorPrincipalId: principal._id,
+        effectiveRole: "owner" as const,
+        afterVersion: 1,
+        createdAt,
+        schemaVersion: 1,
+      };
+      return await Promise.all([
+        ctx.db.insert("missionEvents", { ...common, correlationId: "tied-pulse-a", idempotencyKey: "tied-pulse-a", publicSummary: "Tied event A" }),
+        ctx.db.insert("missionEvents", { ...common, correlationId: "tied-pulse-b", idempotencyKey: "tied-pulse-b", publicSummary: "Tied event B" }),
+      ]);
+    });
+
+    await t.run(async (ctx) => {
+      const mission = await ctx.db.get(missionId);
+      const events = await ctx.db.query("missionEvents")
+        .withIndex("by_mission", (index) => index.eq("missionId", missionId))
+        .collect();
+      expect(mission?.eventSequence).toBe(before?.eventSequence);
+      expect(events.filter((event) => created.some((result) => result.eventId === event._id))).toHaveLength(created.length);
+      expect(events.filter((event) => created.some((result) => result.eventId === event._id)).every((event) => event.missionSequence === undefined)).toBe(true);
+      expect(events.filter((event) => event._id === created[0]!.eventId)).toHaveLength(1);
+    });
+
+    const pulse = await asOwner.query(api.pulse.listMissionPulse, { missionId, limit: 50 });
+    const repeatedPulse = await asOwner.query(api.pulse.listMissionPulse, { missionId, limit: 50 });
+    const ids = pulse.map((entry) => entry._id);
+    expect(ids).toEqual(repeatedPulse.map((entry) => entry._id));
+    expect(ids.indexOf(secondTie)).toBeLessThan(ids.indexOf(firstTie));
+    expect(pulse).toHaveLength(50);
+    expect(pulse.every((entry) => entry.roomId === workshopId)).toBe(true);
   });
 
   it("denies observer and cross-Mission probes while retaining authorized history after archive", async () => {

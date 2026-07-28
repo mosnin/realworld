@@ -132,7 +132,7 @@ describe("Fracture kernel", () => {
       const fracture = await ctx.db.get(first.fractureId);
       expect(fracture).toMatchObject({ reporterPrincipalId: expect.any(String), roomId: workshopId, title: firstArgs.title, currentVersion: 1 });
       const events = await ctx.db.query("missionEvents")
-        .withIndex("by_mission_and_sequence", (index) => index.eq("missionId", missionId))
+        .withIndex("by_mission", (index) => index.eq("missionId", missionId))
         .collect();
       expect(events.map((event) => event.type)).toEqual(["mission.created", "fracture.created", "fracture.created"]);
       expect(events[1]).toMatchObject({ actorPrincipalId: fracture!.reporterPrincipalId, afterVersion: 1 });

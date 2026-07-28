@@ -35,8 +35,9 @@ describe("Move kernel", () => {
     expect(await asOwner.mutation(api.moves.createMove, args)).toEqual(created);
     expect(await asOwner.query(api.moves.listMissionMoves, { missionId })).toEqual([expect.objectContaining({ _id: created.moveId, state: "proposed", dependencyMoveIds: [] })]);
     await t.run(async (ctx) => {
-      const events = await ctx.db.query("missionEvents").withIndex("by_mission_and_sequence", (index) => index.eq("missionId", missionId)).collect();
-      expect(events.map((event) => [event.missionSequence, event.type])).toEqual([[1, "mission.created"], [2, "move.created"]]);
+      const events = await ctx.db.query("missionEvents").withIndex("by_mission", (index) => index.eq("missionId", missionId)).collect();
+      expect(events.map((event) => event.type)).toEqual(["mission.created", "move.created"]);
+      expect(events.every((event) => event.missionSequence === undefined)).toBe(true);
       expect(await ctx.db.query("operationReceipts").withIndex("by_scope_and_idempotency_key", (index) => index.eq("scope", `mission:${missionId}:createMove`).eq("idempotencyKey", "create-move")).unique()).toMatchObject({ moveId: created.moveId, eventId: created.eventId });
     });
   });

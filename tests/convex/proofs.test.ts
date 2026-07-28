@@ -130,7 +130,7 @@ describe("Proof kernel", () => {
       const proof = await ctx.db.get(created.proofId);
       expect(proof).toMatchObject({ roomId: workshopId, status: "submitted", submitterPrincipalId: expect.any(String), currentVersion: 1 });
       const events = await ctx.db.query("missionEvents")
-        .withIndex("by_mission_and_sequence", (index) => index.eq("missionId", missionId))
+        .withIndex("by_mission", (index) => index.eq("missionId", missionId))
         .collect();
       expect(events.map((event) => event.type)).toEqual(["mission.created", "proof.submitted", "proof.submitted"]);
       expect(events[1]).toMatchObject({ actorPrincipalId: proof!.submitterPrincipalId, afterVersion: 1 });

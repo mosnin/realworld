@@ -11,7 +11,6 @@ const maxLimit = 50;
 const pulseEntry = v.object({
   _id: v.id("missionEvents"),
   missionId: v.id("missions"),
-  missionSequence: v.number(),
   eventType: v.string(),
   summary: v.string(),
   actorDisplayName: v.optional(v.string()),
@@ -43,7 +42,10 @@ function requirePulseRead(membership: Awaited<ReturnType<typeof requireActiveMem
 }
 
 async function roomScopeForEvent(ctx: Pick<QueryCtx, "db">, event: Doc<"missionEvents">) {
-  if (!isRoomScopedEvent(event.type)) return undefined;
+  // A persisted room target is authoritative even for future event families.
+  // Known room event types without an event-time target fail closed for legacy
+  // rows instead of consulting mutable aggregate state.
+  if (event.roomId === undefined && !isRoomScopedEvent(event.type)) return undefined;
   if (!event.roomId) return null;
   const room = await ctx.db.get(event.roomId);
   if (!room || room.missionId !== event.missionId) return null;
@@ -68,7 +70,6 @@ async function projectEvent(
   return {
     _id: event._id,
     missionId: event.missionId,
-    missionSequence: event.missionSequence,
     eventType: event.type,
     summary: event.publicSummary,
     ...(actor.displayName === undefined ? {} : { actorDisplayName: actor.displayName }),
@@ -93,7 +94,7 @@ export const listMissionPulse = query({
     }
     const events = await ctx.db
       .query("missionEvents")
-      .withIndex("by_mission_and_sequence", (index) => index.eq("missionId", args.missionId))
+      .withIndex("by_mission", (index) => index.eq("missionId", args.missionId))
       .order("desc")
       .take(maxLimit);
     const entries = await Promise.all(events.map((event) => projectEvent(ctx, membership, event, args.roomId)));

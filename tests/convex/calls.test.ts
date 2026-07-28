@@ -115,13 +115,10 @@ describe("Call kernel", () => {
     ]);
     await t.run(async (ctx) => {
       const events = await ctx.db.query("missionEvents")
-        .withIndex("by_mission_and_sequence", (index) => index.eq("missionId", missionId))
+        .withIndex("by_mission", (index) => index.eq("missionId", missionId))
         .collect();
-      expect(events.map((event) => [event.missionSequence, event.type])).toEqual([
-        [1, "mission.created"],
-        [2, "move.created"],
-        [3, "call.created"],
-      ]);
+      expect(events.map((event) => event.type)).toEqual(["mission.created", "move.created", "call.created"]);
+      expect(events.every((event) => event.missionSequence === undefined)).toBe(true);
       expect(await ctx.db.query("operationReceipts")
         .withIndex("by_scope_and_idempotency_key", (index) => index.eq("scope", `mission:${missionId}:principal:${events[2]!.actorPrincipalId}:createCall`).eq("idempotencyKey", "create-call"))
         .unique()).toMatchObject({ callId: created.callId, eventId: created.eventId });

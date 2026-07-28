@@ -47,7 +47,9 @@ export default defineSchema({
     visibility: missionVisibility,
     lifecycle: missionLifecycle,
     currentVersion: v.number(),
-    eventSequence: v.number(),
+    // Legacy-only compatibility field. New Mission documents and event writes
+    // omit it; canonical event ordering lives on the event index itself.
+    eventSequence: v.optional(v.number()),
     templateKey: v.optional(v.union(v.literal("companySprint"), v.literal("classroomProject"), v.literal("contentProduction"), v.literal("openChallenge"))),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -229,7 +231,8 @@ export default defineSchema({
 
   missionEvents: defineTable({
     missionId: v.id("missions"),
-    missionSequence: v.number(),
+    // Legacy sequence is present on pre-cutover rows only.
+    missionSequence: v.optional(v.number()),
     roomId: v.optional(v.id("rooms")),
     type: v.union(v.literal("mission.created"), v.literal("mission.updated"), v.literal("mission.constitutionUpdated"), v.literal("mission.archived"), v.literal("mission.restored"), v.literal("membership.invited"), v.literal("membership.joined"), v.literal("invite.revoked"), v.literal("room.created"), v.literal("room.renamed"), v.literal("room.archived"), v.literal("room.layoutUpdated"), v.literal("move.created"), v.literal("move.updated"), v.literal("move.transitioned"), v.literal("call.created"), v.literal("call.updated"), v.literal("call.transitioned"), v.literal("call.participantJoined"), v.literal("call.participantWithdrawn"), v.literal("call.responseUpdated"), v.literal("fracture.created"), v.literal("fracture.updated"), v.literal("fracture.transitioned"), v.literal("proof.submitted"), v.literal("proof.updated"), v.literal("proof.verified"), v.literal("proof.rejected"), v.literal("proof.resubmitted")),
     aggregateType: v.literal("mission"),
@@ -244,6 +247,7 @@ export default defineSchema({
     createdAt: v.number(),
     schemaVersion: v.number(),
   })
+    .index("by_mission", ["missionId"])
     .index("by_mission_and_sequence", ["missionId", "missionSequence"])
     .index("by_aggregate_and_sequence", ["aggregateId", "missionSequence"])
     .index("by_correlation_id", ["correlationId"])

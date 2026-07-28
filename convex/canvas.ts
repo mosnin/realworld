@@ -50,10 +50,8 @@ async function receipt(ctx: MutationCtx, scope: string, idempotencyKey: string) 
 async function recordRoomEvent(ctx: MutationCtx, room: Pick<Doc<"rooms">, "_id" | "missionId">, member: Pick<Doc<"missionMembers">, "principalId" | "role">, type: "room.created" | "room.renamed" | "room.archived" | "room.layoutUpdated", idempotencyKey: string, summary: string, afterVersion: number) {
   const mission = await ctx.db.get(room.missionId);
   if (!mission) throw new Error("Not found");
-  const sequence = mission.eventSequence + 1;
   const now = Date.now();
-  await ctx.db.patch(mission._id, { eventSequence: sequence, updatedAt: now });
-  const eventId = await ctx.db.insert("missionEvents", { missionId: mission._id, missionSequence: sequence, roomId: room._id, type, aggregateType: "mission", aggregateId: mission._id, actorPrincipalId: member.principalId, effectiveRole: member.role, correlationId: `room:${idempotencyKey}`, idempotencyKey, publicSummary: summary, afterVersion, createdAt: now, schemaVersion: 1 });
+  const eventId = await ctx.db.insert("missionEvents", { missionId: mission._id, roomId: room._id, type, aggregateType: "mission", aggregateId: mission._id, actorPrincipalId: member.principalId, effectiveRole: member.role, correlationId: `room:${idempotencyKey}`, idempotencyKey, publicSummary: summary, afterVersion, createdAt: now, schemaVersion: 1 });
   return { eventId, now };
 }
 

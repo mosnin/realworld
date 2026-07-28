@@ -82,9 +82,7 @@ async function recordMoveEvent(ctx: MutationCtx, move: Pick<Doc<"moves">, "missi
   const mission = await ctx.db.get(move.missionId);
   if (!mission) throw new Error("Not found");
   const now = Date.now();
-  const sequence = mission.eventSequence + 1;
-  await ctx.db.patch(mission._id, { eventSequence: sequence, updatedAt: now });
-  const eventId = await ctx.db.insert("missionEvents", { missionId: mission._id, missionSequence: sequence, ...(move.roomId === undefined ? {} : { roomId: move.roomId }), type, aggregateType: "mission", aggregateId: mission._id, actorPrincipalId: membership.principalId, effectiveRole: membership.role, correlationId, idempotencyKey, publicSummary: summary, ...(beforeVersion === undefined ? {} : { beforeVersion }), afterVersion, createdAt: now, schemaVersion: 1 });
+  const eventId = await ctx.db.insert("missionEvents", { missionId: mission._id, ...(move.roomId === undefined ? {} : { roomId: move.roomId }), type, aggregateType: "mission", aggregateId: mission._id, actorPrincipalId: membership.principalId, effectiveRole: membership.role, correlationId, idempotencyKey, publicSummary: summary, ...(beforeVersion === undefined ? {} : { beforeVersion }), afterVersion, createdAt: now, schemaVersion: 1 });
   return { eventId, now };
 }
 

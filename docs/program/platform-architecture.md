@@ -68,7 +68,7 @@ Use small normalized aggregates with indexes for every read path; Field response
 | `rooms` | mission, kind, layout, access policy, active branch | A room is a spatial context, not a separate mission. |
 | `moves` | mission, branch, owner/assignee, state, dependencies, version | State machine transition only. |
 | `artifacts` / `artifactVersions` | scope, author, content pointer, lineage, status | Store blobs in managed storage; version metadata stays durable. |
-| `missionEvents` | mission, aggregate ref, actor, type, idempotency key, public summary, evidence refs | Ordered by per-Mission sequence for replay. |
+| `missionEvents` | mission, aggregate ref, actor, type, idempotency key, public summary, evidence refs | Ordered per Mission by the immutable Convex creation cursor; legacy numeric sequences are read-only migration data. |
 | `agentRuns` / `runSteps` | run intent, state, lease, checkpoint, budget, trace, provider receipt | A run is resumable and auditable. |
 | `approvalRequests` | action digest, capability, approver, expiry, decision | Approval is a durable state transition. |
 | `operationReceipts` | idempotency key, status, result/event refs, expiry | Deduplicates tool and client retries. |
@@ -88,7 +88,7 @@ The command path is always:
 5. Any external side effect is scheduled only after the durable intent/event has committed.
 6. The side effect records a receipt and submits its result through another guarded transition.
 
-Use optimistic concurrency for normal aggregate updates. Do not use a global Mission counter as a hot write point; allocate event sequences in a way that keeps per-Mission contention bounded, or append an immutable event with its own order key and build a deterministic projection. The exact Convex schema/index plan remains a Phase 1 implementation decision and must be load-tested with fifty active participants.
+Use optimistic concurrency for normal aggregate updates. Mission events append independently and use the `by_mission` index, whose final Convex `_creationTime` field provides a stable order cursor without a shared Mission counter. Legacy `eventSequence` and `missionSequence` values remain optional migration data and are never written by new commands. This removes the Mission-row hot write point; real browser, network, and Ably load still require separate fifty-participant evidence.
 
 ## Agent runtime
 
