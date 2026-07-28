@@ -2567,6 +2567,205 @@ describe("RealtimeRoomSession", () => {
     }
   });
 
+  it("captures each operation-timeout option once and ignores post-construction mutation", async () => {
+    const providerSecret = "timeout-option-mutation-secret";
+    const timeoutOptions = [
+      "tokenAcquisitionTimeoutMs",
+      "transportConnectionTimeoutMs",
+      "transportDisposalTimeoutMs",
+      "transportPublishTimeoutMs",
+    ] as const;
+    type TimeoutOption = typeof timeoutOptions[number];
+    const clock = new FakeClock();
+    const { transport, connections } = createTransport();
+    const reads: Record<TimeoutOption, number> = {
+      tokenAcquisitionTimeoutMs: 0,
+      transportConnectionTimeoutMs: 0,
+      transportDisposalTimeoutMs: 0,
+      transportPublishTimeoutMs: 0,
+    };
+    const values: Record<TimeoutOption, unknown> = {
+      tokenAcquisitionTimeoutMs: 3,
+      transportConnectionTimeoutMs: 4,
+      transportDisposalTimeoutMs: 5,
+      transportPublishTimeoutMs: 6,
+    };
+    const options = {
+      tokenProvider: async () => token(clock.now() + 300_000),
+      transport,
+      clock,
+    } as unknown as RoomSessionOptions;
+    for (const property of timeoutOptions) {
+      Object.defineProperty(options, property, {
+        get: () => {
+          reads[property] += 1;
+          return values[property];
+        },
+      });
+    }
+    const session = new RealtimeRoomSession(options);
+    for (const property of timeoutOptions) values[property] = providerSecret;
+
+    await session.start({ missionId: "mission-a", roomId: "room-a" });
+    await expect(session.publish(message(clock))).resolves.toBe(true);
+    await session.stop();
+
+    expect(reads).toEqual({
+      tokenAcquisitionTimeoutMs: 1,
+      transportConnectionTimeoutMs: 1,
+      transportDisposalTimeoutMs: 1,
+      transportPublishTimeoutMs: 1,
+    });
+    expect(clock.delays).toEqual(expect.arrayContaining([3, 4, 5, 6]));
+    expect(connections[0]!.unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("contains malformed, hostile, nonfinite, default, and bounded operation-timeout captures", async () => {
+    const providerSecret = "hostile-timeout-option-secret";
+    const timeoutOptions = [
+      "tokenAcquisitionTimeoutMs",
+      "transportConnectionTimeoutMs",
+      "transportDisposalTimeoutMs",
+      "transportPublishTimeoutMs",
+    ] as const;
+    type TimeoutOption = typeof timeoutOptions[number];
+    const hostileValue = {};
+    Object.defineProperty(hostileValue, "valueOf", {
+      get: () => { throw new Error(providerSecret); },
+    });
+    const cases: Array<{ label: string; value: unknown; expected: number }> = [
+      { label: "default", value: undefined, expected: 10_000 },
+      { label: "malformed", value: providerSecret, expected: 10_000 },
+      { label: "hostile-value", value: hostileValue, expected: 10_000 },
+      { label: "nan", value: Number.NaN, expected: 10_000 },
+      { label: "infinite", value: Number.POSITIVE_INFINITY, expected: 10_000 },
+      { label: "negative", value: -1, expected: 1 },
+      { label: "zero", value: 0, expected: 1 },
+      { label: "fractional", value: 2.9, expected: 2 },
+      { label: "oversized", value: 99_999, expected: 30_000 },
+      { label: "throwing-getter", value: undefined, expected: 10_000 },
+    ];
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      for (const { label, value, expected } of cases) {
+        const clock = new FakeClock();
+        const { transport, connections } = createTransport();
+        const reads: Record<TimeoutOption, number> = {
+          tokenAcquisitionTimeoutMs: 0,
+          transportConnectionTimeoutMs: 0,
+          transportDisposalTimeoutMs: 0,
+          transportPublishTimeoutMs: 0,
+        };
+        const failures: unknown[] = [];
+        const options = {
+          tokenProvider: async () => token(clock.now() + 300_000),
+          transport,
+          clock,
+          onTransportFailure: (error: unknown) => failures.push(error),
+        } as unknown as RoomSessionOptions;
+        for (const property of timeoutOptions) {
+          Object.defineProperty(options, property, {
+            get: () => {
+              reads[property] += 1;
+              if (label === "throwing-getter") throw new Error(providerSecret);
+              return value;
+            },
+          });
+        }
+        let session: RealtimeRoomSession | undefined;
+        expect(() => { session = new RealtimeRoomSession(options); }).not.toThrow();
+
+        await session!.start({ missionId: "mission-a", roomId: "room-a" });
+        await expect(session!.publish(message(clock))).resolves.toBe(true);
+        await session!.stop();
+        expect(reads).toEqual({
+          tokenAcquisitionTimeoutMs: 1,
+          transportConnectionTimeoutMs: 1,
+          transportDisposalTimeoutMs: 1,
+          transportPublishTimeoutMs: 1,
+        });
+        expect(clock.delays.filter((delay) => delay === expected)).toHaveLength(4);
+        expect(connections[0]!.unsubscribe).toHaveBeenCalledTimes(1);
+        expect(failures).toEqual([]);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
+  it("contains rejected Promise and hostile-then timeout getter results with one-shot default capture", async () => {
+    const providerSecret = "async-timeout-option-secret";
+    const timeoutOptions = [
+      "tokenAcquisitionTimeoutMs",
+      "transportConnectionTimeoutMs",
+      "transportDisposalTimeoutMs",
+      "transportPublishTimeoutMs",
+    ] as const;
+    type TimeoutOption = typeof timeoutOptions[number];
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      for (const mode of ["rejected-promise", "hostile-then"] as const) {
+        const clock = new FakeClock();
+        const { transport, connections } = createTransport();
+        const reads: Record<TimeoutOption, number> = {
+          tokenAcquisitionTimeoutMs: 0,
+          transportConnectionTimeoutMs: 0,
+          transportDisposalTimeoutMs: 0,
+          transportPublishTimeoutMs: 0,
+        };
+        let thenReads = 0;
+        const failures: unknown[] = [];
+        const options = {
+          tokenProvider: async () => token(clock.now() + 300_000),
+          transport,
+          clock,
+          onTransportFailure: (error: unknown) => failures.push(error),
+        } as unknown as RoomSessionOptions;
+        for (const property of timeoutOptions) {
+          Object.defineProperty(options, property, {
+            get: () => {
+              reads[property] += 1;
+              if (mode === "rejected-promise") return Promise.reject(new Error(providerSecret));
+              const hostileThenable = {};
+              Object.defineProperty(hostileThenable, "then", {
+                get: () => {
+                  thenReads += 1;
+                  throw new Error(providerSecret);
+                },
+              });
+              return hostileThenable;
+            },
+          });
+        }
+        const session = new RealtimeRoomSession(options);
+
+        await session.start({ missionId: "mission-a", roomId: "room-a" });
+        await expect(session.publish(message(clock))).resolves.toBe(true);
+        await session.stop();
+        expect(reads).toEqual({
+          tokenAcquisitionTimeoutMs: 1,
+          transportConnectionTimeoutMs: 1,
+          transportDisposalTimeoutMs: 1,
+          transportPublishTimeoutMs: 1,
+        });
+        expect(clock.delays.filter((delay) => delay === 10_000)).toHaveLength(4);
+        expect(connections[0]!.unsubscribe).toHaveBeenCalledTimes(1);
+        expect(failures).toEqual([]);
+        if (mode === "hostile-then") expect(thenReads).toBe(4);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
   it("snapshots recovery policy getters and receivers once, ignoring later replacements", async () => {
     const providerSecret = "recovery-policy-replacement-secret";
     for (const policy of ["random", "reconnect"] as const) {

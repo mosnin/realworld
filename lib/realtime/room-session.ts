@@ -208,6 +208,42 @@ function normalizedBoundedPositive(value: number | undefined, fallback: number, 
     : Math.min(maximum, Math.max(1, Math.floor(value)));
 }
 
+function snapshotBoundedPositive(read: () => unknown, fallback: number, maximum: number) {
+  try {
+    const value = read();
+    if (typeof value === "number") return normalizedBoundedPositive(value, fallback, maximum);
+    observeAsyncResult(value);
+    return fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function snapshotOperationTimeouts(options: RoomSessionOptions) {
+  return {
+    tokenAcquisition: snapshotBoundedPositive(
+      () => options.tokenAcquisitionTimeoutMs,
+      defaultTokenAcquisitionTimeoutMs,
+      maximumTokenAcquisitionTimeoutMs,
+    ),
+    transportConnection: snapshotBoundedPositive(
+      () => options.transportConnectionTimeoutMs,
+      defaultTransportConnectionTimeoutMs,
+      maximumTransportConnectionTimeoutMs,
+    ),
+    transportDisposal: snapshotBoundedPositive(
+      () => options.transportDisposalTimeoutMs,
+      defaultTransportDisposalTimeoutMs,
+      maximumTransportDisposalTimeoutMs,
+    ),
+    transportPublish: snapshotBoundedPositive(
+      () => options.transportPublishTimeoutMs,
+      defaultTransportPublishTimeoutMs,
+      maximumTransportPublishTimeoutMs,
+    ),
+  };
+}
+
 function boundedRandom(random: () => number) {
   try {
     const value = random();
@@ -618,32 +654,17 @@ export class RealtimeRoomSession {
   constructor(options: RoomSessionOptions) {
     this.tokenProvider = snapshotTokenProvider(options);
     this.transportConnect = snapshotTransportConnect(options);
+    const operationTimeouts = snapshotOperationTimeouts(options);
     this.onStateChange = snapshotObserver(options, () => options.onStateChange);
     this.onMessage = snapshotObserver(options, () => options.onMessage);
     this.onTransientMessageExpired = snapshotObserver(options, () => options.onTransientMessageExpired);
     this.onTransientStateCleared = snapshotObserver(options, () => options.onTransientStateCleared);
     this.onTransportFailure = snapshotObserver(options, () => options.onTransportFailure);
     this.clock = snapshotClock(options);
-    this.tokenAcquisitionTimeoutMs = normalizedBoundedPositive(
-      options.tokenAcquisitionTimeoutMs,
-      defaultTokenAcquisitionTimeoutMs,
-      maximumTokenAcquisitionTimeoutMs,
-    );
-    this.transportConnectionTimeoutMs = normalizedBoundedPositive(
-      options.transportConnectionTimeoutMs,
-      defaultTransportConnectionTimeoutMs,
-      maximumTransportConnectionTimeoutMs,
-    );
-    this.transportDisposalTimeoutMs = normalizedBoundedPositive(
-      options.transportDisposalTimeoutMs,
-      defaultTransportDisposalTimeoutMs,
-      maximumTransportDisposalTimeoutMs,
-    );
-    this.transportPublishTimeoutMs = normalizedBoundedPositive(
-      options.transportPublishTimeoutMs,
-      defaultTransportPublishTimeoutMs,
-      maximumTransportPublishTimeoutMs,
-    );
+    this.tokenAcquisitionTimeoutMs = operationTimeouts.tokenAcquisition;
+    this.transportConnectionTimeoutMs = operationTimeouts.transportConnection;
+    this.transportDisposalTimeoutMs = operationTimeouts.transportDisposal;
+    this.transportPublishTimeoutMs = operationTimeouts.transportPublish;
     this.refreshSkewMs = normalizedNonNegative(options.refreshSkewMs, defaultRefreshSkewMs);
     this.minimumRefreshDelayMs = normalizedPositive(options.minimumRefreshDelayMs, defaultMinimumRefreshDelayMs);
     const random = snapshotRandom(options);
