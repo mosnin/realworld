@@ -46,18 +46,21 @@ Deliverables:
 - Production-quality customizable-canvas design system: commit `ddfacd3`; lint, typecheck, and production build passed locally
 - Convex schema, indexes, guarded Mission functions, and private-alpha password authentication: local deployment push passed on 2026-07-27
 - Durable Mission launch templates, scoped hashed invitations, and Convex-authoritative versioned room layouts: commits `8c7d594` and `dcdc19c`; local Convex push, Convex typecheck, and nine focused authorization/idempotency/concurrency tests passed
+- Authenticated reactive Mission projection and stabilized launch flow: commits `51c86cf` and `23b6172`; new accounts reach the template launcher, create a durable Mission, and render its title and membership role
+- Secure owner invitation and acceptance flow: commits `04f0483`, `c2543b4`, and `eec1dae`; raw tokens remain client-held, Convex stores token hashes, working roles and room scopes are enforced, and a second authenticated browser context retains contributor membership after reload
 - Local browser authentication evidence: synthetic account creation, sign-out, sign-in, and protected Mission World restoration passed on 2026-07-27
 - Cloud Convex deployment and cloud authentication remain unverified; password auth is a private-alpha bridge, not the final passkey decision
 - Vercel preview: `https://realworld-4r7u1kand-mosnins-projects.vercel.app` built successfully from commit `f7d4230`; GitHub repository connected
 - Test, lint, typecheck, accessibility, and browser-test infrastructure: foundation passing locally in commit `a9679c0`
+- Truthful authenticated CI gate: commit `6d66216`; GitHub Actions run `30318024140` passed install, lint, typecheck, unit tests, Convex tests, production build, seven authenticated Chromium journeys, and foundation evidence on 2026-07-27
 - Observability, error boundaries, structured logs, and environment validation: shell error boundaries and safe environment-name validation started in commit `a9679c0`
 
 Evidence boundary:
 
-- The current Mission World and Workshop still use fixture content for much of the visible experience, although room layout persistence now has an authoritative Convex domain contract.
-- They do not count as authenticated, multiplayer, persistent-state, agent-runtime, or production-readiness evidence.
-- Overall production capability remains below one percent until a signed-in user creates and reloads a durable Mission from the connected cloud backend.
-- Six new customizable-canvas browser journeys are implemented but not counted as passing: fresh test pages currently remain at auth-session restoration because CI/test auth bootstrap is not yet provisioned.
+- The current Mission World and Workshop still use fixture content for rooms, occupants, activity, and artifacts. The canvas customization remains browser-local even though a Convex-authoritative room-layout contract exists.
+- The authenticated Mission title, membership role, invitation issuance, invitation acceptance, and reload persistence are real local Convex evidence. They do not prove cloud deployment, shared-canvas synchronization, Ably presence, agent runtime, recovery, or production readiness.
+- Overall production capability remains below one percent until the same flows pass against the connected cloud backend and current preview.
+- Eight browser journeys pass locally against an ephemeral Convex deployment with real private-alpha account creation. GitHub CI is last confirmed green at seven journeys on run `30318024140`; the new two-context journey awaits CI reproduction.
 
 Exit gates:
 
@@ -65,6 +68,13 @@ Exit gates:
 - Preview deployment is reproducible
 - Authorization boundaries have automated coverage
 - CI and production build pass
+
+Current gate status:
+
+- CI and production build: passed in GitHub Actions run `30318024140`
+- Signed-in responsive shell: passed with local ephemeral Convex Auth
+- Authorization boundaries: twelve focused Convex tests pass
+- Reproducible current preview and connected cloud Convex state: still open
 
 ## Phase 2 — Mission kernel
 
