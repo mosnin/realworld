@@ -2,10 +2,16 @@
 
 import { useEffect } from "react";
 
-import type { BrowserRoomSession } from "@/lib/realtime/browser-lifecycle";
 import { createBrowserRealtimeComposition } from "@/lib/realtime/browser-realtime-composition";
 import { createBrowserSignalPublicationPolicy } from "@/lib/realtime/browser-signal-policy";
 import { createDomBrowserLifecycleSourceFromGlobals } from "@/lib/realtime/dom-browser-lifecycle";
+import {
+  createDurableRoomSessionFactory,
+  type DurableRoomReadiness,
+  type DurableRoomSessionFactory,
+  type DurableRoomTokenProviderFactory,
+  type DurableRoomTransportFactory,
+} from "./durable-room-session-factory";
 
 export type AuthenticatedMissionRealtimeLifecycleProps = Readonly<{
   /**
@@ -13,20 +19,16 @@ export type AuthenticatedMissionRealtimeLifecycleProps = Readonly<{
    * Mission-scoped session here. This boundary intentionally has no provider
    * client, token, or transport dependency of its own.
    */
-  sessionFactory?: (readiness: DurableRoomReadiness) => BrowserRoomSession;
+  sessionFactory?: DurableRoomSessionFactory;
+  tokenProviderFactory?: DurableRoomTokenProviderFactory;
+  transportFactory?: DurableRoomTransportFactory;
   readiness?: unknown;
   membershipGrantVersion?: unknown;
   expectedMissionId?: unknown;
   expectedRoomId?: unknown;
 }>;
 
-export type DurableRoomReadiness = Readonly<{
-  missionId: string;
-  roomId: string;
-  grantVersion: number;
-  missionLifecycle: "active";
-  roomState: "active";
-}>;
+export type { DurableRoomReadiness } from "./durable-room-session-factory";
 
 function developmentRealtimeIsExplicitlyEnabled() {
   return process.env.NEXT_PUBLIC_APP_ENV === "development"
@@ -62,6 +64,8 @@ function isDurableRoomReadiness(
  */
 export function AuthenticatedMissionRealtimeLifecycle({
   sessionFactory,
+  tokenProviderFactory,
+  transportFactory,
   readiness,
   membershipGrantVersion,
   expectedMissionId,
@@ -73,7 +77,7 @@ export function AuthenticatedMissionRealtimeLifecycle({
   const grantVersion = durableReadiness?.grantVersion;
 
   useEffect(() => {
-    if (!developmentRealtimeIsExplicitlyEnabled() || !missionId || !roomId || grantVersion === undefined || typeof sessionFactory !== "function") return;
+    if (!developmentRealtimeIsExplicitlyEnabled() || !missionId || !roomId || grantVersion === undefined) return;
     const scopedReadiness: DurableRoomReadiness = {
       missionId,
       roomId,
@@ -82,17 +86,20 @@ export function AuthenticatedMissionRealtimeLifecycle({
       roomState: "active",
     };
 
+    const resolvedSessionFactory = sessionFactory ?? createDurableRoomSessionFactory({ tokenProviderFactory, transportFactory });
+    if (typeof resolvedSessionFactory !== "function") return;
+
     const lifecycle = createBrowserRealtimeComposition({
       environment: "development",
       rawEnabledFlag: "enabled",
       sourceFactory: createDomBrowserLifecycleSourceFromGlobals,
-      sessionFactory: () => sessionFactory(scopedReadiness),
+      sessionFactory: () => resolvedSessionFactory(scopedReadiness),
       publicationPolicy: createBrowserSignalPublicationPolicy(),
     });
 
     void lifecycle.start();
     return () => { void lifecycle.stop(); };
-  }, [grantVersion, missionId, roomId, sessionFactory]);
+  }, [grantVersion, missionId, roomId, sessionFactory, tokenProviderFactory, transportFactory]);
 
   return null;
 }
