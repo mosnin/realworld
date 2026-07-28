@@ -6,6 +6,10 @@ import { createBrowserRealtimeComposition } from "@/lib/realtime/browser-realtim
 import { createBrowserSignalPublicationPolicy } from "@/lib/realtime/browser-signal-policy";
 import { createDomBrowserLifecycleSourceFromGlobals } from "@/lib/realtime/dom-browser-lifecycle";
 import {
+  createAuthenticatedRoomTokenProvider,
+  type AuthenticatedRoomTokenRequester,
+} from "./authenticated-room-token-provider";
+import {
   createDurableRoomSessionFactory,
   type DurableRoomReadiness,
   type DurableRoomSessionFactory,
@@ -21,6 +25,7 @@ export type AuthenticatedMissionRealtimeLifecycleProps = Readonly<{
    */
   sessionFactory?: DurableRoomSessionFactory;
   tokenProviderFactory?: DurableRoomTokenProviderFactory;
+  authenticatedTokenRequester?: AuthenticatedRoomTokenRequester;
   transportFactory?: DurableRoomTransportFactory;
   readiness?: unknown;
   membershipGrantVersion?: unknown;
@@ -65,6 +70,7 @@ function isDurableRoomReadiness(
 export function AuthenticatedMissionRealtimeLifecycle({
   sessionFactory,
   tokenProviderFactory,
+  authenticatedTokenRequester,
   transportFactory,
   readiness,
   membershipGrantVersion,
@@ -86,7 +92,14 @@ export function AuthenticatedMissionRealtimeLifecycle({
       roomState: "active",
     };
 
-    const resolvedSessionFactory = sessionFactory ?? createDurableRoomSessionFactory({ tokenProviderFactory, transportFactory });
+    const bridgeTokenProviderFactory = tokenProviderFactory === undefined && typeof authenticatedTokenRequester === "function"
+      ? (candidate: DurableRoomReadiness) => createAuthenticatedRoomTokenProvider(candidate, authenticatedTokenRequester)
+      : undefined;
+    const resolvedTokenProviderFactory = tokenProviderFactory ?? bridgeTokenProviderFactory;
+    const resolvedSessionFactory = sessionFactory ?? createDurableRoomSessionFactory({
+      tokenProviderFactory: resolvedTokenProviderFactory,
+      transportFactory,
+    });
     if (typeof resolvedSessionFactory !== "function") return;
 
     const lifecycle = createBrowserRealtimeComposition({
@@ -99,7 +112,7 @@ export function AuthenticatedMissionRealtimeLifecycle({
 
     void lifecycle.start();
     return () => { void lifecycle.stop(); };
-  }, [grantVersion, missionId, roomId, sessionFactory, tokenProviderFactory, transportFactory]);
+  }, [authenticatedTokenRequester, grantVersion, missionId, roomId, sessionFactory, tokenProviderFactory, transportFactory]);
 
   return null;
 }
