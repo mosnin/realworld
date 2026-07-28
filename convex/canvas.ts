@@ -36,6 +36,13 @@ function requireRoomWriteAccess(
   }
 }
 
+function requireMissionWideRoomWriteAccess(
+  membership: Awaited<ReturnType<typeof requireActiveMembership>>,
+) {
+  requireRole(membership, ["owner", "steward", "builder"]);
+  if (!membership.scope.includes("mission:*")) throw new Error("Not found");
+}
+
 async function receipt(ctx: MutationCtx, scope: string, idempotencyKey: string) {
   return await ctx.db.query("operationReceipts").withIndex("by_scope_and_idempotency_key", (index) => index.eq("scope", scope).eq("idempotencyKey", idempotencyKey)).unique();
 }
@@ -67,7 +74,7 @@ export const createRoom = mutation({
   returns: v.object({ roomId: v.id("rooms"), currentVersion: v.number(), layoutVersion: v.number() }),
   handler: async (ctx, args) => {
     const member = await requireActiveMembership(ctx, args.missionId);
-    requireRole(member, ["owner", "steward", "builder"]);
+    requireMissionWideRoomWriteAccess(member);
     const scope = `mission:${args.missionId}:createRoom`;
     const commandFingerprint = JSON.stringify({ command: "createRoom", title: args.title.trim(), kind: args.kind, layout: args.layout });
     const prior = await receipt(ctx, scope, args.idempotencyKey);

@@ -146,6 +146,13 @@ describe("room write grants", () => {
     await member(t, missionId, builder, "builder", [`room:${allowed}`]);
     const asBuilder = t.withIdentity(builder);
 
+    await expect(asBuilder.mutation(api.canvas.createRoom, {
+      missionId,
+      title: "Unauthorized new room",
+      kind: "workshop",
+      layout: changedLayout,
+      idempotencyKey: "scoped-create-denied",
+    })).rejects.toThrow("Not found");
     await expect(asBuilder.mutation(api.canvas.updateRoomLayout, { roomId: allowed, expectedLayoutVersion: 1, layout: changedLayout, idempotencyKey: "scoped-allowed-layout" })).resolves.toMatchObject({ roomId: allowed, layoutVersion: 2 });
     await expect(asBuilder.mutation(api.canvas.updateRoomLayout, { roomId: hidden, expectedLayoutVersion: 1, layout: changedLayout, idempotencyKey: "scoped-hidden-layout" })).rejects.toThrow("Not found");
     await expect(asBuilder.mutation(api.canvas.renameRoom, { roomId: hidden, expectedVersion: 1, title: "Probe", idempotencyKey: "scoped-hidden-rename" })).rejects.toThrow("Not found");

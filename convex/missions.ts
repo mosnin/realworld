@@ -263,7 +263,7 @@ export const updateConstitution = mutation({
     const constitution = requireNonBlank(args.constitution, "constitution", 10_000);
     if (args.desiredOutcomes.length < 1 || args.desiredOutcomes.length > 20) throw new Error("Invalid desired outcomes");
     const desiredOutcomes = args.desiredOutcomes.map((outcome) => requireNonBlank(outcome, "desired outcome", 280));
-    if (new Set(desiredOutcomes.map((outcome) => outcome.toLocaleLowerCase())).size !== desiredOutcomes.length) throw new Error("Duplicate desired outcome");
+    if (new Set(desiredOutcomes.map((outcome) => outcome.toLowerCase())).size !== desiredOutcomes.length) throw new Error("Duplicate desired outcome");
     const idempotencyKey = requireNonBlank(args.idempotencyKey, "idempotency key", 200);
     const correlationId = requireNonBlank(args.correlationId, "correlation id", 200);
     const scope = `mission:${args.missionId}:constitution`; const commandFingerprint = JSON.stringify({ command: "updateConstitution", constitution, desiredOutcomes, expectedVersion: args.expectedVersion }); const prior = await ctx.db.query("operationReceipts").withIndex("by_scope_and_idempotency_key", (index) => index.eq("scope", scope).eq("idempotencyKey", idempotencyKey)).unique();
