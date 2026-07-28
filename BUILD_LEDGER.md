@@ -59,6 +59,7 @@ Deliverables:
 - Durable two-participant CI gate: commit `63101ad`; GitHub Actions run `30318560377` passed install, lint, typecheck, 13 Vitest tests, Convex validation, production build, eight authenticated Chromium journeys, and foundation evidence on 2026-07-27
 - Durable canvas and mobile CI gate: commit `a6c70c4`; GitHub Actions run `30319454840` passed install, lint, typecheck, 14 Vitest tests, Convex validation, production build, nine authenticated Chromium journeys, and foundation evidence on 2026-07-27
 - Scoped reactive canvas CI gate: commit `77e8b8e`; GitHub Actions run `30320163658` passed install, lint, typecheck, 15 Vitest tests, Convex validation, production build, nine authenticated Chromium journeys with live scoped cross-context movement, and foundation evidence on 2026-07-27
+- Conflict-recovery and role-matrix CI gate: commit `1a120e2`; GitHub Actions run `30320832450` passed install, lint, typecheck, 16 Vitest tests, Convex validation, production build, ten authenticated Chromium journeys with concurrent OCC convergence, and foundation evidence on 2026-07-27
 - Observability, error boundaries, structured logs, and environment validation: shell error boundaries and safe environment-name validation started in commit `a9679c0`
 
 Evidence boundary:
@@ -66,7 +67,7 @@ Evidence boundary:
 - The current Mission World and Workshop still use fixture content for occupants, activity, and artifacts. Room identity, titles, lifecycle, and coordinates are now durable Convex state; presentation preferences and layout lock intentionally remain personal and browser-local.
 - The authenticated Mission title, membership role, invitation issuance, invitation acceptance, room lifecycle, layout persistence, scoped visibility, cross-browser reactive movement, and concurrent conflict recovery are real local Convex evidence. They do not prove cloud deployment, Ably presence, exhaustive role coverage, agent runtime, disaster recovery, load, or production readiness.
 - Overall production capability remains below one percent until the same flows pass against the connected cloud backend and current preview.
-- Ten browser journeys pass locally against an ephemeral Convex deployment with real private-alpha account creation, including mobile room entry, durable room lifecycle, deny-by-default scoped discovery, live two-context movement, and a concurrent owner/builder OCC race with visible recovery. GitHub CI run `30320282531` is green for the prior nine-journey slice; the conflict-recovery journey awaits CI reproduction.
+- Ten browser journeys pass locally and in GitHub CI run `30320832450` against an ephemeral Convex deployment with real private-alpha account creation, including mobile room entry, durable room lifecycle, deny-by-default scoped discovery, live two-context movement, and a concurrent owner/builder OCC race with visible recovery.
 
 Exit gates:
 
@@ -77,7 +78,7 @@ Exit gates:
 
 Current gate status:
 
-- CI and production build: passed in GitHub Actions run `30320163658`
+- CI and production build: passed in GitHub Actions run `30320832450`
 - Signed-in responsive shell: passed with local ephemeral Convex Auth
 - Authorization boundaries: fifteen focused Convex tests pass
 - Reproducible current preview and connected cloud Convex state: still open

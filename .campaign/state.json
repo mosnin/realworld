@@ -5,11 +5,11 @@
   "currentPhase": 1,
   "phaseName": "Production foundation",
   "startedAt": "2026-07-27T00:00:00-04:00",
-  "lastUpdatedAt": "2026-07-27T21:37:34-04:00",
+  "lastUpdatedAt": "2026-07-27T21:40:35-04:00",
   "exactNextActions": [
     "Create or connect a cloud Convex development deployment and verify the current preview creates and reloads a durable Mission",
-    "Push and reproduce the ten-journey conflict-recovery gate in GitHub Actions",
-    "Implement authenticated Mission edit, archive, and restore controls with replayable history"
+    "Implement authenticated Mission edit, archive, and restore controls with replayable history",
+    "Complete per-role rename, archive, and layout mutation variants"
   ],
   "teams": {
     "worldNetwork": {"status":"complete","model":"gpt-5.6-terra","writeScope":"docs/program/world-network-system.md","lastMeaningfulHeartbeatAt":"2026-07-27T18:52:00-04:00","evidence":"commit 0ca7a39","exactNextAction":"Review the product contract against the room interaction specification"},
@@ -21,7 +21,7 @@
     "artifactStudio": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"artifact domain and surfaces","exactNextAction":"Wait for client, realtime, and agent contracts"},
     "discoverySocial": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"discovery and contribution surfaces","exactNextAction":"Wait for Artifact Studio and reputation contracts"},
     "trustGovernance": {"status":"review","model":"gpt-5.6-terra","writeScope":"docs/program/trust-quality-release.md","lastMeaningfulHeartbeatAt":"2026-07-27T21:37:00-04:00","evidence":"commits c1f156b, e90d1ee, and 44d944b; deny-by-default room scope and nine actor states have automated Mission, invitation, and room boundary coverage","exactNextAction":"Complete remaining rename, archive, and layout variants for every eligible role"},
-    "qualityOperations": {"status":"active","model":"gpt-5.6-terra","writeScope":"CI and verification infrastructure","lastMeaningfulHeartbeatAt":"2026-07-27T21:37:00-04:00","evidence":"GitHub Actions run 30320282531 passed the prior nine-journey gate; current local gate passes lint, typecheck, 16 Vitest tests, production build, and ten authenticated Chromium journeys including a real concurrent OCC race and convergence","exactNextAction":"Push and reproduce the ten-journey conflict-recovery gate in GitHub Actions"}
+    "qualityOperations": {"status":"review","model":"gpt-5.6-terra","writeScope":"CI and verification infrastructure","lastMeaningfulHeartbeatAt":"2026-07-27T21:40:00-04:00","evidence":"GitHub Actions run 30320832450 passed install, lint, typecheck, 16 Vitest tests, Convex validation, production build, ten authenticated Chromium journeys including a real concurrent OCC race and convergence, and foundation evidence","exactNextAction":"Add true disconnect/reconnect, recovery, and load evidence"}
   },
   "orchestration": {
     "preferredRuntime": "orca",
