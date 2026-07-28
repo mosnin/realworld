@@ -1129,6 +1129,10 @@ export class RealtimeRoomSession {
         () => finish(new Error("Realtime transport connection timed out")),
         this.transportConnectionTimeoutMs,
       );
+      if (settled) {
+        this.clock.clearTimeout(timer);
+        return;
+      }
       let connectionPromise: Promise<RealtimeTransportSubscription>;
       try {
         connectionPromise = Promise.resolve(this.transportConnect(input));
