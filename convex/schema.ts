@@ -210,6 +210,7 @@ export default defineSchema({
   missionEvents: defineTable({
     missionId: v.id("missions"),
     missionSequence: v.number(),
+    roomId: v.optional(v.id("rooms")),
     type: v.union(v.literal("mission.created"), v.literal("mission.updated"), v.literal("mission.constitutionUpdated"), v.literal("mission.archived"), v.literal("mission.restored"), v.literal("membership.invited"), v.literal("membership.joined"), v.literal("invite.revoked"), v.literal("room.created"), v.literal("room.renamed"), v.literal("room.archived"), v.literal("room.layoutUpdated"), v.literal("move.created"), v.literal("move.updated"), v.literal("move.transitioned"), v.literal("call.created"), v.literal("call.updated"), v.literal("call.transitioned"), v.literal("call.participantJoined"), v.literal("call.participantWithdrawn"), v.literal("call.responseUpdated"), v.literal("fracture.created"), v.literal("fracture.updated"), v.literal("fracture.transitioned"), v.literal("proof.submitted"), v.literal("proof.updated"), v.literal("proof.verified"), v.literal("proof.rejected"), v.literal("proof.resubmitted")),
     aggregateType: v.literal("mission"),
     aggregateId: v.id("missions"),

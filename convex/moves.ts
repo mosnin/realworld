@@ -78,13 +78,13 @@ function transitionAllowed(current: Doc<"moves">["state"], next: "proposed" | "r
   return ({ proposed: ["ready", "cancelled"], ready: ["inProgress", "blocked", "cancelled"], inProgress: ["review", "blocked", "cancelled"], blocked: ["ready", "cancelled"], review: ["completed", "inProgress", "blocked"], completed: [], cancelled: [], claimed: [], archived: [] } as const)[current].includes(next as never);
 }
 
-async function recordMoveEvent(ctx: MutationCtx, move: Pick<Doc<"moves">, "missionId" | "_id">, membership: Pick<Doc<"missionMembers">, "principalId" | "role">, type: "move.created" | "move.updated" | "move.transitioned", idempotencyKey: string, correlationId: string, summary: string, beforeVersion: number | undefined, afterVersion: number) {
+async function recordMoveEvent(ctx: MutationCtx, move: Pick<Doc<"moves">, "missionId" | "roomId">, membership: Pick<Doc<"missionMembers">, "principalId" | "role">, type: "move.created" | "move.updated" | "move.transitioned", idempotencyKey: string, correlationId: string, summary: string, beforeVersion: number | undefined, afterVersion: number) {
   const mission = await ctx.db.get(move.missionId);
   if (!mission) throw new Error("Not found");
   const now = Date.now();
   const sequence = mission.eventSequence + 1;
   await ctx.db.patch(mission._id, { eventSequence: sequence, updatedAt: now });
-  const eventId = await ctx.db.insert("missionEvents", { missionId: mission._id, missionSequence: sequence, type, aggregateType: "mission", aggregateId: mission._id, actorPrincipalId: membership.principalId, effectiveRole: membership.role, correlationId, idempotencyKey, publicSummary: summary, ...(beforeVersion === undefined ? {} : { beforeVersion }), afterVersion, createdAt: now, schemaVersion: 1 });
+  const eventId = await ctx.db.insert("missionEvents", { missionId: mission._id, missionSequence: sequence, ...(move.roomId === undefined ? {} : { roomId: move.roomId }), type, aggregateType: "mission", aggregateId: mission._id, actorPrincipalId: membership.principalId, effectiveRole: membership.role, correlationId, idempotencyKey, publicSummary: summary, ...(beforeVersion === undefined ? {} : { beforeVersion }), afterVersion, createdAt: now, schemaVersion: 1 });
   return { eventId, now };
 }
 
@@ -116,7 +116,7 @@ export const createMove = mutation({
     if (args.roomId !== undefined) { const room = await ctx.db.get(args.roomId); if (!room || room.missionId !== args.missionId || room.state !== "active") throw new Error("Invalid Move room"); }
     await assertDependencies(ctx, args.missionId, membership, undefined, dependencies);
     const now = Date.now(); const moveId = await ctx.db.insert("moves", { missionId: args.missionId, roomId: args.roomId, title, intent, dependencyMoveIds: dependencies, state: "proposed", currentVersion: 1, createdAt: now, updatedAt: now, schemaVersion: 1 });
-    const event = await recordMoveEvent(ctx, { missionId: args.missionId, _id: moveId }, membership, "move.created", idempotencyKey, correlationId, "Move created", undefined, 1);
+    const event = await recordMoveEvent(ctx, { missionId: args.missionId, roomId: args.roomId }, membership, "move.created", idempotencyKey, correlationId, "Move created", undefined, 1);
     const operationReceiptId = await saveReceipt(ctx, { scope, idempotencyKey, commandFingerprint, missionId: args.missionId, moveId, eventId: event.eventId, currentVersion: 1, correlationId, now: event.now });
     return { moveId, eventId: event.eventId, operationReceiptId, currentVersion: 1 };
   },

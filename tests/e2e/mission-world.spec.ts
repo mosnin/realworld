@@ -622,6 +622,50 @@ test("an owner can reject, resubmit, verify, and reload a durable room Proof", a
   await expect(proofDialog.getByRole("button", { name: `Reject ${updatedTitle}` })).toHaveCount(0);
 });
 
+test("a durable Workshop Move appears in Pulse and remains readable after reload and archive", async ({ page }) => {
+  const moveTitle = "Record the Pulse handoff";
+
+  await page.goto("/");
+  await expect(page.getByText("25 people in world", { exact: true })).toHaveCount(0);
+
+  await page.getByRole("button", { name: /Open Moves/ }).click();
+  const moveDialog = page.getByRole("dialog", { name: "Turn intent into progress" });
+  await moveDialog.getByLabel("Move title").fill(moveTitle);
+  await moveDialog.getByLabel("Move intent").fill("Record a durable Workshop action for the Mission Pulse.");
+  await moveDialog.getByLabel("Room").selectOption({ label: "Workshop" });
+  await moveDialog.getByRole("button", { name: "Create Move" }).click();
+  await expect(moveDialog.getByText("Move created.")).toBeVisible();
+  await moveDialog.getByRole("button", { name: "Close Moves" }).click();
+
+  const pulse = page.getByLabel("Mission activity Pulse");
+  const openPulse = pulse.getByRole("button", { name: /Open Mission Pulse/ });
+  await openPulse.focus();
+  await expect(openPulse).toBeFocused();
+  await page.keyboard.press("Enter");
+  const activity = pulse.getByLabel("Recent durable Mission activity");
+  const moveEvent = activity.getByRole("button", { name: /Move created/ });
+  await expect(moveEvent).toBeVisible();
+  await expect(moveEvent.getByText("Move created", { exact: true })).toBeVisible();
+  await expect(moveEvent.locator("small")).toHaveText(/.+ · Workshop · (just now|\d+m ago)/);
+  await expect(activity.getByText("Durable Mission events — not live presence.")).toBeVisible();
+
+  await page.reload();
+  const reloadedPulse = page.getByLabel("Mission activity Pulse");
+  const reopenPulse = reloadedPulse.getByRole("button", { name: /Open Mission Pulse/ });
+  await reopenPulse.focus();
+  await page.keyboard.press("Enter");
+  const reloadedActivity = reloadedPulse.getByLabel("Recent durable Mission activity");
+  const reloadedMoveEvent = reloadedActivity.getByRole("button", { name: /Move created/ });
+  await expect(reloadedMoveEvent).toBeVisible();
+  await expect(reloadedMoveEvent.locator("small")).toHaveText(/.+ · Workshop · (just now|\d+m ago)/);
+
+  await page.getByRole("button", { name: "Manage Mission" }).click();
+  await page.getByRole("button", { name: "Archive Mission" }).click();
+  await expect(page.getByRole("status", { name: "Archived Mission read-only" })).toBeVisible();
+  await expect(reloadedMoveEvent).toBeVisible();
+  await expect(reloadedMoveEvent.locator("small")).toHaveText(/.+ · Workshop · (just now|\d+m ago)/);
+});
+
 test("an owner and contributor reactively coordinate a capacity-limited Call", async ({ browser, page }) => {
   const title = `Pair on the live Call ${Date.now()}`;
   const firstResponse = "I can review the current permission behavior.";

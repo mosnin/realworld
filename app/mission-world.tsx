@@ -13,6 +13,7 @@ import { MoveBoard } from "@/app/moves/move-board";
 import { CallSurface } from "@/app/calls/call-surface";
 import { FractureSurface } from "@/app/fractures/fracture-surface";
 import { ProofSurface } from "@/app/proofs/proof-surface";
+import { PulseSurface } from "@/app/pulse/pulse-surface";
 import { Icon, type IconName } from "@/app/ui/icons";
 
 type RoomId = string;
@@ -287,7 +288,7 @@ function PersonToken({ name, index }: Readonly<{ name: string; index: number }>)
   );
 }
 
-function Workshop({ onExit }: Readonly<{ onExit: () => void }>) {
+function Workshop({ mission, onExit }: Readonly<{ mission: { _id: Id<"missions"> }; onExit: () => void }>) {
   return (
     <div className="workshop-view" aria-labelledby="workshop-heading">
       <header className="room-topbar">
@@ -341,21 +342,8 @@ function Workshop({ onExit }: Readonly<{ onExit: () => void }>) {
           <button className="secondary-button" type="button">Prepare Proof</button>
         </aside>
       </div>
-      <PulseRail />
+      <PulseSurface mission={mission} />
     </div>
-  );
-}
-
-function PulseRail() {
-  return (
-    <footer className="pulse-rail" aria-label="Live Mission pulse">
-      <div><strong>Pulse</strong><span>Live now</span></div>
-      <div className="pulse-rail__route" aria-hidden="true" />
-      <div className="pulse-rail__people">
-        {people.map((person, index) => <PersonToken key={person} name={person} index={index} />)}
-      </div>
-      <span className="pulse-rail__count">25 people in world</span>
-    </footer>
   );
 }
 
@@ -611,7 +599,7 @@ export function MissionWorld() {
   const missionWritable = activeMission.lifecycle === "active";
 
   if (view === "workshop") {
-    return <Workshop onExit={() => setView("world")} />;
+    return <Workshop mission={activeMission} onExit={() => setView("world")} />;
   }
 
   return (
@@ -671,7 +659,6 @@ export function MissionWorld() {
         <h1 id="mission-title">{activeMission.title}</h1>
         <p>{missionWritable ? "Give humans and autonomous agents shared Missions, live rooms, durable Artifacts, and the tools to accomplish ambitious work together." : "This Mission is archived and read-only. Its owner can restore it from Manage Mission."}</p>
         <div className="mission-summary__facts"><span><i /> {missionWritable ? "Active" : "Archived"}</span><span>{activeMission.role}</span><span>Durable Mission</span><span>{missionWritable ? "Live projection" : "Read-only projection"}</span></div>
-        <div className="summary-pulse"><strong>Pulse</strong><svg viewBox="0 0 220 34" aria-hidden="true"><path d="M1 21 C20 30 26 6 45 17 S70 26 88 11 S113 9 130 22 S155 25 169 14 S194 12 219 9" /></svg></div>
         <ConstitutionControls mission={activeMission} />
         <MoveBoard
           key={activeMission._id}
@@ -754,7 +741,7 @@ export function MissionWorld() {
           <button className="secondary-button" type="button">Follow Priya</button>
         </aside>
       </main>
-      <PulseRail />
+      <PulseSurface mission={activeMission} />
     </div>
   );
 }

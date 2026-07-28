@@ -171,7 +171,7 @@ async function requireVisibleLinkedMove(
 
 async function recordCallEvent(
   ctx: MutationCtx,
-  call: Pick<Doc<"calls">, "missionId">,
+  call: Pick<Doc<"calls">, "missionId" | "roomId">,
   membership: Pick<Doc<"missionMembers">, "principalId" | "role">,
   type: "call.created" | "call.updated" | "call.transitioned" | "call.participantJoined" | "call.participantWithdrawn" | "call.responseUpdated",
   idempotencyKey: string,
@@ -188,6 +188,7 @@ async function recordCallEvent(
   const eventId = await ctx.db.insert("missionEvents", {
     missionId: mission._id,
     missionSequence: sequence,
+    ...(call.roomId === undefined ? {} : { roomId: call.roomId }),
     type,
     aggregateType: "mission",
     aggregateId: mission._id,
@@ -354,7 +355,7 @@ export const createCall = mutation({
       updatedAt: now,
       schemaVersion: 1,
     });
-    const event = await recordCallEvent(ctx, { missionId: args.missionId }, membership, "call.created", idempotencyKey, correlationId, "Call created", undefined, 1);
+    const event = await recordCallEvent(ctx, { missionId: args.missionId, roomId: args.roomId }, membership, "call.created", idempotencyKey, correlationId, "Call created", undefined, 1);
     const operationReceiptId = await saveReceipt(ctx, { scope, idempotencyKey, commandFingerprint, missionId: args.missionId, callId, eventId: event.eventId, currentVersion: 1, correlationId, now: event.now });
     return { callId, eventId: event.eventId, operationReceiptId, currentVersion: 1 };
   },
@@ -405,7 +406,7 @@ export const updateCall = mutation({
     await requireCallRoom(ctx, call.missionId, args.roomId);
     await requireVisibleLinkedMove(ctx, call.missionId, membership, args.roomId, linkedMoveId);
     const nextVersion = call.currentVersion + 1;
-    const event = await recordCallEvent(ctx, call, membership, "call.updated", idempotencyKey, correlationId, "Call details updated", call.currentVersion, nextVersion);
+    const event = await recordCallEvent(ctx, { ...call, roomId: args.roomId }, membership, "call.updated", idempotencyKey, correlationId, "Call details updated", call.currentVersion, nextVersion);
     await ctx.db.patch(call._id, { roomId: args.roomId, linkedMoveId, title, detail, maxParticipants, currentVersion: nextVersion, updatedAt: event.now });
     const operationReceiptId = await saveReceipt(ctx, { scope, idempotencyKey, commandFingerprint, missionId: call.missionId, callId: call._id, eventId: event.eventId, currentVersion: nextVersion, correlationId, now: event.now });
     return { callId: call._id, eventId: event.eventId, operationReceiptId, currentVersion: nextVersion };

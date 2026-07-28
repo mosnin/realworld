@@ -109,7 +109,7 @@ async function requireLinkedMove(ctx: MutationCtx, missionId: Id<"missions">, ro
 
 async function recordProofEvent(
   ctx: MutationCtx,
-  proof: Pick<Doc<"proofs">, "missionId">,
+  proof: Pick<Doc<"proofs">, "missionId" | "roomId">,
   membership: Pick<Doc<"missionMembers">, "principalId" | "role">,
   type: "proof.submitted" | "proof.updated" | "proof.verified" | "proof.rejected" | "proof.resubmitted",
   idempotencyKey: string,
@@ -126,6 +126,7 @@ async function recordProofEvent(
   const eventId = await ctx.db.insert("missionEvents", {
     missionId: mission._id,
     missionSequence: sequence,
+    roomId: proof.roomId,
     type,
     aggregateType: "mission",
     aggregateId: mission._id,
@@ -286,7 +287,7 @@ export const createProof = mutation({
       updatedAt: now,
       schemaVersion: 1,
     });
-    const event = await recordProofEvent(ctx, { missionId: args.missionId }, membership, "proof.submitted", idempotencyKey, correlationId, "Proof submitted", undefined, 1);
+    const event = await recordProofEvent(ctx, { missionId: args.missionId, roomId: args.roomId }, membership, "proof.submitted", idempotencyKey, correlationId, "Proof submitted", undefined, 1);
     const operationReceiptId = await saveReceipt(ctx, { scope, idempotencyKey, commandFingerprint, missionId: args.missionId, proofId, eventId: event.eventId, currentVersion: 1, correlationId, now: event.now });
     return { proofId, eventId: event.eventId, operationReceiptId, currentVersion: 1 };
   },
@@ -330,7 +331,7 @@ export const updateProof = mutation({
     await requireProofRoom(ctx, proof.missionId, args.roomId);
     await requireLinkedMove(ctx, proof.missionId, args.roomId, linkedMoveId);
     const nextVersion = proof.currentVersion + 1;
-    const event = await recordProofEvent(ctx, proof, membership, "proof.updated", idempotencyKey, correlationId, "Proof details updated", proof.currentVersion, nextVersion);
+    const event = await recordProofEvent(ctx, { ...proof, roomId: args.roomId }, membership, "proof.updated", idempotencyKey, correlationId, "Proof details updated", proof.currentVersion, nextVersion);
     await ctx.db.patch(proof._id, { roomId: args.roomId, linkedMoveId, title, claim, evidenceNote, currentVersion: nextVersion, updatedAt: event.now });
     const operationReceiptId = await saveReceipt(ctx, { scope, idempotencyKey, commandFingerprint, missionId: proof.missionId, proofId: proof._id, eventId: event.eventId, currentVersion: nextVersion, correlationId, now: event.now });
     return { proofId: proof._id, eventId: event.eventId, operationReceiptId, currentVersion: nextVersion };

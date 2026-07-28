@@ -20,6 +20,7 @@ import type * as lib_mission_templates from "../lib/mission_templates.js";
 import type * as missions from "../missions.js";
 import type * as moves from "../moves.js";
 import type * as proofs from "../proofs.js";
+import type * as pulse from "../pulse.js";
 
 import type {
   ApiFromModules,
@@ -40,6 +41,7 @@ declare const fullApi: ApiFromModules<{
   missions: typeof missions;
   moves: typeof moves;
   proofs: typeof proofs;
+  pulse: typeof pulse;
 }>;
 
 /**

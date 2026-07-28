@@ -47,13 +47,13 @@ async function receipt(ctx: MutationCtx, scope: string, idempotencyKey: string) 
   return await ctx.db.query("operationReceipts").withIndex("by_scope_and_idempotency_key", (index) => index.eq("scope", scope).eq("idempotencyKey", idempotencyKey)).unique();
 }
 
-async function recordRoomEvent(ctx: MutationCtx, room: Pick<Doc<"rooms">, "missionId">, member: Pick<Doc<"missionMembers">, "principalId" | "role">, type: "room.created" | "room.renamed" | "room.archived" | "room.layoutUpdated", idempotencyKey: string, summary: string, afterVersion: number) {
+async function recordRoomEvent(ctx: MutationCtx, room: Pick<Doc<"rooms">, "_id" | "missionId">, member: Pick<Doc<"missionMembers">, "principalId" | "role">, type: "room.created" | "room.renamed" | "room.archived" | "room.layoutUpdated", idempotencyKey: string, summary: string, afterVersion: number) {
   const mission = await ctx.db.get(room.missionId);
   if (!mission) throw new Error("Not found");
   const sequence = mission.eventSequence + 1;
   const now = Date.now();
   await ctx.db.patch(mission._id, { eventSequence: sequence, updatedAt: now });
-  const eventId = await ctx.db.insert("missionEvents", { missionId: mission._id, missionSequence: sequence, type, aggregateType: "mission", aggregateId: mission._id, actorPrincipalId: member.principalId, effectiveRole: member.role, correlationId: `room:${idempotencyKey}`, idempotencyKey, publicSummary: summary, afterVersion, createdAt: now, schemaVersion: 1 });
+  const eventId = await ctx.db.insert("missionEvents", { missionId: mission._id, missionSequence: sequence, roomId: room._id, type, aggregateType: "mission", aggregateId: mission._id, actorPrincipalId: member.principalId, effectiveRole: member.role, correlationId: `room:${idempotencyKey}`, idempotencyKey, publicSummary: summary, afterVersion, createdAt: now, schemaVersion: 1 });
   return { eventId, now };
 }
 
@@ -87,7 +87,7 @@ export const createRoom = mutation({
     await requireWritableMission(ctx, args.missionId);
     const now = Date.now();
     const roomId = await ctx.db.insert("rooms", { missionId: args.missionId, title: title(args.title), kind: args.kind, accessPolicy: "mission", mapType: "field", layout: validLayout(args.layout), layoutVersion: 1, state: "active", currentVersion: 1, createdAt: now, updatedAt: now, schemaVersion: 1 });
-    const event = await recordRoomEvent(ctx, { missionId: args.missionId }, member, "room.created", args.idempotencyKey, "Room created", 1);
+    const event = await recordRoomEvent(ctx, { _id: roomId, missionId: args.missionId }, member, "room.created", args.idempotencyKey, "Room created", 1);
     await ctx.db.insert("operationReceipts", { scope, idempotencyKey: args.idempotencyKey, commandFingerprint, state: "complete", missionId: args.missionId, eventId: event.eventId, roomId, resultVersion: 1, correlationId: `room:${args.idempotencyKey}`, createdAt: now, expiresAt: now + receiptMs, schemaVersion: 1 });
     return { roomId, currentVersion: 1, layoutVersion: 1 };
   },

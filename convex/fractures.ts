@@ -117,7 +117,7 @@ async function requireLinkedMove(ctx: MutationCtx, missionId: Id<"missions">, ro
 
 async function recordFractureEvent(
   ctx: MutationCtx,
-  fracture: Pick<Doc<"fractures">, "missionId">,
+  fracture: Pick<Doc<"fractures">, "missionId" | "roomId">,
   membership: Pick<Doc<"missionMembers">, "principalId" | "role">,
   type: "fracture.created" | "fracture.updated" | "fracture.transitioned",
   idempotencyKey: string,
@@ -134,6 +134,7 @@ async function recordFractureEvent(
   const eventId = await ctx.db.insert("missionEvents", {
     missionId: mission._id,
     missionSequence: sequence,
+    roomId: fracture.roomId,
     type,
     aggregateType: "mission",
     aggregateId: mission._id,
@@ -291,7 +292,7 @@ export const createFracture = mutation({
       updatedAt: now,
       schemaVersion: 1,
     });
-    const event = await recordFractureEvent(ctx, { missionId: args.missionId }, membership, "fracture.created", idempotencyKey, correlationId, "Fracture reported", undefined, 1);
+    const event = await recordFractureEvent(ctx, { missionId: args.missionId, roomId: args.roomId }, membership, "fracture.created", idempotencyKey, correlationId, "Fracture reported", undefined, 1);
     const operationReceiptId = await saveReceipt(ctx, { scope, idempotencyKey, commandFingerprint, missionId: args.missionId, fractureId, eventId: event.eventId, currentVersion: 1, correlationId, now: event.now });
     return { fractureId, eventId: event.eventId, operationReceiptId, currentVersion: 1 };
   },
@@ -333,7 +334,7 @@ export const updateFracture = mutation({
     await requireFractureRoom(ctx, fracture.missionId, args.roomId);
     await requireLinkedMove(ctx, fracture.missionId, args.roomId, linkedMoveId);
     const nextVersion = fracture.currentVersion + 1;
-    const event = await recordFractureEvent(ctx, fracture, membership, "fracture.updated", idempotencyKey, correlationId, "Fracture details updated", fracture.currentVersion, nextVersion);
+    const event = await recordFractureEvent(ctx, { ...fracture, roomId: args.roomId }, membership, "fracture.updated", idempotencyKey, correlationId, "Fracture details updated", fracture.currentVersion, nextVersion);
     await ctx.db.patch(fracture._id, { roomId: args.roomId, linkedMoveId, title, detail, severity: args.severity, currentVersion: nextVersion, updatedAt: event.now });
     const operationReceiptId = await saveReceipt(ctx, { scope, idempotencyKey, commandFingerprint, missionId: fracture.missionId, fractureId: fracture._id, eventId: event.eventId, currentVersion: nextVersion, correlationId, now: event.now });
     return { fractureId: fracture._id, eventId: event.eventId, operationReceiptId, currentVersion: nextVersion };
