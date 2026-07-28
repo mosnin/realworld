@@ -223,6 +223,48 @@ function snapshotUnauthorizedClassifier(
   }
 }
 
+function rejectedTokenProvider(): Promise<RealtimeToken> {
+  return Promise.reject(new Error("Realtime token acquisition failed"));
+}
+
+function snapshotTokenProvider(options: RoomSessionOptions): RealtimeTokenProvider {
+  try {
+    const provider = options.tokenProvider;
+    if (typeof provider !== "function") return () => rejectedTokenProvider();
+    return (scope) => {
+      try {
+        return Promise.resolve(Reflect.apply(provider, options, [scope]) as Promise<RealtimeToken>);
+      } catch {
+        return rejectedTokenProvider();
+      }
+    };
+  } catch {
+    return () => rejectedTokenProvider();
+  }
+}
+
+function rejectedTransportConnection(): Promise<RealtimeTransportSubscription> {
+  return Promise.reject(new Error("Realtime transport connection failed"));
+}
+
+function snapshotTransportConnect(options: RoomSessionOptions): RealtimeTransportAdapter["connect"] {
+  try {
+    const transport = options.transport;
+    if ((typeof transport !== "object" && typeof transport !== "function") || transport === null) return () => rejectedTransportConnection();
+    const connect = transport.connect;
+    if (typeof connect !== "function") return () => rejectedTransportConnection();
+    return (input) => {
+      try {
+        return Promise.resolve(Reflect.apply(connect, transport, [input]) as Promise<RealtimeTransportSubscription>);
+      } catch {
+        return rejectedTransportConnection();
+      }
+    };
+  } catch {
+    return () => rejectedTransportConnection();
+  }
+}
+
 type TransportSubscriptionSnapshot = Readonly<{
   subscription?: RealtimeTransportSubscription;
   disposable?: RealtimeTransportSubscription;
@@ -385,6 +427,8 @@ function parseEnvelopeUnchecked(
  */
 export class RealtimeRoomSession {
   private readonly clock: RealtimeClock;
+  private readonly tokenProvider: RealtimeTokenProvider;
+  private readonly transportConnect: RealtimeTransportAdapter["connect"];
   private readonly tokenAcquisitionTimeoutMs: number;
   private readonly transportConnectionTimeoutMs: number;
   private readonly transportDisposalTimeoutMs: number;
@@ -424,7 +468,9 @@ export class RealtimeRoomSession {
   private readonly senderSequence = new Map<string, number>();
   private isNotifyingTransientClear = false;
 
-  constructor(private readonly options: RoomSessionOptions) {
+  constructor(options: RoomSessionOptions) {
+    this.tokenProvider = snapshotTokenProvider(options);
+    this.transportConnect = snapshotTransportConnect(options);
     this.onStateChange = snapshotObserver(options, () => options.onStateChange);
     this.onMessage = snapshotObserver(options, () => options.onMessage);
     this.onTransientMessageExpired = snapshotObserver(options, () => options.onTransientMessageExpired);
@@ -656,7 +702,7 @@ export class RealtimeRoomSession {
       );
       let tokenPromise: Promise<RealtimeToken>;
       try {
-        tokenPromise = Promise.resolve(this.options.tokenProvider(scope));
+        tokenPromise = Promise.resolve(this.tokenProvider(scope));
       } catch {
         finish(new Error("Realtime token acquisition failed"));
         return;
@@ -696,7 +742,7 @@ export class RealtimeRoomSession {
       );
       let connectionPromise: Promise<RealtimeTransportSubscription>;
       try {
-        connectionPromise = Promise.resolve(this.options.transport.connect(input));
+        connectionPromise = Promise.resolve(this.transportConnect(input));
       } catch {
         finish(new Error("Realtime transport connection failed"));
         return;

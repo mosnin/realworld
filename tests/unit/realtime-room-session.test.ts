@@ -2024,6 +2024,390 @@ describe("RealtimeRoomSession", () => {
     }
   });
 
+  it("captures mandatory token and transport dependencies once with their original receivers despite later replacement", async () => {
+    const clock = new FakeClock();
+    const tokenReceivers: unknown[] = [];
+    const connectReceivers: unknown[] = [];
+    const originalTokenProvider = vi.fn(function (this: unknown) {
+      tokenReceivers.push(this);
+      return Promise.resolve(token(clock.now() + 300_000));
+    });
+    const originalConnect = vi.fn(function (this: unknown) {
+      connectReceivers.push(this);
+      return Promise.resolve({ unsubscribe: () => undefined });
+    });
+    const capturedTransport = {};
+    let tokenProvider: unknown = originalTokenProvider;
+    let transport: unknown = capturedTransport;
+    let tokenProviderReads = 0;
+    let transportReads = 0;
+    let connectReads = 0;
+    const options = { clock } as unknown as RoomSessionOptions;
+    Object.defineProperty(options, "tokenProvider", {
+      get: () => {
+        tokenProviderReads += 1;
+        return tokenProvider;
+      },
+    });
+    Object.defineProperty(options, "transport", {
+      get: () => {
+        transportReads += 1;
+        return transport;
+      },
+    });
+    Object.defineProperty(capturedTransport, "connect", {
+      get: () => {
+        connectReads += 1;
+        return originalConnect;
+      },
+    });
+
+    const session = new RealtimeRoomSession(options);
+    const replacementTokenProvider = vi.fn(async () => { throw new Error("replacement token provider must stay unused"); });
+    const replacementConnect = vi.fn(async () => { throw new Error("replacement transport must stay unused"); });
+    tokenProvider = replacementTokenProvider;
+    transport = { connect: replacementConnect };
+    await session.start({ missionId: "mission-a", roomId: "room-a" });
+    await session.refresh();
+
+    expect(session.state).toBe("live");
+    expect(tokenProviderReads).toBe(1);
+    expect(transportReads).toBe(1);
+    expect(connectReads).toBe(1);
+    expect(originalTokenProvider).toHaveBeenCalledTimes(2);
+    expect(originalConnect).toHaveBeenCalledTimes(2);
+    expect(tokenReceivers).toEqual([options, options]);
+    expect(connectReceivers).toEqual([capturedTransport, capturedTransport]);
+    expect(replacementTokenProvider).not.toHaveBeenCalled();
+    expect(replacementConnect).not.toHaveBeenCalled();
+  });
+
+  it("contains missing, nonfunction, and hostile mandatory dependency getters without activation or leaked provider detail", async () => {
+    const providerSecret = "mandatory-dependency-secret";
+    const modes = [
+      "token-missing",
+      "token-nonfunction",
+      "token-throwing-getter",
+      "transport-missing",
+      "transport-nonfunction",
+      "transport-throwing-getter",
+      "connect-missing",
+      "connect-nonfunction",
+      "connect-throwing-getter",
+    ] as const;
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      for (const mode of modes) {
+        const clock = new FakeClock();
+        const failures: unknown[] = [];
+        const connect = vi.fn(async () => ({ unsubscribe: () => undefined }));
+        const validTransport = { connect };
+        const options = {
+          clock,
+          maxReconnectAttempts: 0,
+          onTransportFailure: (error: unknown) => failures.push(error),
+        } as unknown as RoomSessionOptions;
+
+        if (!mode.startsWith("token-missing")) {
+          Object.defineProperty(options, "tokenProvider", {
+            get: () => {
+              if (mode === "token-nonfunction") return providerSecret;
+              if (mode === "token-throwing-getter") throw new Error(providerSecret);
+              return async () => token(clock.now() + 300_000);
+            },
+          });
+        }
+        if (!mode.startsWith("transport-missing")) {
+          Object.defineProperty(options, "transport", {
+            get: () => {
+              if (mode === "transport-nonfunction") return providerSecret;
+              if (mode === "transport-throwing-getter") throw new Error(providerSecret);
+              if (mode.startsWith("connect-")) {
+                const hostileTransport = {};
+                if (mode !== "connect-missing") {
+                  Object.defineProperty(hostileTransport, "connect", {
+                    get: () => {
+                      if (mode === "connect-nonfunction") return providerSecret;
+                      throw new Error(providerSecret);
+                    },
+                  });
+                }
+                return hostileTransport;
+              }
+              return validTransport;
+            },
+          });
+        }
+
+        let session: RealtimeRoomSession | undefined;
+        expect(() => { session = new RealtimeRoomSession(options); }).not.toThrow();
+        await session!.start({ missionId: "mission-a", roomId: "room-a" });
+
+        expect(session!.state).toBe("degraded");
+        expect(connect).not.toHaveBeenCalled();
+        expect(failures).toEqual([expect.objectContaining({ message: expect.stringMatching(/^Realtime /) })]);
+        expect(String(failures[0])).not.toContain(providerSecret);
+        clock.advance(30_000);
+        await flush();
+        expect(session!.state).toBe("degraded");
+        expect(connect).not.toHaveBeenCalled();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
+  it("lets a captured token provider stop the session without opening a transport connection or leaving a stale retry", async () => {
+    const clock = new FakeClock();
+    const connect = vi.fn(async () => ({ unsubscribe: () => undefined }));
+    const options = {
+      clock,
+      tokenProvider: () => {
+        void session.stop();
+        return Promise.resolve(token(clock.now() + 300_000));
+      },
+      transport: { connect },
+    } as RoomSessionOptions;
+    const session = new RealtimeRoomSession(options);
+
+    await session.start({ missionId: "mission-a", roomId: "room-a" });
+
+    expect(session.state).toBe("stopped");
+    expect(session.scope).toBeUndefined();
+    expect(connect).not.toHaveBeenCalled();
+    clock.advance(30_000);
+    await flush();
+    expect(session.state).toBe("stopped");
+    expect(connect).not.toHaveBeenCalled();
+  });
+
+  it("lets a captured connect function hand off exactly once, disposing its old candidate before only the new room goes live", async () => {
+    const clock = new FakeClock();
+    const oldScope = { missionId: "mission-a", roomId: "room-a" };
+    const newScope = { missionId: "mission-a", roomId: "room-b" };
+    const oldSubscription = { unsubscribe: vi.fn(() => undefined) };
+    const newSubscription = { unsubscribe: vi.fn(() => undefined) };
+    const connectReceivers: unknown[] = [];
+    const capturedTransport = {};
+    let connectReads = 0;
+    const originalConnect = vi.fn(function (this: unknown, input: Parameters<RealtimeTransportAdapter["connect"]>[0]) {
+      connectReceivers.push(this);
+      if (input.scope.roomId === oldScope.roomId) {
+        void session.start(newScope);
+        return Promise.resolve(oldSubscription);
+      }
+      return Promise.resolve(newSubscription);
+    });
+    Object.defineProperty(capturedTransport, "connect", {
+      get: () => {
+        connectReads += 1;
+        return originalConnect;
+      },
+    });
+    const options = {
+      clock,
+      tokenProvider: async () => token(clock.now() + 300_000),
+      transport: capturedTransport,
+    } as unknown as RoomSessionOptions;
+    const session = new RealtimeRoomSession(options);
+
+    await session.start(oldScope);
+    await vi.waitFor(() => expect(session.state).toBe("live"));
+
+    expect(session.scope).toEqual(newScope);
+    expect(originalConnect).toHaveBeenCalledTimes(2);
+    expect(connectReads).toBe(1);
+    expect(connectReceivers).toEqual([capturedTransport, capturedTransport]);
+    expect(oldSubscription.unsubscribe).toHaveBeenCalledTimes(1);
+    expect(newSubscription.unsubscribe).not.toHaveBeenCalled();
+    clock.advance(30_000);
+    await flush();
+    expect(session.state).toBe("live");
+    expect(session.scope).toEqual(newScope);
+    expect(originalConnect).toHaveBeenCalledTimes(2);
+    expect(oldSubscription.unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("contains hostile and late-rejecting captured token providers after stop or exact handoff", async () => {
+    const providerSecret = "captured-token-provider-secret";
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      const hostileClock = new FakeClock();
+      const hostileConnect = vi.fn(async () => ({ unsubscribe: () => undefined }));
+      const hostileOptions = {
+        clock: hostileClock,
+        maxReconnectAttempts: 0,
+        tokenProvider: () => Object.defineProperty({}, "then", {
+          get: () => { throw new Error(providerSecret); },
+        }),
+        transport: { connect: hostileConnect },
+      } as unknown as RoomSessionOptions;
+      const hostileSession = new RealtimeRoomSession(hostileOptions);
+      await hostileSession.start({ missionId: "mission-a", roomId: "room-a" });
+      expect(hostileSession.state).toBe("degraded");
+      expect(hostileConnect).not.toHaveBeenCalled();
+
+      for (const action of ["stop", "handoff"] as const) {
+        const clock = new FakeClock();
+        const oldToken = deferred<RealtimeToken>();
+        const oldScope = { missionId: "mission-a", roomId: "room-a" };
+        const newScope = { missionId: "mission-a", roomId: "room-b" };
+        const connect = vi.fn(async () => ({ unsubscribe: () => undefined }));
+        const session = new RealtimeRoomSession({
+          clock,
+          tokenProvider: (scope) => scope.roomId === oldScope.roomId
+            ? oldToken.promise
+            : Promise.resolve(token(clock.now() + 300_000)),
+          transport: { connect },
+        });
+        void session.start(oldScope);
+        await flush();
+        expect(connect).not.toHaveBeenCalled();
+
+        if (action === "stop") await session.stop();
+        else await session.start(newScope);
+        await vi.waitFor(() => expect(session.state).toBe(action === "stop" ? "stopped" : "live"));
+        oldToken.reject(new Error(providerSecret));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(session.state).toBe(action === "stop" ? "stopped" : "live");
+        expect(connect).toHaveBeenCalledTimes(action === "stop" ? 0 : 1);
+        if (action === "handoff") expect(session.scope).toEqual(newScope);
+        clock.advance(30_000);
+        await flush();
+        expect(connect).toHaveBeenCalledTimes(action === "stop" ? 0 : 1);
+      }
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
+  it("contains hostile and late-rejecting captured connect results after stop or exact handoff", async () => {
+    const providerSecret = "captured-connect-provider-secret";
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      const hostileClock = new FakeClock();
+      const hostileOptions = {
+        clock: hostileClock,
+        maxReconnectAttempts: 0,
+        tokenProvider: async () => token(hostileClock.now() + 300_000),
+        transport: {
+          connect: () => Object.defineProperty({}, "then", {
+            get: () => { throw new Error(providerSecret); },
+          }),
+        },
+      } as unknown as RoomSessionOptions;
+      const hostileSession = new RealtimeRoomSession(hostileOptions);
+      await hostileSession.start({ missionId: "mission-a", roomId: "room-a" });
+      expect(hostileSession.state).toBe("degraded");
+
+      for (const action of ["stop", "handoff"] as const) {
+        const clock = new FakeClock();
+        const oldConnection = deferred<RealtimeTransportSubscription>();
+        const oldScope = { missionId: "mission-a", roomId: "room-a" };
+        const newScope = { missionId: "mission-a", roomId: "room-b" };
+        const newSubscription = { unsubscribe: vi.fn(() => undefined) };
+        const connect = vi.fn((input: Parameters<RealtimeTransportAdapter["connect"]>[0]) => input.scope.roomId === oldScope.roomId
+          ? oldConnection.promise
+          : Promise.resolve(newSubscription));
+        const session = new RealtimeRoomSession({
+          clock,
+          tokenProvider: async () => token(clock.now() + 300_000),
+          transport: { connect },
+        });
+        void session.start(oldScope);
+        await vi.waitFor(() => expect(connect).toHaveBeenCalledTimes(1));
+
+        if (action === "stop") await session.stop();
+        else await session.start(newScope);
+        await vi.waitFor(() => expect(session.state).toBe(action === "stop" ? "stopped" : "live"));
+        oldConnection.reject(new Error(providerSecret));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(session.state).toBe(action === "stop" ? "stopped" : "live");
+        expect(connect).toHaveBeenCalledTimes(action === "stop" ? 1 : 2);
+        if (action === "handoff") expect(session.scope).toEqual(newScope);
+        clock.advance(30_000);
+        await flush();
+        expect(connect).toHaveBeenCalledTimes(action === "stop" ? 1 : 2);
+      }
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
+  it("reuses captured dependencies for a scheduled recovery after mutation rather than reading replacements", async () => {
+    const clock = new FakeClock();
+    const tokenReceivers: unknown[] = [];
+    const connectReceivers: unknown[] = [];
+    const inputs: Array<Parameters<RealtimeTransportAdapter["connect"]>[0]> = [];
+    const originalTokenProvider = vi.fn(function (this: unknown) {
+      tokenReceivers.push(this);
+      return Promise.resolve(token(clock.now() + 300_000));
+    });
+    const originalConnect = vi.fn(function (this: unknown, input: Parameters<RealtimeTransportAdapter["connect"]>[0]) {
+      connectReceivers.push(this);
+      inputs.push(input);
+      return Promise.resolve({ unsubscribe: vi.fn(() => undefined) });
+    });
+    const capturedTransport = {};
+    let tokenProvider: unknown = originalTokenProvider;
+    let transport: unknown = capturedTransport;
+    let tokenProviderReads = 0;
+    let transportReads = 0;
+    let connectReads = 0;
+    const options = { clock, reconnectDelayMs: () => 11 } as unknown as RoomSessionOptions;
+    Object.defineProperty(options, "tokenProvider", {
+      get: () => {
+        tokenProviderReads += 1;
+        return tokenProvider;
+      },
+    });
+    Object.defineProperty(options, "transport", {
+      get: () => {
+        transportReads += 1;
+        return transport;
+      },
+    });
+    Object.defineProperty(capturedTransport, "connect", {
+      get: () => {
+        connectReads += 1;
+        return originalConnect;
+      },
+    });
+    const session = new RealtimeRoomSession(options);
+    const replacementTokenProvider = vi.fn(async () => { throw new Error("replacement token provider must stay unused"); });
+    const replacementConnect = vi.fn(async () => { throw new Error("replacement transport must stay unused"); });
+    tokenProvider = replacementTokenProvider;
+    transport = { connect: replacementConnect };
+
+    await session.start({ missionId: "mission-a", roomId: "room-a" });
+    inputs[0]!.onFailure(new Error("ordinary failure"));
+    expect(session.state).toBe("degraded");
+    clock.advance(11);
+    await vi.waitFor(() => expect(session.state).toBe("live"));
+
+    expect(tokenProviderReads).toBe(1);
+    expect(transportReads).toBe(1);
+    expect(connectReads).toBe(1);
+    expect(originalTokenProvider).toHaveBeenCalledTimes(2);
+    expect(originalConnect).toHaveBeenCalledTimes(2);
+    expect(tokenReceivers).toEqual([options, options]);
+    expect(connectReceivers).toEqual([capturedTransport, capturedTransport]);
+    expect(replacementTokenProvider).not.toHaveBeenCalled();
+    expect(replacementConnect).not.toHaveBeenCalled();
+  });
+
   it("expires accepted transient messages on their visibility deadline", async () => {
     const clock = new FakeClock();
     const { transport, connections } = createTransport();
