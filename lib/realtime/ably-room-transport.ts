@@ -65,7 +65,7 @@ export type AblyClientFactory = (tokenRequest: TokenRequest) => Promise<AblyReal
 
 export type DevelopmentAblyRoomTransportOptions = Readonly<{
   environment: AblyAdapterEnvironment;
-  clientFactory?: AblyClientFactory;
+  clientFactory: AblyClientFactory;
   connectionReadyTimeoutMs?: number;
   timer?: AblyConnectionTimer;
   now?: () => number;
@@ -195,30 +195,28 @@ function normalizedConnectionReadyTimeout(value: number | undefined) {
     : Math.max(1, Math.min(maximumConnectionReadyTimeoutMs, value));
 }
 
-async function defaultClientFactory(tokenRequest: TokenRequest): Promise<AblyRealtimeClient> {
-  const { default: Ably } = await import("ably");
-  const client = new Ably.Realtime({
-    autoConnect: false,
-    authCallback: (_params, callback) => callback(null, tokenRequest),
-  });
-  // The SDK exposes overloaded channel methods; the adapter intentionally uses
-  // only the v2 promise forms represented by its narrow injected-client seam.
-  return client as unknown as AblyRealtimeClient;
-}
-
 /**
- * Uses only non-production, exact token capabilities. Supplying a factory is
- * the intended test seam; no provider object is constructed until connect().
+ * Uses only non-production, exact token capabilities. A client factory is
+ * required and injected; no provider object is constructed until connect().
  */
 export class DevelopmentAblyRoomTransport implements RealtimeTransportAdapter {
+  private readonly options: DevelopmentAblyRoomTransportOptions;
   private readonly clientFactory: AblyClientFactory;
   private readonly timer: AblyConnectionTimer;
   private readonly connectionReadyTimeoutMs: number;
   private readonly publishGovernor: Pick<RealtimePublishGovernor, "acquire">;
   private readonly telemetry: PrivacySafeRealtimeTelemetry;
 
-  constructor(private readonly options: DevelopmentAblyRoomTransportOptions) {
-    this.clientFactory = options.clientFactory ?? defaultClientFactory;
+  constructor(options: DevelopmentAblyRoomTransportOptions) {
+    let clientFactory: unknown;
+    try {
+      clientFactory = options?.clientFactory;
+    } catch {
+      throw new Error("Realtime client factory is required");
+    }
+    if (typeof clientFactory !== "function") throw new Error("Realtime client factory is required");
+    this.options = options;
+    this.clientFactory = clientFactory as AblyClientFactory;
     this.timer = options.timer ?? defaultTimer;
     this.connectionReadyTimeoutMs = normalizedConnectionReadyTimeout(options.connectionReadyTimeoutMs);
     this.publishGovernor = options.publishGovernor ?? createRealtimePublishGovernor({

@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { createDevelopmentAblyRoomTransport, type AblyRealtimeClient, type AblyRoomChannel } from "../../lib/realtime/ably-room-transport";
@@ -99,6 +101,23 @@ function fakeClient(autoConnect = true) {
 }
 
 describe("development Ably room transport", () => {
+  it("requires an explicitly injected client factory and never falls back to an SDK or network path", async () => {
+    const hostileFactoryOptions = Object.defineProperty({ environment: "preview" }, "clientFactory", {
+      get: () => { throw new Error("hostile factory getter"); },
+    });
+    const malformedFactoryOptions = { environment: "preview", clientFactory: "not-a-factory" };
+
+    expect(() => createDevelopmentAblyRoomTransport({ environment: "preview" } as never)).toThrow(/client factory/i);
+    expect(() => createDevelopmentAblyRoomTransport(malformedFactoryOptions as never)).toThrow(/client factory/i);
+    expect(() => createDevelopmentAblyRoomTransport(hostileFactoryOptions as never)).toThrow(/client factory/i);
+
+    const source = await readFile(new URL("../../lib/realtime/ably-room-transport.ts", import.meta.url), "utf8");
+    expect(source).toMatch(/^import type \{ TokenRequest \} from "ably";$/m);
+    expect(source).not.toMatch(/^import\s+(?!type\s).*from\s+["']ably["'];?$/m);
+    expect(source).not.toMatch(/import\s*\(\s*["']ably["']\s*\)/);
+    expect(source).not.toMatch(/\bnew\s+Ably\./);
+  });
+
   it("does not construct a client until connect and denies production, malformed tokens, and overbroad capabilities first", async () => {
     const fake = fakeClient();
     const factory = vi.fn(async () => fake.client);
@@ -117,6 +136,12 @@ describe("development Ably room transport", () => {
     delete rawMissingClientId.clientId;
     await expect(adapter.connect({ scope, token: { ...missingClientId, tokenRequest: rawMissingClientId }, connectionEpoch: 1, onMessage: vi.fn(), onFailure: vi.fn() })).rejects.toThrow("token-bound client id");
     expect(factory).not.toHaveBeenCalled();
+
+    const signedToken = tokenRequest({ [names().world]: ["subscribe"] });
+    const subscription = await adapter.connect({ scope, token: signedToken, connectionEpoch: 1, onMessage: vi.fn(), onFailure: vi.fn() });
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(factory).toHaveBeenCalledWith(signedToken.tokenRequest);
+    await subscription.unsubscribe();
   });
 
   it("rejects a failed connection before readiness and cleans up its fake client", async () => {
