@@ -421,15 +421,63 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-function snapshotRealtimeToken(value: unknown): RealtimeToken | undefined {
+function snapshotTokenRequest(value: unknown): unknown | undefined {
   try {
     if (!isRecord(value)) return undefined;
-    const tokenRequest = value.tokenRequest;
-    const expiresAt = value.expiresAt;
-    const authorizationVersion = value.authorizationVersion;
-    if (!isFiniteNumber(expiresAt) || !isFiniteNumber(authorizationVersion)) return undefined;
-    return { tokenRequest, expiresAt, authorizationVersion };
+    const then = (value as { then?: unknown }).then;
+    if (then !== undefined) {
+      observeCapturedThenable(value, then);
+      return undefined;
+    }
+    const materialized: Record<string, unknown> = {};
+    for (const key of Object.getOwnPropertyNames(value)) {
+      const property = captureProperty(value, key);
+      if (!property.read) return undefined;
+      Object.defineProperty(materialized, key, { value: property.value, enumerable: true, configurable: false, writable: false });
+    }
+    const serialized = JSON.stringify(materialized);
+    if (typeof serialized !== "string") return undefined;
+    const snapshot = JSON.parse(serialized);
+    return isRecord(snapshot) ? freezeJsonPayload(snapshot) : undefined;
   } catch {
+    return undefined;
+  }
+}
+
+function observeCapturedThenable(value: object, then: unknown) {
+  if (typeof then !== "function") return;
+  try {
+    void new Promise<void>((resolve, reject) => {
+      Reflect.apply(then, value, [resolve, reject]);
+    }).catch(() => undefined);
+  } catch {
+    // A hostile then getter or callback cannot affect token acquisition.
+  }
+}
+
+function snapshotRealtimeToken(value: unknown): RealtimeToken | undefined {
+  try {
+    if (!isRecord(value)) {
+      observeAsyncResult(value);
+      return undefined;
+    }
+    const tokenRequest = captureProperty(value, "tokenRequest");
+    const expiresAt = captureProperty(value, "expiresAt");
+    const authorizationVersion = captureProperty(value, "authorizationVersion");
+    observeAsyncResult(value);
+    observeAsyncResult(expiresAt.value);
+    observeAsyncResult(authorizationVersion.value);
+    if (!tokenRequest.read || !expiresAt.read || !authorizationVersion.read
+      || !isFiniteNumber(expiresAt.value) || !isFiniteNumber(authorizationVersion.value)) return undefined;
+    const tokenRequestSnapshot = snapshotTokenRequest(tokenRequest.value);
+    if (tokenRequestSnapshot === undefined) return undefined;
+    return Object.freeze({
+      tokenRequest: tokenRequestSnapshot,
+      expiresAt: expiresAt.value,
+      authorizationVersion: authorizationVersion.value,
+    });
+  } catch {
+    observeAsyncResult(value);
     return undefined;
   }
 }

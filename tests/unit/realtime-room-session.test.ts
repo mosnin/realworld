@@ -3682,6 +3682,82 @@ describe("RealtimeRoomSession", () => {
     }
   });
 
+  it("snapshots acquired tokens and nested token requests once into detached immutable transport credentials", async () => {
+    const clock = new FakeClock();
+    const { transport, connections } = createTransport();
+    const reads = { tokenRequest: 0, expiresAt: 0, authorizationVersion: 0, capability: 0 };
+    let capability: unknown = "room:read";
+    let expiresAt: unknown = clock.now() + 90_000;
+    let authorizationVersion: unknown = 1;
+    const request = {} as Record<string, unknown>;
+    Object.defineProperty(request, "capability", { enumerable: true, get: () => { reads.capability += 1; return capability; } });
+    const rawToken = {} as Record<string, unknown>;
+    Object.defineProperties(rawToken, {
+      tokenRequest: { get: () => { reads.tokenRequest += 1; return request; } },
+      expiresAt: { get: () => { reads.expiresAt += 1; return expiresAt; } },
+      authorizationVersion: { get: () => { reads.authorizationVersion += 1; return authorizationVersion; } },
+    });
+    const tokenProvider = vi.fn().mockResolvedValue(rawToken as RealtimeToken);
+    const session = new RealtimeRoomSession({ tokenProvider, transport, clock });
+    await session.start({ missionId: "mission-a", roomId: "room-a" });
+    const captured = connections[0]!.input.token;
+    expect(reads).toEqual({ tokenRequest: 1, expiresAt: 1, authorizationVersion: 1, capability: 1 });
+    expect(captured).toEqual({ tokenRequest: { capability: "room:read" }, expiresAt: clock.now() + 90_000, authorizationVersion: 1 });
+    expect(Object.isFrozen(captured)).toBe(true);
+    expect(Object.isFrozen(captured.tokenRequest)).toBe(true);
+    capability = "room:write";
+    expiresAt = clock.now() + 180_000;
+    authorizationVersion = 2;
+    await session.refresh();
+    expect(connections[0]!.input.token).toEqual(captured);
+    expect(connections[1]!.input.token).toEqual({
+      tokenRequest: { capability: "room:write" },
+      expiresAt: clock.now() + 180_000,
+      authorizationVersion: 2,
+    });
+    expect(reads).toEqual({ tokenRequest: 2, expiresAt: 2, authorizationVersion: 2, capability: 2 });
+    expect(Object.isFrozen(connections[1]!.input.token)).toBe(true);
+    expect(Object.isFrozen(connections[1]!.input.token.tokenRequest)).toBe(true);
+    await session.stop();
+  });
+
+  it("fails closed for hostile token fields and token requests without unhandled provider leakage", async () => {
+    const providerSecret = "hostile-token-secret";
+    const modes = ["throw", "rejected", "hostile-then", "cyclic"] as const;
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      for (const mode of modes) {
+        const clock = new FakeClock();
+        const { transport, connect } = createTransport();
+        const raw = { tokenRequest: { capability: "read" }, expiresAt: clock.now() + 300_000, authorizationVersion: 1 } as Record<string, unknown>;
+        if (mode === "cyclic") { const cyclic: Record<string, unknown> = {}; cyclic.self = cyclic; raw.tokenRequest = cyclic; }
+        else Object.defineProperty(raw, "tokenRequest", {
+          get: () => {
+            if (mode === "throw") throw new Error(providerSecret);
+            if (mode === "rejected") return Promise.reject(new Error(providerSecret));
+            const thenable = {};
+            Object.defineProperty(thenable, "then", { get: () => { throw new Error(providerSecret); } });
+            return thenable;
+          },
+        });
+        const failures: unknown[] = [];
+        const session = new RealtimeRoomSession({ tokenProvider: async () => raw as RealtimeToken, transport, clock, maxReconnectAttempts: 0, onTransportFailure: (error) => failures.push(error) });
+        await session.start({ missionId: "mission-a", roomId: "room-a" });
+        expect(session.state).toBe("degraded");
+        expect(connect).not.toHaveBeenCalled();
+        expect(failures).toHaveLength(1);
+        expect(String(failures[0])).not.toContain(providerSecret);
+        await session.stop();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
   it("snapshots recovery policy getters and receivers once, ignoring later replacements", async () => {
     const providerSecret = "recovery-policy-replacement-secret";
     for (const policy of ["random", "reconnect"] as const) {
