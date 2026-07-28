@@ -368,9 +368,7 @@ export function MissionWorld() {
   const missions = useQuery(api.missions.listMyMissions, {});
   const launch = useMutation(api.launch.createMissionFromTemplate);
   const [launching, setLaunching] = useState<string | null>(null);
-  if (missions === undefined) return <main id="main-content" className="foundation">Loading your Mission World…</main>;
-  if (missions.length === 0) return <main id="main-content" className="foundation"><p className="wordmark">Realworld</p><h1>Start a Mission with a real work shape.</h1><p>Choose a room ecology for the work ahead.</p>{templateOptions.map(({ key, label }) => <button key={key} disabled={launching !== null} onClick={async () => { setLaunching(key); try { await launch({ templateKey: key, slug: `${key}-${crypto.randomUUID().slice(0, 8)}`, title: label, idempotencyKey: crypto.randomUUID(), correlationId: crypto.randomUUID() }); } finally { setLaunching(null); } }} type="button">{launching === key ? "Launching…" : `Launch ${label}`}</button>)}</main>;
-  const activeMission = missions[0]!;
+  const [launchError, setLaunchError] = useState<string | null>(null);
   const [selectedRoomId, setSelectedRoomId] = useState<RoomId>("workshop");
   const [view, setView] = useState<"world" | "workshop">("world");
   const [showDirectory, setShowDirectory] = useState(false);
@@ -446,6 +444,49 @@ export function MissionWorld() {
     const trimmed = name.trim();
     if (trimmed) setCanvasRooms((current) => current.map((room) => room.id === selectedRoom.id ? { ...room, name: trimmed } : room));
   }
+
+  if (missions === undefined) {
+    return <main id="main-content" className="foundation">Loading your Mission World…</main>;
+  }
+
+  if (missions.length === 0) {
+    return (
+      <main id="main-content" className="foundation">
+        <p className="wordmark">Realworld</p>
+        <h1>Start a Mission with a real work shape.</h1>
+        <p>Choose a room ecology for the work ahead.</p>
+        {launchError === null ? null : <p aria-live="polite">{launchError}</p>}
+        {templateOptions.map(({ key, label }) => (
+          <button
+            key={key}
+            disabled={launching !== null}
+            onClick={async () => {
+              setLaunching(key);
+              setLaunchError(null);
+              try {
+                await launch({
+                  templateKey: key,
+                  slug: `${key.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase()}-${crypto.randomUUID().slice(0, 8)}`,
+                  title: label,
+                  idempotencyKey: crypto.randomUUID(),
+                  correlationId: crypto.randomUUID(),
+                });
+              } catch {
+                setLaunchError("The Mission could not launch. Try again.");
+              } finally {
+                setLaunching(null);
+              }
+            }}
+            type="button"
+          >
+            {launching === key ? "Launching…" : `Launch ${label}`}
+          </button>
+        ))}
+      </main>
+    );
+  }
+
+  const activeMission = missions[0]!;
 
   if (view === "workshop") {
     return <Workshop onExit={() => setView("world")} />;

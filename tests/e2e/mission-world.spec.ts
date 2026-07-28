@@ -3,9 +3,7 @@ import { expect, test } from "@playwright/test";
 test.beforeEach(async ({ page }, testInfo) => {
   await page.goto("/");
 
-  const missionHeading = page.getByRole("heading", {
-    name: "Build Realworld into a living multiplayer work platform",
-  });
+  const missionHeading = page.getByRole("heading", { name: "Company sprint" });
   if (await missionHeading.isVisible()) {
     return;
   }
@@ -19,20 +17,24 @@ test.beforeEach(async ({ page }, testInfo) => {
   const createAccount = page.getByRole("button", { name: "Create private-alpha account" });
   await expect(createAccount).toBeVisible();
   await createAccount.click();
+  await expect(
+    page.getByRole("heading", { name: "Start a Mission with a real work shape." }),
+  ).toBeVisible({ timeout: 15_000 });
+  await page.getByRole("button", { name: "Launch Company sprint" }).click();
   await expect(missionHeading).toBeVisible({ timeout: 15_000 });
 });
 
 test("a participant can inspect and enter Workshop from the Mission World", async ({ page }) => {
   await page.goto("/");
 
-  await expect(page.getByRole("heading", { name: "Build Realworld into a living multiplayer work platform" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Company sprint" })).toBeVisible();
   await expect(page.getByText(/music studio|digital audio workstation/i)).toHaveCount(0);
   await page.getByRole("button", { name: /Workshop\. 4 active people/i }).click();
   await expect(page.getByRole("heading", { name: "Workshop" })).toBeVisible();
   await page.getByRole("complementary", { name: "Workshop" }).getByRole("button", { name: "Enter Workshop" }).click();
   await expect(page.getByRole("heading", { name: "Make room entry feel instantly useful" })).toBeVisible();
   await page.getByRole("button", { name: "Mission World" }).click();
-  await expect(page.getByRole("heading", { name: "Build Realworld into a living multiplayer work platform" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Company sprint" })).toBeVisible();
 });
 
 test("the room directory provides a non-spatial path to Workshop", async ({ page }) => {

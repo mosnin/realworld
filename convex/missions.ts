@@ -222,7 +222,13 @@ export const listMyMissions = query({
   args: {},
   returns: v.array(v.object({ _id: v.id("missions"), title: v.string(), slug: v.string(), summary: v.string(), templateKey: v.optional(v.string()), role: v.string() })),
   handler: async (ctx) => {
-    const principal = await requireExistingHumanPrincipal(ctx);
+    const tokenIdentifier = await requireAuthenticatedTokenIdentifier(ctx);
+    const principal = await ctx.db
+      .query("principals")
+      .withIndex("by_token_identifier", (query) => query.eq("tokenIdentifier", tokenIdentifier))
+      .unique();
+    if (principal === null) return [];
+    if (principal.type !== "human" || principal.state !== "active") throw new Error("Unauthorized");
     const memberships = await ctx.db.query("missionMembers").withIndex("by_principal_and_state", q => q.eq("principalId", principal._id).eq("state", "active")).take(100);
     const values = await Promise.all(memberships.map(async membership => { const mission = await ctx.db.get(membership.missionId); return mission === null ? null : { _id: mission._id, title: mission.title, slug: mission.slug, summary: mission.summary, templateKey: mission.templateKey, role: membership.role }; }));
     return values.filter((value): value is NonNullable<typeof value> => value !== null);
