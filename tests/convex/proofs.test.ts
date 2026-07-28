@@ -8,6 +8,7 @@ const modules = {
   "../../convex/_generated/api.js": () => import("../../convex/_generated/api.js"),
   "../../convex/missions.ts": () => import("../../convex/missions"),
   "../../convex/moves.ts": () => import("../../convex/moves"),
+  "../../convex/pulse.ts": () => import("../../convex/pulse"),
   "../../convex/proofs.ts": () => import("../../convex/proofs"),
 };
 
@@ -154,6 +155,17 @@ describe("Proof kernel", () => {
     await expect(asBuilder.query(api.proofs.listRoomProofs, { roomId: restrictedId })).rejects.toThrow("Not found");
     await expect(asBuilder.mutation(api.proofs.createProof, createArgs(missionId, restrictedId, "builder-hidden-probe"))).rejects.toThrow("Not found");
     await expect(asReviewer.mutation(api.proofs.createProof, createArgs(missionId, workshopId, "reviewer-submit"))).rejects.toThrow("Not found");
+    await expect(asReviewer.mutation(api.proofs.updateProof, {
+      proofId: submitted.proofId,
+      expectedVersion: submitted.currentVersion,
+      roomId: workshopId,
+      linkedMoveId: null,
+      title: "Reviewer rewrite",
+      claim: "A reviewer must not rewrite the submitted claim.",
+      evidenceNote: "The narrow review role can transition status only.",
+      idempotencyKey: "reviewer-edit",
+      correlationId: "reviewer-edit",
+    })).rejects.toThrow("Not found");
     await expect(asReviewer.mutation(api.proofs.transitionProof, {
       proofId: hiddenProof.proofId,
       expectedVersion: hiddenProof.currentVersion,
@@ -171,6 +183,32 @@ describe("Proof kernel", () => {
     } as const;
     const verified = await asReviewer.mutation(api.proofs.transitionProof, verifyArgs);
     expect(await asReviewer.mutation(api.proofs.transitionProof, verifyArgs)).toEqual(verified);
+    await t.run(async (ctx) => {
+      const events = await ctx.db.query("missionEvents")
+        .withIndex("by_mission", (index) => index.eq("missionId", missionId))
+        .collect();
+      const verificationEvents = events.filter((event) => event.type === "proof.verified");
+      expect(verificationEvents).toHaveLength(1);
+      expect(verificationEvents[0]).toMatchObject({
+        _id: verified.eventId,
+        roomId: workshopId,
+        effectiveRole: "reviewer",
+        beforeVersion: submitted.currentVersion,
+        afterVersion: verified.currentVersion,
+      });
+    });
+    const pulse = await asOwner.query(api.pulse.listMissionPulse, { missionId, limit: 50 });
+    const verificationEntry = pulse.find((entry) => entry._id === verified.eventId);
+    expect(verificationEntry).toMatchObject({
+      eventType: "proof.verified",
+      summary: "Proof verified",
+      actorDisplayName: "Proof reviewer",
+      effectiveRole: "reviewer",
+      roomId: workshopId,
+      roomTitle: "Workshop",
+    });
+    expect(verificationEntry).not.toHaveProperty("actorPrincipalId");
+    expect(verificationEntry).not.toHaveProperty("correlationId");
     await expect(asBuilder.mutation(api.proofs.updateProof, {
       proofId: submitted.proofId,
       expectedVersion: verified.currentVersion,
@@ -199,6 +237,13 @@ describe("Proof kernel", () => {
       idempotencyKey: "reviewer-reject",
       correlationId: "reviewer-reject",
     });
+    await expect(asReviewer.mutation(api.proofs.transitionProof, {
+      proofId: retry.proofId,
+      expectedVersion: rejected.currentVersion,
+      nextStatus: "submitted",
+      idempotencyKey: "reviewer-resubmit",
+      correlationId: "reviewer-resubmit",
+    })).rejects.toThrow("Not found");
     const rejectedView = await asBuilder.query(api.proofs.listMissionProofs, { missionId });
     expect(rejectedView.find((proof) => proof._id === retry.proofId)).not.toHaveProperty("verifierDisplayName");
     expect(rejectedView.find((proof) => proof._id === retry.proofId)).not.toHaveProperty("verifiedAt");
