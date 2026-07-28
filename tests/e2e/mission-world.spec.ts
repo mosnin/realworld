@@ -238,6 +238,58 @@ test("an owner can create, switch, archive, and recover separate Mission worlds"
   await expect(page.getByRole("button", { name: "Layout unlocked" })).toBeEnabled();
 });
 
+test("an owner can save, archive, restore, and persist governing intent", async ({ page }) => {
+  const constitution = "Build a durable multiplayer work system with accountable human and agent collaboration.";
+  const firstOutcome = "Ship a trustworthy shared Mission world.";
+  const secondOutcome = "Make every important change attributable and reviewable.";
+  const revisedOutcome = "Keep every important change attributable, reviewable, and durable.";
+
+  await page.goto("/");
+  const governingIntent = page.getByRole("heading", { name: "Governing intent" }).locator("..");
+  await expect(governingIntent.getByText("No Constitution has been set yet.")).toBeVisible();
+
+  await governingIntent.getByRole("button", { name: "Edit governing intent" }).click();
+  await governingIntent.getByLabel("Mission Constitution").fill(constitution);
+  await governingIntent.getByLabel("Outcome 1").fill(firstOutcome);
+  await governingIntent.getByRole("button", { name: "Add outcome" }).click();
+  await governingIntent.getByLabel("Outcome 2").fill(secondOutcome);
+  await governingIntent.getByRole("button", { name: "Save governing intent" }).click();
+  await expect(governingIntent.getByText("Governing intent saved.")).toBeVisible();
+  await expect(governingIntent.getByRole("button", { name: "Edit governing intent" })).toBeVisible();
+  await expect(governingIntent.getByText(constitution)).toBeVisible();
+  await expect(governingIntent.getByText(firstOutcome)).toBeVisible();
+  await expect(governingIntent.getByText(secondOutcome)).toBeVisible();
+
+  await page.reload();
+  await expect(governingIntent.getByText(constitution)).toBeVisible();
+  await expect(governingIntent.getByText(firstOutcome)).toBeVisible();
+  await expect(governingIntent.getByText(secondOutcome)).toBeVisible();
+
+  await governingIntent.getByRole("button", { name: "Edit governing intent" }).click();
+  await governingIntent.getByLabel("Outcome 2").fill(revisedOutcome);
+  await governingIntent.getByRole("button", { name: "Save governing intent" }).click();
+  await expect(governingIntent.getByText("Governing intent saved.")).toBeVisible();
+  await expect(governingIntent.getByRole("button", { name: "Edit governing intent" })).toBeVisible();
+  await expect(governingIntent.getByText(revisedOutcome)).toBeVisible();
+
+  await page.getByRole("button", { name: "Manage Mission" }).click();
+  await page.getByRole("button", { name: "Archive Mission" }).click();
+  await expect(page.getByRole("status", { name: "Archived Mission read-only" })).toBeVisible();
+  await expect(governingIntent.getByLabel("Governing intent read-only")).toHaveText("Archived Mission — governing intent is read-only.");
+  await expect(governingIntent.getByText(constitution)).toBeVisible();
+  await expect(governingIntent.getByText(revisedOutcome)).toBeVisible();
+
+  await page.getByRole("button", { name: "Restore Mission" }).click();
+  await expect(page.getByRole("status", { name: "Archived Mission read-only" })).toHaveCount(0);
+  await expect(governingIntent.getByRole("button", { name: "Edit governing intent" })).toBeVisible();
+  await expect(governingIntent.getByText(constitution)).toBeVisible();
+  await expect(governingIntent.getByText(revisedOutcome)).toBeVisible();
+
+  await page.reload();
+  await expect(governingIntent.getByText(constitution)).toBeVisible();
+  await expect(governingIntent.getByText(revisedOutcome)).toBeVisible();
+});
+
 // The following invitation journey handles a bearer URL. Do not retain it in Playwright traces.
 test.use({ trace: "off" });
 
