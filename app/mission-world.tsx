@@ -6,6 +6,7 @@ import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { SessionControl } from "@/app/auth/session-control";
+import { AuthenticatedMissionRealtimeLifecycle } from "@/app/realtime/authenticated-mission-lifecycle";
 import { OwnerInvitePanel } from "@/app/invitations/owner-invite-panel";
 import { MissionControls } from "@/app/missions/mission-controls";
 import { ConstitutionControls } from "@/app/missions/constitution-controls";
@@ -604,6 +605,7 @@ export function MissionWorld() {
 
   return (
     <div className="mission-world" aria-label="Realworld Mission World" data-accent={preferences.accent} data-density={preferences.density} data-decoration={preferences.reducedDecoration ? "reduced" : "standard"}>
+      <AuthenticatedMissionRealtimeLifecycle />
       <header className="world-topbar">
         <a className="brand" href="#core" aria-label="Realworld Mission World"><Icon name="spark" /> <span>Realworld</span></a>
         <nav aria-label="Primary navigation">
