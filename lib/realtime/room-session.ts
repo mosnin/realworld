@@ -401,6 +401,22 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
+function snapshotRoomScope(value: unknown): RealtimeRoomScope | undefined {
+  try {
+    if (!isRecord(value)) return undefined;
+    const missionId = value.missionId;
+    const roomId = value.roomId;
+    if (!isNonEmptyString(missionId) || !isNonEmptyString(roomId)) {
+      observeAsyncResult(missionId);
+      observeAsyncResult(roomId);
+      return undefined;
+    }
+    return Object.freeze({ missionId, roomId });
+  } catch {
+    return undefined;
+  }
+}
+
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
@@ -753,12 +769,14 @@ export class RealtimeRoomSession {
   }
 
   async start(scope: RealtimeRoomScope): Promise<void> {
-    if (this.scopeValue && (this.scopeValue.missionId !== scope.missionId || this.scopeValue.roomId !== scope.roomId)) {
+    const nextScope = snapshotRoomScope(scope);
+    if (!nextScope) return;
+    if (this.scopeValue && (this.scopeValue.missionId !== nextScope.missionId || this.scopeValue.roomId !== nextScope.roomId)) {
       const handoffCompleted = await this.stopInternal("scope-changed", "idle");
       if (!handoffCompleted) return;
     }
     if (this.scopeValue && this.stateValue === "live") return;
-    this.scopeValue = scope;
+    if (!this.scopeValue) this.scopeValue = nextScope;
     await this.requestConnect("connecting");
   }
 

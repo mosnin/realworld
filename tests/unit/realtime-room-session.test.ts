@@ -3470,6 +3470,120 @@ describe("RealtimeRoomSession", () => {
     }
   });
 
+  it("snapshots a valid start scope once and preserves it through provider, transport, publish, refresh, and same-scope dedupe", async () => {
+    const clock = new FakeClock();
+    const { transport, connect, connections } = createTransport();
+    const tokenScopes: unknown[] = [];
+    const tokenProvider = vi.fn(async (scope: unknown) => {
+      tokenScopes.push(scope);
+      return token(clock.now() + 300_000);
+    });
+    let missionId: unknown = "mission-a";
+    let roomId: unknown = "room-a";
+    const reads = { missionId: 0, roomId: 0 };
+    const mutableScope = {} as { missionId: string; roomId: string };
+    Object.defineProperties(mutableScope, {
+      missionId: {
+        get: () => {
+          reads.missionId += 1;
+          return missionId;
+        },
+      },
+      roomId: {
+        get: () => {
+          reads.roomId += 1;
+          return roomId;
+        },
+      },
+    });
+    const session = new RealtimeRoomSession({ tokenProvider, transport, clock });
+    await session.start(mutableScope);
+    missionId = "provider-secret-mission";
+    roomId = "provider-secret-room";
+    await expect(session.publish(message(clock))).resolves.toBe(true);
+    await session.refresh();
+    await session.start({ missionId: "mission-a", roomId: "room-a" });
+
+    expect(reads).toEqual({ missionId: 1, roomId: 1 });
+    expect(session.scope).toEqual({ missionId: "mission-a", roomId: "room-a" });
+    expect(tokenScopes).toEqual([{ missionId: "mission-a", roomId: "room-a" }, { missionId: "mission-a", roomId: "room-a" }]);
+    expect(connect.mock.calls.map(([input]) => input.scope)).toEqual([
+      { missionId: "mission-a", roomId: "room-a" },
+      { missionId: "mission-a", roomId: "room-a" },
+    ]);
+    expect(connections).toHaveLength(2);
+    expect(connections[1]!.publish).toHaveBeenCalledTimes(0);
+    await session.stop();
+  });
+
+  it("contains invalid start scopes without invoking providers or tearing down an existing valid live scope", async () => {
+    const providerSecret = "hostile-start-scope-secret";
+    const cases: Array<{ label: string; value: unknown }> = [
+      { label: "missing", value: undefined },
+      { label: "malformed", value: 1 },
+      { label: "empty", value: "" },
+      { label: "symbol", value: Symbol("scope") },
+      { label: "throwing", value: undefined },
+      { label: "rejected-promise", value: undefined },
+      { label: "hostile-then", value: undefined },
+    ];
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      for (const { label, value } of cases) {
+        const clock = new FakeClock();
+        const { transport, connect, connections } = createTransport();
+        const tokenProvider = vi.fn(async () => token(clock.now() + 300_000));
+        const session = new RealtimeRoomSession({ tokenProvider, transport, clock });
+        await session.start({ missionId: "mission-a", roomId: "room-a" });
+        const invalid = {} as { missionId: string; roomId: string };
+        Object.defineProperties(invalid, {
+          missionId: {
+            get: () => {
+              if (label === "throwing") throw new Error(providerSecret);
+              if (label === "rejected-promise") return Promise.reject(new Error(providerSecret));
+              if (label === "hostile-then") {
+                const thenable = {};
+                Object.defineProperty(thenable, "then", { get: () => { throw new Error(providerSecret); } });
+                return thenable;
+              }
+              return value;
+            },
+          },
+          roomId: { get: () => "room-b" },
+        });
+
+        await session.start(invalid);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(session.state).toBe("live");
+        expect(session.scope).toEqual({ missionId: "mission-a", roomId: "room-a" });
+        expect(tokenProvider).toHaveBeenCalledTimes(1);
+        expect(connect).toHaveBeenCalledTimes(1);
+        expect(connections[0]!.unsubscribe).not.toHaveBeenCalled();
+        await session.stop();
+      }
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
+  it("deduplicates exact valid scopes and hands off one time to a distinct validated scope", async () => {
+    const clock = new FakeClock();
+    const { transport, connect, connections } = createTransport();
+    const session = new RealtimeRoomSession({ tokenProvider: async () => token(clock.now() + 300_000), transport, clock });
+    await session.start({ missionId: "mission-a", roomId: "room-a" });
+    await session.start({ missionId: "mission-a", roomId: "room-a" });
+    await session.start({ missionId: "mission-a", roomId: "room-b" });
+
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(connections[0]!.unsubscribe).toHaveBeenCalledTimes(1);
+    expect(session.scope).toEqual({ missionId: "mission-a", roomId: "room-b" });
+    expect(connections[1]!.input.scope).toEqual({ missionId: "mission-a", roomId: "room-b" });
+    await session.stop();
+  });
+
   it("snapshots recovery policy getters and receivers once, ignoring later replacements", async () => {
     const providerSecret = "recovery-policy-replacement-secret";
     for (const policy of ["random", "reconnect"] as const) {
