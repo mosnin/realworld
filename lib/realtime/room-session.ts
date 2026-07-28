@@ -222,6 +222,74 @@ function defaultReconnectDelay(attempt: number, random: () => number) {
   return Math.min(maximumReconnectDelayMs, Math.floor(cappedBase * (0.75 + (0.5 * boundedRandom(random)))));
 }
 
+function isObjectOrFunction(value: unknown): value is object | ((...args: never[]) => unknown) {
+  return (typeof value === "object" && value !== null) || typeof value === "function";
+}
+
+function observeAsyncResult(value: unknown) {
+  if (!isObjectOrFunction(value)) return;
+  try {
+    void Promise.resolve(value).catch(() => undefined);
+  } catch {
+    // Recovery policy callbacks are synchronous; contain hostile thenables.
+  }
+}
+
+function synchronousNumber(value: unknown): number {
+  if (typeof value === "number") return value;
+  observeAsyncResult(value);
+  return Number.NaN;
+}
+
+function snapshotRandom(options: RoomSessionOptions): () => number {
+  try {
+    const random = options.random;
+    if (typeof random !== "function") {
+      return Math.random;
+    }
+
+    return () => {
+      try {
+        return synchronousNumber(Reflect.apply(random, options, []));
+      } catch {
+        return Math.random();
+      }
+    };
+  } catch {
+    return Math.random;
+  }
+}
+
+function snapshotReconnectDelay(
+  options: RoomSessionOptions,
+  random: () => number,
+): (attempt: number) => number {
+  const fallback = (attempt: number) => defaultReconnectDelay(attempt, random);
+
+  try {
+    const reconnectDelayMs = options.reconnectDelayMs;
+    if (typeof reconnectDelayMs !== "function") {
+      return fallback;
+    }
+
+    return (attempt) => {
+      try {
+        const result = Reflect.apply(reconnectDelayMs, options, [attempt]);
+        if (typeof result === "number") return result;
+        if (isObjectOrFunction(result)) {
+          observeAsyncResult(result);
+          return fallback(attempt);
+        }
+        return Number.NaN;
+      } catch {
+        return fallback(attempt);
+      }
+    };
+  } catch {
+    return fallback;
+  }
+}
+
 function defaultUnauthorizedError(error: unknown) {
   return error instanceof Error && (error.name === "RealtimeUnauthorizedError" || error.message === "Unauthorized" || error.message === "Not found");
 }
@@ -578,8 +646,8 @@ export class RealtimeRoomSession {
     );
     this.refreshSkewMs = normalizedNonNegative(options.refreshSkewMs, defaultRefreshSkewMs);
     this.minimumRefreshDelayMs = normalizedPositive(options.minimumRefreshDelayMs, defaultMinimumRefreshDelayMs);
-    const random = options.random ?? Math.random;
-    this.reconnectDelayMs = options.reconnectDelayMs ?? ((attempt) => defaultReconnectDelay(attempt, random));
+    const random = snapshotRandom(options);
+    this.reconnectDelayMs = snapshotReconnectDelay(options, random);
     this.maxReconnectAttempts = normalizedAttemptLimit(options.maxReconnectAttempts, defaultMaxReconnectAttempts);
     this.maxMessageTtlMs = normalizedPositive(options.maxMessageTtlMs, defaultMaxMessageTtlMs);
     this.maxFutureIssuedAtMs = normalizedNonNegative(options.maxFutureIssuedAtMs, defaultMaxFutureIssuedAtMs);
@@ -925,6 +993,7 @@ export class RealtimeRoomSession {
     } catch {
       requestedDelay = maximumReconnectDelayMs;
     }
+    if (failureGeneration !== this.generation) return;
     const delay = Number.isFinite(requestedDelay) ? Math.max(0, Math.min(maximumReconnectDelayMs, requestedDelay)) : maximumReconnectDelayMs;
     this.reconnectAttempt += 1;
     this.reconnectTimer = this.clock.setTimeout(() => {

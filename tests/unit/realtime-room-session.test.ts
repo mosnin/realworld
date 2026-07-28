@@ -2567,6 +2567,315 @@ describe("RealtimeRoomSession", () => {
     }
   });
 
+  it("snapshots recovery policy getters and receivers once, ignoring later replacements", async () => {
+    const providerSecret = "recovery-policy-replacement-secret";
+    for (const policy of ["random", "reconnect"] as const) {
+      const clock = new FakeClock();
+      const { transport, connect, connections } = createTransport();
+      const reads = { random: 0, reconnect: 0 };
+      const randomReceivers: unknown[] = [];
+      const reconnectReceivers: unknown[] = [];
+      const originalRandom = function (this: unknown) {
+        randomReceivers.push(this);
+        return 0;
+      };
+      const originalReconnect = function (this: unknown) {
+        reconnectReceivers.push(this);
+        return 13;
+      };
+      let random: unknown = originalRandom;
+      let reconnect: unknown = policy === "reconnect" ? originalReconnect : undefined;
+      const options = {
+        tokenProvider: async () => token(clock.now() + 300_000),
+        transport,
+        clock,
+      } as unknown as RoomSessionOptions;
+      Object.defineProperties(options, {
+        random: {
+          get: () => {
+            reads.random += 1;
+            return random;
+          },
+        },
+        reconnectDelayMs: {
+          get: () => {
+            reads.reconnect += 1;
+            return reconnect;
+          },
+        },
+      });
+      const session = new RealtimeRoomSession(options);
+      random = () => { throw new Error(providerSecret); };
+      reconnect = () => { throw new Error(providerSecret); };
+
+      await session.start({ missionId: "mission-a", roomId: "room-a" });
+      connections[0]!.input.onFailure(new Error("ordinary failure"));
+      expect(session.state).toBe("degraded");
+      expect(reads).toEqual({ random: 1, reconnect: 1 });
+      const delay = policy === "random" ? 375 : 13;
+      expect(clock.delays).toContain(delay);
+      clock.advance(delay);
+      await vi.waitFor(() => expect(session.state).toBe("live"));
+
+      expect(connect).toHaveBeenCalledTimes(2);
+      if (policy === "random") {
+        expect(randomReceivers).toEqual([options]);
+        expect(reconnectReceivers).toEqual([]);
+      } else {
+        expect(randomReceivers).toEqual([]);
+        expect(reconnectReceivers).toEqual([options]);
+      }
+    }
+  });
+
+  it("contains hostile recovery-policy surfaces and bounds every requested retry", async () => {
+    const providerSecret = "hostile-recovery-policy-secret";
+    const cases: Array<{
+      policy: "random" | "reconnect";
+      mode: "missing" | "nonfunction" | "throwing-getter" | "throwing-callback" | "nan" | "infinite" | "negative" | "oversized";
+      expected?: number;
+    }> = [
+      { policy: "random", mode: "missing" },
+      { policy: "random", mode: "nonfunction" },
+      { policy: "random", mode: "throwing-getter" },
+      { policy: "random", mode: "throwing-callback" },
+      { policy: "random", mode: "nan", expected: 500 },
+      { policy: "random", mode: "infinite", expected: 500 },
+      { policy: "random", mode: "negative", expected: 375 },
+      { policy: "random", mode: "oversized", expected: 625 },
+      { policy: "reconnect", mode: "missing", expected: 500 },
+      { policy: "reconnect", mode: "nonfunction" },
+      { policy: "reconnect", mode: "throwing-getter" },
+      { policy: "reconnect", mode: "throwing-callback" },
+      { policy: "reconnect", mode: "nan", expected: 30_000 },
+      { policy: "reconnect", mode: "infinite", expected: 30_000 },
+      { policy: "reconnect", mode: "negative", expected: 0 },
+      { policy: "reconnect", mode: "oversized", expected: 30_000 },
+    ];
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      for (const { policy, mode, expected } of cases) {
+        const clock = new FakeClock();
+        const { transport, connect } = createTransport([new Error("ordinary failure"), "success"]);
+        const failures: unknown[] = [];
+        const options = {
+          tokenProvider: async () => token(clock.now() + 300_000),
+          transport,
+          clock,
+          onTransportFailure: (error: unknown) => failures.push(error),
+        } as unknown as RoomSessionOptions;
+        const callback = () => {
+          if (mode === "throwing-callback") throw new Error(providerSecret);
+          if (mode === "nan") return Number.NaN;
+          if (mode === "infinite") return Number.POSITIVE_INFINITY;
+          if (mode === "negative") return policy === "random" ? -1 : -10;
+          if (mode === "oversized") return policy === "random" ? 2 : 99_999;
+          return 0.5;
+        };
+        for (const property of ["random", "reconnectDelayMs"] as const) {
+          Object.defineProperty(options, property, {
+            get: () => {
+              const targeted = property === (policy === "random" ? "random" : "reconnectDelayMs");
+              if (!targeted) return property === "random" ? () => 0.5 : undefined;
+              if (mode === "missing") return undefined;
+              if (mode === "nonfunction") return providerSecret;
+              if (mode === "throwing-getter") throw new Error(providerSecret);
+              return callback;
+            },
+          });
+        }
+
+        const session = new RealtimeRoomSession(options);
+        await session.start({ missionId: "mission-a", roomId: "room-a" });
+        expect(session.state).toBe("degraded");
+        expect(failures).toHaveLength(1);
+        expect(String(failures[0])).not.toContain(providerSecret);
+        const delay = clock.delays.at(-1)!;
+        expect(delay).toBeGreaterThanOrEqual(0);
+        expect(delay).toBeLessThanOrEqual(30_000);
+        if (expected !== undefined) expect(delay).toBe(expected);
+        clock.advance(delay);
+        await vi.waitFor(() => expect(session.state).toBe("live"));
+        expect(connect).toHaveBeenCalledTimes(2);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
+  it("contains reentrant custom and default recovery policies before stale timers, connects, or notifications can escape", async () => {
+    const providerSecret = "reentrant-recovery-policy-secret";
+    const oldScope = { missionId: "mission-a", roomId: "room-a" };
+    const newScope = { missionId: "mission-a", roomId: "room-b" };
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      for (const policy of ["reconnect", "random"] as const) {
+        for (const action of ["stop", "handoff"] as const) {
+        const clock = new FakeClock();
+        const { transport, connect, connections } = createTransport([new Error("ordinary failure"), "success"]);
+        const states: string[] = [];
+        const failures: unknown[] = [];
+        let policyCalls = 0;
+        const session = new RealtimeRoomSession({
+          tokenProvider: async () => token(clock.now() + 300_000),
+          transport,
+          clock,
+          ...(policy === "reconnect" ? {
+            reconnectDelayMs: () => {
+              policyCalls += 1;
+              if (action === "stop") void session.stop();
+              else void session.start(newScope);
+              throw new Error(providerSecret);
+            },
+          } : {
+            random: () => {
+              policyCalls += 1;
+              if (action === "stop") void session.stop();
+              else void session.start(newScope);
+              throw new Error(providerSecret);
+            },
+          }),
+          onStateChange: (state) => states.push(state),
+          onTransportFailure: (error) => failures.push(error),
+        });
+
+        await session.start(oldScope);
+        await vi.waitFor(() => expect(session.state).toBe(action === "stop" ? "stopped" : "live"));
+        clock.advance(30_000);
+        await flush();
+
+        expect(session.state).toBe(action === "stop" ? "stopped" : "live");
+        expect(states).not.toContain("degraded");
+        expect(failures).toEqual([]);
+        expect(policyCalls).toBe(1);
+        expect(connect).toHaveBeenCalledTimes(action === "stop" ? 1 : 2);
+        if (action === "stop") expect(session.scope).toBeUndefined();
+        else {
+          expect(session.scope).toEqual(newScope);
+          expect(connections).toHaveLength(1);
+          expect(connections[0]!.input.scope).toEqual(newScope);
+        }
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
+  it("contains immediately rejected recovery-policy results and hostile thenables with the bounded fallback", async () => {
+    const providerSecret = "async-recovery-policy-secret";
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      for (const policy of ["random", "reconnect"] as const) {
+        for (const resultMode of ["rejected", "hostile-then"] as const) {
+          const clock = new FakeClock();
+          const { transport, connect, connections } = createTransport();
+          const failures: unknown[] = [];
+          const hostileThenable = {};
+          Object.defineProperty(hostileThenable, "then", {
+            get: () => { throw new Error(providerSecret); },
+          });
+          const result = resultMode === "rejected"
+            ? Promise.reject(new Error(providerSecret))
+            : hostileThenable;
+          const session = new RealtimeRoomSession({
+            tokenProvider: async () => token(clock.now() + 300_000),
+            transport,
+            clock,
+            ...(policy === "random"
+              ? { random: () => result as number }
+              : { random: () => 0.5, reconnectDelayMs: () => result as number }),
+            onTransportFailure: (error) => failures.push(error),
+          });
+
+          await session.start({ missionId: "mission-a", roomId: "room-a" });
+          connections[0]!.input.onFailure(new Error("ordinary failure"));
+          expect(session.state).toBe("degraded");
+          expect(failures).toHaveLength(1);
+          expect(String(failures[0])).not.toContain(providerSecret);
+          expect(clock.delays.at(-1)).toBe(500);
+          clock.advance(500);
+          await vi.waitFor(() => expect(session.state).toBe("live"));
+          expect(connect).toHaveBeenCalledTimes(2);
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
+  it("contains deferred recovery-policy rejections after stop or exact handoff without mutating the scheduled fallback", async () => {
+    const providerSecret = "late-async-recovery-policy-secret";
+    const oldScope = { missionId: "mission-a", roomId: "room-a" };
+    const newScope = { missionId: "mission-a", roomId: "room-b" };
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      for (const policy of ["random", "reconnect"] as const) {
+        for (const action of ["stop", "handoff"] as const) {
+          const clock = new FakeClock();
+          const { transport, connect, connections } = createTransport();
+          const failures: unknown[] = [];
+          const lateResult = deferred<number>();
+          const session = new RealtimeRoomSession({
+            tokenProvider: async () => token(clock.now() + 300_000),
+            transport,
+            clock,
+            ...(policy === "random"
+              ? { random: () => lateResult.promise as unknown as number }
+              : { random: () => 0.5, reconnectDelayMs: () => lateResult.promise as unknown as number }),
+            onTransportFailure: (error) => failures.push(error),
+          });
+
+          await session.start(oldScope);
+          connections[0]!.input.onFailure(new Error("ordinary failure"));
+          expect(session.state).toBe("degraded");
+          expect(clock.delays.at(-1)).toBe(500);
+          if (action === "stop") await session.stop();
+          else await session.start(newScope);
+          await vi.waitFor(() => expect(session.state).toBe(action === "stop" ? "stopped" : "live"));
+          const delaysAfterLifecycleChange = [...clock.delays];
+
+          lateResult.reject(new Error(providerSecret));
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          expect(clock.delays).toEqual(delaysAfterLifecycleChange);
+          expect(session.state).toBe(action === "stop" ? "stopped" : "live");
+          expect(failures).toHaveLength(1);
+          expect(String(failures[0])).not.toContain(providerSecret);
+          expect(connect).toHaveBeenCalledTimes(action === "stop" ? 1 : 2);
+          if (action === "stop") expect(session.scope).toBeUndefined();
+          else {
+            expect(session.scope).toEqual(newScope);
+            expect(connections).toHaveLength(2);
+            expect(connections[1]!.input.scope).toEqual(newScope);
+          }
+
+          clock.advance(30_000);
+          await flush();
+          expect(session.state).toBe(action === "stop" ? "stopped" : "live");
+          expect(connect).toHaveBeenCalledTimes(action === "stop" ? 1 : 2);
+          expect(failures).toHaveLength(1);
+        }
+      }
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
   it("falls back when a captured now method returns invalid values or throws", async () => {
     const providerSecret = "clock-now-provider-secret";
     const modes: Array<() => unknown> = [
