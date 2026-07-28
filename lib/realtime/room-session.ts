@@ -1045,6 +1045,10 @@ export class RealtimeRoomSession {
         () => finish(new Error("Realtime transport publish timed out")),
         this.transportPublishTimeoutMs,
       );
+      if (settled) {
+        this.clock.clearTimeout(timer);
+        return;
+      }
       let publication: Promise<void>;
       try {
         publication = Promise.resolve(operation());
