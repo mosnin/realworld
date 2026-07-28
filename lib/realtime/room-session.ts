@@ -1,3 +1,5 @@
+import { parseRealtimePayload } from "./message-schema";
+
 /**
  * Provider-independent lifecycle for disposable room signals.
  *
@@ -161,6 +163,18 @@ function parseEnvelope(
   }
 }
 
+/**
+ * Conservative public boundary for transport adapters that may be invoked
+ * independently of a room session.
+ */
+export function validateRealtimeEnvelope(value: unknown, now: number = Date.now()): RealtimeEnvelope | undefined {
+  return parseEnvelope(value, now, {
+    maxMessageTtlMs: defaultMaxMessageTtlMs,
+    maxFutureIssuedAtMs: defaultMaxFutureIssuedAtMs,
+    maxSerializedPayloadBytes: defaultMaxSerializedPayloadBytes,
+  });
+}
+
 function parseEnvelopeUnchecked(
   value: unknown,
   now: number,
@@ -266,8 +280,11 @@ export class RealtimeRoomSession {
       maxSerializedPayloadBytes: this.maxSerializedPayloadBytes,
     });
     if (!validated || validated.missionId !== this.scopeValue?.missionId || validated.roomId !== this.scopeValue.roomId) return false;
+    const payload = parseRealtimePayload(validated.kind, validated.payload);
+    if (!payload) return false;
+    const typedMessage = { ...validated, payload };
     try {
-      await this.subscription.publish(validated);
+      await this.subscription.publish(typedMessage);
       return true;
     } catch (error) {
       this.handleFailure(error, this.generation);
@@ -424,24 +441,27 @@ export class RealtimeRoomSession {
     });
     if (!message) return appearsExpired(value, now) ? "expired" : "malformed";
     if (message.missionId !== this.scopeValue.missionId || message.roomId !== this.scopeValue.roomId) return "out-of-scope";
+    const payload = parseRealtimePayload(message.kind, message.payload);
+    if (!payload) return "malformed";
+    const typedMessage = { ...message, payload };
     this.evictExpiredMessageIds(now);
-    if (this.seenMessageExpiry.has(message.messageId)) return "duplicate";
-    const senderKey = `${message.sender.clientId}:${message.sender.clientInstanceId}`;
+    if (this.seenMessageExpiry.has(typedMessage.messageId)) return "duplicate";
+    const senderKey = `${typedMessage.sender.clientId}:${typedMessage.sender.clientInstanceId}`;
     const priorEpoch = this.senderEpoch.get(senderKey);
-    if (priorEpoch !== undefined && message.sender.connectionEpoch < priorEpoch) return "stale-epoch";
-    const sequenceKey = `${senderKey}:${message.sender.connectionEpoch}:${message.kind}`;
+    if (priorEpoch !== undefined && typedMessage.sender.connectionEpoch < priorEpoch) return "stale-epoch";
+    const sequenceKey = `${senderKey}:${typedMessage.sender.connectionEpoch}:${typedMessage.kind}`;
     const priorSequence = this.senderSequence.get(sequenceKey);
-    if (priorEpoch === message.sender.connectionEpoch && priorSequence !== undefined && message.clientSeq <= priorSequence) return "stale-sequence";
-    if (priorEpoch === undefined || message.sender.connectionEpoch > priorEpoch) {
-      this.senderEpoch.set(senderKey, message.sender.connectionEpoch);
+    if (priorEpoch === typedMessage.sender.connectionEpoch && priorSequence !== undefined && typedMessage.clientSeq <= priorSequence) return "stale-sequence";
+    if (priorEpoch === undefined || typedMessage.sender.connectionEpoch > priorEpoch) {
+      this.senderEpoch.set(senderKey, typedMessage.sender.connectionEpoch);
       for (const key of this.senderSequence.keys()) {
         if (key.startsWith(`${senderKey}:`)) this.senderSequence.delete(key);
       }
     }
-    this.senderSequence.set(sequenceKey, message.clientSeq);
-    this.seenMessageExpiry.set(message.messageId, message.expiresAtMs);
-    this.scheduleMessageExpiry(message);
-    return message;
+    this.senderSequence.set(sequenceKey, typedMessage.clientSeq);
+    this.seenMessageExpiry.set(typedMessage.messageId, typedMessage.expiresAtMs);
+    this.scheduleMessageExpiry(typedMessage);
+    return typedMessage;
   }
 
   private scheduleMessageExpiry(message: RealtimeEnvelope) {

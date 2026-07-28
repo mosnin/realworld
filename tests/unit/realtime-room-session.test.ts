@@ -75,7 +75,7 @@ function message(clock: FakeClock, overrides: Partial<RealtimeEnvelope> = {}): R
     issuedAtMs: clock.now(),
     expiresAtMs: clock.now() + 10_000,
     clientSeq: 1,
-    payload: { x: 0.5, y: 0.5 },
+    payload: { targetId: "canvas-1", x: 0.5, y: 0.5, mode: "map" },
     ...overrides,
   };
 }
@@ -291,6 +291,21 @@ describe("RealtimeRoomSession", () => {
     expect(received.map((value) => value.messageId)).toEqual(["sequence-4", "sequence-5", "other-tab"]);
   });
 
+  it("rejects unknown, schema-invalid, and extra-field inbound signal payloads", async () => {
+    const clock = new FakeClock();
+    const { transport, connections } = createTransport();
+    const received: RealtimeEnvelope[] = [];
+    const session = new RealtimeRoomSession({ tokenProvider: async () => token(clock.now() + 300_000), transport, clock, onMessage: (value) => received.push(value) });
+    await session.start({ missionId: "mission-a", roomId: "room-a" });
+    const deliver = connections[0]!.input.onMessage;
+
+    deliver(message(clock, { messageId: "unknown-kind", kind: "interaction.unknown" }));
+    deliver(message(clock, { messageId: "invalid-coordinate", payload: { targetId: "canvas-1", x: 1.01, y: 0.5, mode: "map" } }));
+    deliver(message(clock, { messageId: "extra-field", payload: { targetId: "canvas-1", x: 0.5, y: 0.5, mode: "map", unexpected: true } }));
+
+    expect(received).toEqual([]);
+  });
+
   it("drops oversized and cyclic payloads without surfacing them to the transient view", async () => {
     const clock = new FakeClock();
     const { transport, connections } = createTransport();
@@ -318,6 +333,19 @@ describe("RealtimeRoomSession", () => {
     await expect(session.publish(message(clock, { missionId: "mission-b" }))).resolves.toBe(false);
     await expect(session.publish(message(clock, { payload: "x".repeat(2_049) }))).resolves.toBe(false);
     await expect(session.publish(message(clock, { payload: cyclic }))).resolves.toBe(false);
+
+    expect(connections[0]!.publish).not.toHaveBeenCalled();
+  });
+
+  it("never publishes unknown, schema-invalid, or extra-field outbound signal payloads", async () => {
+    const clock = new FakeClock();
+    const { transport, connections } = createTransport();
+    const session = new RealtimeRoomSession({ tokenProvider: async () => token(clock.now() + 300_000), transport, clock });
+    await session.start({ missionId: "mission-a", roomId: "room-a" });
+
+    await expect(session.publish(message(clock, { kind: "interaction.unknown" }))).resolves.toBe(false);
+    await expect(session.publish(message(clock, { payload: { targetId: "canvas-1", x: -0.01, y: 0.5, mode: "map" } }))).resolves.toBe(false);
+    await expect(session.publish(message(clock, { payload: { targetId: "canvas-1", x: 0.5, y: 0.5, mode: "map", unexpected: true } }))).resolves.toBe(false);
 
     expect(connections[0]!.publish).not.toHaveBeenCalled();
   });
