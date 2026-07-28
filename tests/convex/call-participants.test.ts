@@ -122,10 +122,18 @@ describe("Call participants", () => {
     const response = await t.withIdentity(reviewer).mutation(api.calls.respondToCall, { callId: call.callId, expectedParticipantVersion: reviewerJoin.currentVersion, response: "I can validate the permission matrix.", idempotencyKey: "reviewer-response", correlationId: "reviewer-response" });
     expect(await t.withIdentity(reviewer).mutation(api.calls.respondToCall, { callId: call.callId, expectedParticipantVersion: reviewerJoin.currentVersion, response: "I can validate the permission matrix.", idempotencyKey: "reviewer-response", correlationId: "reviewer-response" })).toEqual(response);
     const projection = await asOwner.query(api.calls.listMissionCalls, { missionId });
-    expect(projection).toEqual([expect.objectContaining({ _id: call.callId, joinedCount: 2, maxParticipants: 2 })]);
+    expect(projection).toEqual([expect.objectContaining({ _id: call.callId, joinedCount: 2, maxParticipants: 2, canAdminister: true })]);
     const participants = await asOwner.query(api.calls.listCallParticipants, { callId: call.callId });
     expect(participants).toHaveLength(2);
-    expect(participants.find((participant) => participant._id === reviewerJoin.participantId)).toMatchObject({ response: "I can validate the permission matrix." });
+    expect(participants.find((participant) => participant._id === ownerJoin.participantId)).toMatchObject({ isCurrentUser: true, role: "owner" });
+    expect(participants.find((participant) => participant._id === reviewerJoin.participantId)).toMatchObject({
+      isCurrentUser: false,
+      role: "reviewer",
+      response: "I can validate the permission matrix.",
+    });
+    expect(await t.withIdentity(reviewer).query(api.calls.listCallParticipants, { callId: call.callId })).toEqual(
+      expect.arrayContaining([expect.objectContaining({ _id: reviewerJoin.participantId, isCurrentUser: true })]),
+    );
     expect(ownerJoin.participantId).not.toBe(reviewerJoin.participantId);
   });
 
@@ -143,6 +151,10 @@ describe("Call participants", () => {
     await expect(t.withIdentity(observer).mutation(api.calls.respondToCall, { callId: ownerCall.callId, expectedParticipantVersion: 1, response: "No access", idempotencyKey: "observer-response", correlationId: "observer-response" })).rejects.toThrow("Not found");
     const contributorCall = await t.withIdentity(contributor).mutation(api.calls.createCall, callArgs(missionId, roomId, "creator-call"));
     await expect(t.withIdentity(contributor).mutation(api.calls.updateCall, { callId: contributorCall.callId, expectedVersion: 1, roomId, linkedMoveId: null, title: "Creator can update", detail: "A contributor who created this Call can administer it in scope.", idempotencyKey: "creator-edit", correlationId: "creator-edit" })).resolves.toMatchObject({ currentVersion: 2 });
+    expect(await t.withIdentity(contributor).query(api.calls.listMissionCalls, { missionId })).toEqual(expect.arrayContaining([
+      expect.objectContaining({ _id: ownerCall.callId, canAdminister: false }),
+      expect.objectContaining({ _id: contributorCall.callId, canAdminister: true }),
+    ]));
     await expect(t.withIdentity(reviewer).mutation(api.calls.joinCall, { callId: ownerCall.callId, idempotencyKey: "reviewer-join", correlationId: "reviewer-join" })).resolves.toMatchObject({ joinedCount: 1 });
   });
 

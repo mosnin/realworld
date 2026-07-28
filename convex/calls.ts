@@ -25,6 +25,7 @@ const callView = v.object({
   detail: v.string(),
   maxParticipants: v.number(),
   joinedCount: v.number(),
+  canAdminister: v.boolean(),
   status: callStatus,
   currentVersion: v.number(),
   createdAt: v.number(),
@@ -33,7 +34,17 @@ const callView = v.object({
 const participantView = v.object({
   _id: v.id("callParticipants"),
   callId: v.id("calls"),
-  principalId: v.id("principals"),
+  displayName: v.optional(v.string()),
+  role: v.optional(v.union(
+    v.literal("owner"),
+    v.literal("steward"),
+    v.literal("builder"),
+    v.literal("reviewer"),
+    v.literal("contributor"),
+    v.literal("observer"),
+    v.literal("agent"),
+  )),
+  isCurrentUser: v.boolean(),
   response: v.optional(v.string()),
   currentVersion: v.number(),
   joinedAt: v.number(),
@@ -99,6 +110,17 @@ function requireCallAdmin(
 ) {
   if (!canReadCall(membership, call)) throw new Error("Not found");
   if (!["owner", "steward"].includes(membership.role) && membership.principalId !== call.creatorPrincipalId) throw new Error("Not found");
+}
+
+function canAdministerCall(
+  membership: Awaited<ReturnType<typeof requireActiveMembership>>,
+  call: Pick<Doc<"calls">, "roomId" | "creatorPrincipalId">,
+) {
+  return canReadCall(membership, call) && (
+    membership.role === "owner"
+    || membership.role === "steward"
+    || membership.principalId === call.creatorPrincipalId
+  );
 }
 
 function requireCallParticipation(
@@ -242,6 +264,7 @@ export const listMissionCalls = query({
         detail: call.detail,
         maxParticipants: normalizedMaxParticipants(call.maxParticipants),
         joinedCount: call.joinedCount ?? 0,
+        canAdminister: canAdministerCall(membership, call),
         status: call.status,
         currentVersion: call.currentVersion,
         createdAt: call.createdAt,
@@ -262,14 +285,26 @@ export const listCallParticipants = query({
       .query("callParticipants")
       .withIndex("by_call_and_state", (index) => index.eq("callId", call._id).eq("state", "joined"))
       .take(50);
-    return participants.map((participant) => ({
-      _id: participant._id,
-      callId: participant.callId,
-      principalId: participant.principalId,
-      response: participant.response,
-      currentVersion: participant.currentVersion,
-      joinedAt: participant.joinedAt,
-      updatedAt: participant.updatedAt,
+    return await Promise.all(participants.map(async (participant) => {
+      const [principal, participantMembership] = await Promise.all([
+        ctx.db.get(participant.principalId),
+        ctx.db
+          .query("missionMembers")
+          .withIndex("by_mission_and_principal", (index) =>
+            index.eq("missionId", call.missionId).eq("principalId", participant.principalId))
+          .unique(),
+      ]);
+      return {
+        _id: participant._id,
+        callId: participant.callId,
+        displayName: principal?.displayName,
+        role: participantMembership?.role,
+        isCurrentUser: participant.principalId === membership.principalId,
+        response: participant.response,
+        currentVersion: participant.currentVersion,
+        joinedAt: participant.joinedAt,
+        updatedAt: participant.updatedAt,
+      };
     }));
   },
 });

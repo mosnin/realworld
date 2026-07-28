@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery } from "convex/react";
 
@@ -55,36 +55,74 @@ export function CallSurface({
   const createCall = useMutation(api.calls.createCall);
   const updateCall = useMutation(api.calls.updateCall);
   const transitionCall = useMutation(api.calls.transitionCall);
+  const joinCall = useMutation(api.calls.joinCall);
+  const withdrawCall = useMutation(api.calls.withdrawCall);
+  const respondToCall = useMutation(api.calls.respondToCall);
   const commandKeys = useRef<Record<string, string>>({});
   const firstFieldRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const openerRef = useRef<HTMLButtonElement | null>(null);
   const [open, setOpen] = useState(false);
   const [selectedCallId, setSelectedCallId] = useState<Id<"calls"> | null>(null);
   const [title, setTitle] = useState("");
   const [detail, setDetail] = useState("");
   const [roomId, setRoomId] = useState<Id<"rooms"> | "">(rooms[0]?._id ?? "");
   const [linkedMoveId, setLinkedMoveId] = useState<Id<"moves"> | "">("");
+  const [maxParticipants, setMaxParticipants] = useState("50");
+  const [responseDraft, setResponseDraft] = useState<{ callId: Id<"calls"> | null; participantVersion: number; value: string }>({ callId: null, participantVersion: -1, value: "" });
   const [pendingIntent, setPendingIntent] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const canWrite = mission.lifecycle === "active" && ["owner", "steward", "builder", "contributor"].includes(mission.role);
+  const participants = useQuery(
+    api.calls.listCallParticipants,
+    selectedCallId === null ? "skip" : { callId: selectedCallId },
+  );
+  const canCreate = mission.lifecycle === "active" && ["owner", "steward", "builder", "contributor"].includes(mission.role);
+  const canParticipate = mission.lifecycle === "active" && ["owner", "steward", "builder", "reviewer", "contributor"].includes(mission.role);
   const selectedCall = calls?.find((call) => call._id === selectedCallId);
   const linkedMoveOptions = moves.filter((move) => move.roomId === roomId);
   const selectedCallRoom = rooms.find((room) => room._id === selectedCall?.roomId);
   const selectedCallMove = moves.find((move) => move._id === selectedCall?.linkedMoveId);
   const selectedTransitions = selectedCall === undefined ? [] : transitions[selectedCall.status] ?? [];
-  const isEditableCall = canWrite && (selectedCall === undefined || selectedCall.status === "open" || selectedCall.status === "accepted");
+  const isTerminalCall = selectedCall?.status === "resolved" || selectedCall?.status === "cancelled";
+  const isEditableCall = selectedCall === undefined ? canCreate : Boolean(selectedCall?.canAdminister) && !isTerminalCall;
+  const currentParticipant = participants?.find((participant) => participant.isCurrentUser);
+  const canChangeParticipation = canParticipate && !isTerminalCall && selectedCall !== undefined;
+  const remainingSlots = selectedCall === undefined ? 0 : Math.max(0, selectedCall.maxParticipants - selectedCall.joinedCount);
+  const response = responseDraft.callId === selectedCallId && responseDraft.participantVersion === currentParticipant?.currentVersion
+    ? responseDraft.value
+    : currentParticipant?.response ?? "";
+  const closeSurface = useCallback(() => {
+    setOpen(false);
+    window.requestAnimationFrame(() => openerRef.current?.focus());
+  }, []);
 
   useEffect(() => {
     if (!open) return;
-    const frame = window.requestAnimationFrame(() => firstFieldRef.current?.focus());
+    const frame = window.requestAnimationFrame(() => {
+      const firstInteractive = panelRef.current?.querySelector<HTMLElement>("button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled])");
+      (firstFieldRef.current ?? firstInteractive)?.focus();
+    });
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && pendingIntent === null) setOpen(false);
+      if (event.key === "Escape" && pendingIntent === null) closeSurface();
+      if (event.key !== "Tab" || !panelRef.current) return;
+      const focusable = Array.from(panelRef.current.querySelectorAll<HTMLElement>("button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled])"));
+      if (focusable.length === 0) return;
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => {
       window.cancelAnimationFrame(frame);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [open, pendingIntent]);
+  }, [closeSurface, open, pendingIntent]);
 
   function resetComposer(clearStatus = true) {
     setSelectedCallId(null);
@@ -92,22 +130,28 @@ export function CallSurface({
     setDetail("");
     setRoomId(rooms[0]?._id ?? "");
     setLinkedMoveId("");
+    setMaxParticipants("50");
+    setResponseDraft({ callId: null, participantVersion: -1, value: "" });
     if (clearStatus) setStatus(null);
   }
 
-  function openComposer() {
+  function openComposer(event: React.MouseEvent<HTMLButtonElement>) {
+    openerRef.current = event.currentTarget;
     resetComposer();
     setOpen(true);
   }
 
-  function inspectCall(callId: Id<"calls">) {
+  function inspectCall(callId: Id<"calls">, event: React.MouseEvent<HTMLButtonElement>) {
     const call = calls?.find((candidate) => candidate._id === callId);
     if (!call) return;
+    if (!panelRef.current?.contains(event.currentTarget)) openerRef.current = event.currentTarget;
     setSelectedCallId(call._id);
     setTitle(call.title);
     setDetail(call.detail);
     setRoomId(call.roomId ?? "");
     setLinkedMoveId(call.linkedMoveId ?? "");
+    setMaxParticipants(String(call.maxParticipants));
+    setResponseDraft({ callId: null, participantVersion: -1, value: "" });
     setStatus(null);
     setOpen(true);
   }
@@ -132,7 +176,12 @@ export function CallSurface({
   }
 
   async function save() {
-    if (!canWrite || roomId === "") return;
+    if (!isEditableCall || roomId === "") return;
+    const participantLimit = Number(maxParticipants);
+    if (!Number.isInteger(participantLimit) || participantLimit < 1 || participantLimit > 50) {
+      setStatus("Choose a participant limit from 1 to 50.");
+      return;
+    }
     if (selectedCall === undefined) {
       const succeeded = await runCommand(
         "create",
@@ -142,6 +191,7 @@ export function CallSurface({
           linkedMoveId: linkedMoveId || undefined,
           title,
           detail,
+          maxParticipants: participantLimit,
           idempotencyKey,
           correlationId: crypto.randomUUID(),
         }),
@@ -159,6 +209,7 @@ export function CallSurface({
         linkedMoveId: linkedMoveId || null,
         title,
         detail,
+        maxParticipants: participantLimit,
         idempotencyKey,
         correlationId: crypto.randomUUID(),
       }),
@@ -182,10 +233,37 @@ export function CallSurface({
     );
   }
 
+  async function join() {
+    if (!selectedCall || !canChangeParticipation) return;
+    await runCommand(
+      `join:${selectedCall._id}`,
+      (idempotencyKey) => joinCall({ callId: selectedCall._id, idempotencyKey, correlationId: crypto.randomUUID() }),
+      `You joined ${selectedCall.title}.`,
+    );
+  }
+
+  async function withdraw() {
+    if (!selectedCall || !currentParticipant || !canChangeParticipation) return;
+    await runCommand(
+      `withdraw:${selectedCall._id}`,
+      (idempotencyKey) => withdrawCall({ callId: selectedCall._id, expectedParticipantVersion: currentParticipant.currentVersion, idempotencyKey, correlationId: crypto.randomUUID() }),
+      `You withdrew from ${selectedCall.title}.`,
+    );
+  }
+
+  async function respond() {
+    if (!selectedCall || !currentParticipant || !canChangeParticipation) return;
+    await runCommand(
+      `respond:${selectedCall._id}`,
+      (idempotencyKey) => respondToCall({ callId: selectedCall._id, expectedParticipantVersion: currentParticipant.currentVersion, response, idempotencyKey, correlationId: crypto.randomUUID() }),
+      `Response sent to ${selectedCall.title}.`,
+    );
+  }
+
   return (
     <section className="call-surface" aria-label="Mission Calls">
       <button className="call-surface__trigger" onClick={openComposer} type="button">
-        <Icon name="spark" /> {canWrite ? "Issue Call" : "View Calls"}{calls === undefined ? "" : ` (${calls.length})`}
+        <Icon name="spark" /> {canCreate ? "Issue Call" : "View Calls"}{calls === undefined ? "" : ` (${calls.length})`}
       </button>
 
       <div className="call-beacons" aria-label="Calls anchored to Mission rooms">
@@ -193,10 +271,10 @@ export function CallSurface({
           const room = rooms.find((candidate) => candidate._id === call.roomId);
           return (
             <button
-              aria-label={`Open Call: ${call.title}, ${statusLabel(call.status)}`}
+              aria-label={`Open Call: ${call.title}, ${statusLabel(call.status)}, ${call.joinedCount} of ${call.maxParticipants} participants`}
               className={`call-beacon call-beacon--${call.status}`}
               key={call._id}
-              onClick={() => inspectCall(call._id)}
+              onClick={(event) => inspectCall(call._id, event)}
               style={{
                 left: `calc(${room?.x ?? 50}% + ${(index % 3) * 12}px)`,
                 top: `calc(${room?.y ?? 10}% + ${-42 - Math.floor(index / 3) * 12}px)`,
@@ -205,24 +283,24 @@ export function CallSurface({
             >
               <span aria-hidden="true"><Icon name="spark" /></span>
               <strong>{call.title}</strong>
-              <small>{statusLabel(call.status)}</small>
+              <small>{statusLabel(call.status)} · {call.joinedCount}/{call.maxParticipants}</small>
             </button>
           );
         })}
       </div>
 
       {open ? createPortal((
-        <div aria-labelledby="call-surface-title" aria-modal="true" className="preference-panel call-surface__panel" role="dialog">
+        <div aria-labelledby="call-surface-title" aria-modal="true" className="preference-panel call-surface__panel" ref={panelRef} role="dialog">
           <div className="preference-panel__header">
             <div>
               <p className="eyebrow">Mission Calls</p>
               <h2 id="call-surface-title">Ask for a hand, in context</h2>
             </div>
-            <button aria-label="Close Calls" className="icon-button" disabled={pendingIntent !== null} onClick={() => setOpen(false)} type="button">×</button>
+            <button aria-label="Close Calls" className="icon-button" disabled={pendingIntent !== null} onClick={closeSurface} type="button">×</button>
           </div>
 
-          {!canWrite ? <p aria-label="Mission Calls read-only">Calls are read-only for your role or this archived Mission.</p> : null}
-          {selectedCall !== undefined && canWrite ? <button className="call-surface__back" disabled={pendingIntent !== null} onClick={() => resetComposer()} type="button">Issue another Call</button> : null}
+          {!canCreate && !canParticipate ? <p aria-label="Mission Calls read-only">Calls are read-only for your role or this archived Mission.</p> : null}
+          {selectedCall !== undefined && canCreate ? <button className="call-surface__back" disabled={pendingIntent !== null} onClick={() => resetComposer()} type="button">Issue another Call</button> : null}
 
           {selectedCall !== undefined ? (
             <article className="call-detail" aria-label={`Call details for ${selectedCall.title}`}>
@@ -230,6 +308,7 @@ export function CallSurface({
               <div>{selectedCall.detail}</div>
               <small>Room: {selectedCallRoom?.title ?? "Mission-wide"}</small>
               <small>Linked Move: {selectedCallMove?.title ?? "None"}</small>
+              <small aria-live="polite" className="call-detail__capacity" role="status">{selectedCall.joinedCount} / {selectedCall.maxParticipants} participants</small>
             </article>
           ) : null}
 
@@ -256,11 +335,15 @@ export function CallSurface({
                   {linkedMoveOptions.map((move) => <option key={move._id} value={move._id}>{move.title}</option>)}
                 </select>
               </label>
+              <label>
+                Participant limit (1–50)
+                <input disabled={pendingIntent !== null} max="50" min="1" onChange={(event) => setMaxParticipants(event.target.value)} required type="number" value={maxParticipants} />
+              </label>
               <button disabled={pendingIntent !== null} type="submit">{pendingIntent === "create" ? "Issuing…" : selectedCall === undefined ? "Issue Call" : pendingIntent?.startsWith("update:") ? "Saving…" : "Save Call"}</button>
             </form>
           ) : isEditableCall ? <p>No writable Room is available for a Call.</p> : null}
 
-          {selectedCall !== undefined && canWrite && selectedTransitions.length > 0 ? (
+          {selectedCall !== undefined && selectedCall.canAdminister && selectedTransitions.length > 0 ? (
             <section aria-label={`Call actions for ${selectedCall.title}`} className="call-actions">
               <p><strong>{selectedCall.title}</strong> <span>{statusLabel(selectedCall.status)}</span></p>
               {selectedTransitions.map((nextStatus) => (
@@ -271,6 +354,38 @@ export function CallSurface({
             </section>
           ) : null}
 
+          {selectedCall !== undefined ? (
+            <section aria-label={`Call participants for ${selectedCall.title}`} className="call-participants">
+              <div className="call-participants__header">
+                <strong>Participants</strong>
+                <span>{selectedCall.joinedCount} / {selectedCall.maxParticipants}</span>
+              </div>
+              {participants === undefined ? <p>Loading participants…</p> : participants.length === 0 ? <p>No one has joined yet.</p> : (
+                <ul>
+                  {participants.map((participant, index) => <li key={participant._id}>
+                    <span>{participant.isCurrentUser ? "You" : participant.displayName ?? participant.role ?? `Collaborator ${index + 1}`}</span>
+                    {participant.response ? <small>{participant.response}</small> : <small>Joined</small>}
+                  </li>)}
+                </ul>
+              )}
+              {canChangeParticipation && participants !== undefined ? (
+                <div className="call-participation-actions">
+                  {currentParticipant ? <button disabled={pendingIntent !== null} onClick={() => void withdraw()} type="button">{pendingIntent?.startsWith("withdraw:") ? "Withdrawing…" : `Withdraw ${selectedCall.title}`}</button> : (
+                    <button disabled={pendingIntent !== null || remainingSlots === 0} onClick={() => void join()} type="button">{pendingIntent?.startsWith("join:") ? "Joining…" : `Join ${selectedCall.title}`}</button>
+                  )}
+                  {currentParticipant ? <>
+                    <label>
+                      Response to {selectedCall.title}
+                      <textarea disabled={pendingIntent !== null} onChange={(event) => setResponseDraft({ callId: selectedCall._id, participantVersion: currentParticipant.currentVersion, value: event.target.value })} value={response} />
+                    </label>
+                    <button disabled={pendingIntent !== null || response.trim().length === 0} onClick={() => void respond()} type="button">{pendingIntent?.startsWith("respond:") ? "Responding…" : `Respond to ${selectedCall.title}`}</button>
+                  </> : null}
+                  {!currentParticipant && remainingSlots === 0 ? <p aria-live="polite">This Call is full.</p> : null}
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+
           {calls !== undefined && calls.length > 0 ? (
             <ul className="call-list" aria-label="Mission Calls">
               {calls.map((call) => {
@@ -278,7 +393,7 @@ export function CallSurface({
                 const linkedMove = moves.find((move) => move._id === call.linkedMoveId);
                 return (
                   <li key={call._id}>
-                    <button aria-pressed={selectedCallId === call._id} onClick={() => inspectCall(call._id)} type="button">
+                    <button aria-pressed={selectedCallId === call._id} onClick={(event) => inspectCall(call._id, event)} type="button">
                       <span><strong>{call.title}</strong><em>{statusLabel(call.status)}</em></span>
                       <small>{call.detail}</small>
                       <i>{callRoom?.title ?? "Mission-wide"}{linkedMove ? ` · Move: ${linkedMove.title}` : ""}</i>

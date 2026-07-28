@@ -437,6 +437,103 @@ test("an owner can issue, edit, advance, and reload a durable room Call", async 
   await expect(callDialog.getByLabel(`Call actions for ${updatedTitle}`)).toHaveCount(0);
 });
 
+test("an owner and contributor reactively coordinate a capacity-limited Call", async ({ browser, page }) => {
+  const title = `Pair on the live Call ${Date.now()}`;
+  const firstResponse = "I can review the current permission behavior.";
+  const updatedResponse = "I can review the current permission behavior and verify the recovery path.";
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Invite collaborators" }).click();
+  const invitations = page.getByRole("dialog", { name: "Invite collaborators" });
+  await invitations.getByLabel("Role").selectOption("contributor");
+  await invitations.getByRole("checkbox", { name: /Workshop/i }).check();
+  await invitations.getByRole("button", { name: "Create invitation" }).click();
+  const inviteUrl = await invitations.getByLabel("Invitation link").inputValue();
+  expect(inviteUrl).toContain("/invite/");
+
+  const contributorContext = await browser.newContext();
+  try {
+    const contributor = await contributorContext.newPage();
+    await contributor.goto(inviteUrl);
+    await contributor.getByLabel("Email").fill(
+      `call-contributor-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`,
+    );
+    await contributor.getByLabel("Password").fill("Realworld-browser-test-2026");
+    await contributor.getByRole("button", { name: "Need an invitation? Create an account" }).click();
+    await contributor.getByRole("button", { name: "Create private-alpha account" }).click();
+    await expect(contributor.getByRole("heading", { name: "You have a Mission invitation." })).toBeVisible({ timeout: 15_000 });
+    await contributor.getByRole("button", { name: "Join Mission" }).click();
+    await expect(contributor.getByText("You joined the Mission.")).toBeVisible();
+    await contributor.getByRole("link", { name: "Enter the Mission World" }).click();
+    await expect(contributor.getByRole("heading", { name: "Company sprint" })).toBeVisible();
+    await expect(contributor.getByText("contributor", { exact: true })).toBeVisible();
+
+    await page.getByRole("button", { name: "Close invitations" }).click();
+    await page.getByRole("button", { name: /Issue Call/ }).click();
+    const ownerDialog = page.getByRole("dialog", { name: "Ask for a hand, in context" });
+    await ownerDialog.getByLabel("Call title").fill(title);
+    await ownerDialog.getByRole("textbox", { name: "Detail" }).fill("Pair with one contributor on the Workshop access review.");
+    await ownerDialog.getByLabel("Room").selectOption({ label: "Workshop" });
+    await ownerDialog.getByLabel("Participant limit (1–50)").fill("1");
+    await ownerDialog.getByRole("button", { name: "Issue Call", exact: true }).click();
+    await expect(ownerDialog.getByText("Call issued.")).toBeVisible();
+    await ownerDialog.getByRole("button", { name: "Close Calls" }).click();
+
+    const contributorBeacon = contributor.getByRole("button", { name: `Open Call: ${title}, open` });
+    await expect(contributorBeacon).toBeVisible({ timeout: 15_000 });
+    await contributorBeacon.click();
+    let contributorDialog = contributor.getByRole("dialog", { name: "Ask for a hand, in context" });
+    const contributorParticipants = contributorDialog.getByLabel(`Call participants for ${title}`);
+    await expect(contributorParticipants).toContainText(/0\s*\/\s*1/);
+    await contributorDialog.getByRole("button", { name: `Join ${title}` }).click();
+    await expect(contributorParticipants).toContainText(/1\s*\/\s*1/);
+
+    const ownerBeacon = page.getByRole("button", { name: `Open Call: ${title}, open` });
+    await ownerBeacon.click();
+    const ownerParticipants = ownerDialog.getByLabel(`Call participants for ${title}`);
+    await expect(ownerParticipants).toContainText(/1\s*\/\s*1/, { timeout: 15_000 });
+
+    await contributorDialog.getByLabel(`Response to ${title}`).fill(firstResponse);
+    await contributorDialog.getByRole("button", { name: `Respond to ${title}` }).click();
+    await expect(contributorParticipants.getByText(firstResponse, { exact: true })).toBeVisible();
+    await contributorDialog.getByLabel(`Response to ${title}`).fill(updatedResponse);
+    await contributorDialog.getByRole("button", { name: `Respond to ${title}` }).click();
+    await expect(ownerParticipants.getByText(updatedResponse, { exact: true })).toBeVisible({ timeout: 15_000 });
+
+    await contributorDialog.getByRole("button", { name: `Withdraw ${title}` }).click();
+    await expect(contributorParticipants).toContainText(/0\s*\/\s*1/);
+    await expect(ownerParticipants).toContainText(/0\s*\/\s*1/, { timeout: 15_000 });
+
+    await contributor.reload();
+    await expect(contributor.getByRole("heading", { name: "Company sprint" })).toBeVisible();
+    await contributor.getByRole("button", { name: `Open Call: ${title}, open` }).click();
+    contributorDialog = contributor.getByRole("dialog", { name: "Ask for a hand, in context" });
+    const reloadedParticipants = contributorDialog.getByLabel(`Call participants for ${title}`);
+    await expect(reloadedParticipants).toContainText(/0\s*\/\s*1/);
+    await expect(contributorDialog.getByRole("button", { name: `Join ${title}` })).toBeVisible();
+
+    await contributorDialog.getByRole("button", { name: `Join ${title}` }).click();
+    await expect(reloadedParticipants).toContainText(/1\s*\/\s*1/);
+    await contributorDialog.getByLabel(`Response to ${title}`).fill(updatedResponse);
+    await contributorDialog.getByRole("button", { name: `Respond to ${title}` }).click();
+    await expect(ownerParticipants.getByText(updatedResponse, { exact: true })).toBeVisible({ timeout: 15_000 });
+
+    await ownerDialog.getByRole("button", { name: `Accept ${title}` }).click();
+    await expect(ownerDialog.getByText(`${title} is now accepted.`)).toBeVisible();
+    await ownerDialog.getByRole("button", { name: `Resolve ${title}` }).click();
+    await expect(ownerDialog.getByText(`${title} is now resolved.`)).toBeVisible();
+
+    await expect(contributorDialog.getByRole("button", { name: `Join ${title}` })).toHaveCount(0, { timeout: 15_000 });
+    await expect(contributorDialog.getByRole("button", { name: `Withdraw ${title}` })).toHaveCount(0);
+    await expect(contributorDialog.getByLabel(`Response to ${title}`)).toHaveCount(0);
+    await expect(contributorDialog.getByRole("button", { name: `Respond to ${title}` })).toHaveCount(0);
+    await expect(contributorDialog.getByLabel(`Call participants for ${title}`)).toContainText(/1\s*\/\s*1/);
+    await expect(contributorDialog.getByText(updatedResponse, { exact: true })).toBeVisible();
+  } finally {
+    await contributorContext.close();
+  }
+});
+
 test.describe("a reactive scoped Mission canvas", () => {
   test("an owner can invite a participant and their Workshop map reacts without a reload", async ({ browser, page }) => {
   await page.goto("/");
