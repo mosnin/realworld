@@ -660,6 +660,7 @@ function disposeTransportSubscription(
       () => finish(new Error("Realtime transport disposal timed out")),
       timeoutMs,
     );
+    if (settled) clock.clearTimeout(timer);
     let disposal: void | Promise<void>;
     try {
       disposal = subscription.unsubscribe();
