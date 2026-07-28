@@ -5,7 +5,7 @@
   "currentPhase": 1,
   "phaseName": "Production foundation",
   "startedAt": "2026-07-27T00:00:00-04:00",
-  "lastUpdatedAt": "2026-07-27T22:51:00-04:00",
+  "lastUpdatedAt": "2026-07-27T22:54:00-04:00",
   "exactNextActions": [
     "Create or connect a cloud Convex development deployment and verify the current preview creates and reloads a durable Mission",
     "Implement durable Calls, Fractures, Proof, and Pulse on top of the Mission event ledger",
@@ -21,7 +21,7 @@
     "artifactStudio": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"artifact domain and surfaces","exactNextAction":"Wait for client, realtime, and agent contracts"},
     "discoverySocial": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"discovery and contribution surfaces","exactNextAction":"Wait for Artifact Studio and reputation contracts"},
     "trustGovernance": {"status":"review","model":"gpt-5.6-terra","writeScope":"docs/program/trust-quality-release.md","lastMeaningfulHeartbeatAt":"2026-07-27T22:51:00-04:00","evidence":"commits c1f156b, e90d1ee, 44d944b, 5f49c17, d21d37a, 90f4d11, 6792212, 2c1d1f8, 8b395eb, and 4ec39a6; deny-by-default room and Move scope, writer-role variants, revoked and expired writers, dependency visibility, archive freeze, OCC, and replay authorization have automated coverage","exactNextAction":"Add adversarial cyclic and cross-scope dependency coverage"},
-    "qualityOperations": {"status":"review","model":"gpt-5.6-terra","writeScope":"CI and verification infrastructure","lastMeaningfulHeartbeatAt":"2026-07-27T22:51:00-04:00","evidence":"Local gate passes lint, typecheck, 36 automated tests, Convex validation, production build, and fifteen authenticated Chromium journeys including the durable owner Move workflow. Hosted CI remains verified only through GitHub Actions run 30323307089 with 32 tests and fourteen journeys. The local 50-participant simulation is not browser, network, Ably, or production load evidence","exactNextAction":"Verify the Move-board release gate in hosted CI, then add real network, browser, Ably, and failure-recovery evidence"}
+    "qualityOperations": {"status":"review","model":"gpt-5.6-terra","writeScope":"CI and verification infrastructure","lastMeaningfulHeartbeatAt":"2026-07-27T22:54:00-04:00","evidence":"GitHub Actions run 30324312423 passes install, lint, typecheck, 36 automated tests, 35 Convex-focused tests, Convex validation, production build, fifteen authenticated Chromium journeys including the durable owner Move workflow, and foundation evidence. The local 50-participant simulation is not browser, network, Ably, or production load evidence","exactNextAction":"Add real network, browser, Ably, and failure-recovery evidence"}
   },
   "orchestration": {
     "preferredRuntime": "orca",
