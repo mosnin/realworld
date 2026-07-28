@@ -231,7 +231,7 @@ describe("development Ably transport factory", () => {
     expect(clientFactory.mock.calls).toEqual([[firstToken.tokenRequest], [secondToken.tokenRequest]]);
   });
 
-  it("has no ambient provider, credential, or network path and Mission World still injects none", async () => {
+  it("has no ambient provider, credential, or network path while Mission World injects only the authenticated token action", async () => {
     const [factorySource, missionWorldSource] = await Promise.all([
       readFile(new URL("../../app/realtime/development-ably-transport-factory.ts", import.meta.url), "utf8"),
       readFile(new URL("../../app/mission-world.tsx", import.meta.url), "utf8"),
@@ -239,7 +239,9 @@ describe("development Ably transport factory", () => {
 
     expect(factorySource).not.toMatch(/process\.env|import\(["']ably["']\)|\bfetch\s*\(/);
     expect(factorySource).toContain("clientFactory?: unknown");
-    expect(missionWorldSource).toContain("<AuthenticatedMissionRealtimeLifecycle");
-    expect(missionWorldSource).not.toMatch(/authenticatedTokenRequester=|transportFactory=|sessionFactory=/);
+    expect(missionWorldSource).toContain('useAction(api.realtime.issueTokenRequest)');
+    expect(missionWorldSource).toMatch(/<AuthenticatedMissionRealtimeLifecycle[^>]*authenticatedTokenRequester=\{requestAuthenticatedRealtimeToken\}/s);
+    expect(missionWorldSource).not.toMatch(/transportFactory=|sessionFactory=/);
+    expect(missionWorldSource).not.toMatch(/createDevelopmentAblyTransportFactory|clientFactory=|ABLY_API_KEY|process\.env/);
   });
 });

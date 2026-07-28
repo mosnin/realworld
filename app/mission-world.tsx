@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useAction, useMutation, useQuery } from "convex/react";
 
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
@@ -398,6 +398,14 @@ export function MissionWorld() {
   const updateRoomLayout = useMutation(api.canvas.updateRoomLayout);
   const renameRoomMutation = useMutation(api.canvas.renameRoom);
   const archiveRoomMutation = useMutation(api.canvas.archiveRoom);
+  const issueRealtimeTokenRequest = useAction(api.realtime.issueTokenRequest);
+  const requestAuthenticatedRealtimeToken = useCallback(async ({ missionId, roomId }: { missionId: string; roomId: string }) => {
+    const response = await issueRealtimeTokenRequest({
+      missionId: missionId as Id<"missions">,
+      roomId: roomId as Id<"rooms">,
+    });
+    return { ...response, missionId, roomId };
+  }, [issueRealtimeTokenRequest]);
   const [launching, setLaunching] = useState<string | null>(null);
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [selectedRoomId, setSelectedRoomId] = useState<RoomId>("");
@@ -606,12 +614,12 @@ export function MissionWorld() {
   const missionWritable = activeMission.lifecycle === "active";
 
   if (view === "workshop") {
-    return <><AuthenticatedMissionRealtimeLifecycle expectedMissionId={activeMission._id} expectedRoomId={selectedRoom.id} membershipGrantVersion={activeMission.grantVersion} readiness={realtimeRoomReadiness} /><Workshop mission={activeMission} onExit={() => setView("world")} /></>;
+    return <><AuthenticatedMissionRealtimeLifecycle authenticatedTokenRequester={requestAuthenticatedRealtimeToken} expectedMissionId={activeMission._id} expectedRoomId={selectedRoom.id} membershipGrantVersion={activeMission.grantVersion} readiness={realtimeRoomReadiness} /><Workshop mission={activeMission} onExit={() => setView("world")} /></>;
   }
 
   return (
     <div className="mission-world" aria-label="Realworld Mission World" data-accent={preferences.accent} data-density={preferences.density} data-decoration={preferences.reducedDecoration ? "reduced" : "standard"}>
-      <AuthenticatedMissionRealtimeLifecycle expectedMissionId={activeMission._id} expectedRoomId={selectedRoom.id} membershipGrantVersion={activeMission.grantVersion} readiness={realtimeRoomReadiness} />
+      <AuthenticatedMissionRealtimeLifecycle authenticatedTokenRequester={requestAuthenticatedRealtimeToken} expectedMissionId={activeMission._id} expectedRoomId={selectedRoom.id} membershipGrantVersion={activeMission.grantVersion} readiness={realtimeRoomReadiness} />
       <header className="world-topbar">
         <a className="brand" href="#core" aria-label="Realworld Mission World"><Icon name="spark" /> <span>Realworld</span></a>
         <nav aria-label="Primary navigation">
