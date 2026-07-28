@@ -267,6 +267,7 @@ describe("invites and durable canvas", () => {
   it("rejects owner/steward grants, expired/max-use tokens, non-owner issuers, and cross-mission rooms", async () => {
     const { t, asOwner, result } = await createMission(); const roomId = await roomFor(t, result.missionId); const guest = t.withIdentity(contributorIdentity);
     await expect(asOwner.mutation(api.invites.createInvite, { missionId: result.missionId, role: "owner" as never, roomIds: [roomId], expiresAt: Date.now() + 60_000, maxUses: 1, inviteToken: "b".repeat(40), idempotencyKey: "bad-role", correlationId: "c" })).rejects.toThrow();
+    await expect(asOwner.mutation(api.invites.createInvite, { missionId: result.missionId, role: "observer", roomIds: [], expiresAt: Date.now() + 60_000, maxUses: 1, inviteToken: "z".repeat(40), idempotencyKey: "empty-rooms", correlationId: "c" })).rejects.toThrow("Invalid invite constraints");
     await t.run(async (ctx) => { const id = await ctx.db.insert("principals", { type: "human", state: "active", tokenIdentifier: contributorIdentity.tokenIdentifier, createdAt: Date.now(), updatedAt: Date.now(), schemaVersion: 1 }); await ctx.db.insert("missionMembers", { missionId: result.missionId, principalId: id, role: "contributor", state: "active", scope: [], grantVersion: 1, createdAt: Date.now(), updatedAt: Date.now(), schemaVersion: 1 }); });
     await expect(guest.mutation(api.invites.createInvite, { missionId: result.missionId, role: "observer", roomIds: [roomId], expiresAt: Date.now() + 60_000, maxUses: 1, inviteToken: "c".repeat(40), idempotencyKey: "guest-invite", correlationId: "c" })).rejects.toThrow("Not found");
   });
@@ -283,6 +284,19 @@ describe("invites and durable canvas", () => {
     await asOwner.mutation(api.invites.createInvite, { missionId: result.missionId, role: "observer", roomIds: [roomId], expiresAt: Date.now() + 60_000, maxUses: 1, inviteToken: limitedToken, idempotencyKey: "limited-invite", correlationId: "limited-c" });
     await t.withIdentity(contributorIdentity).mutation(api.invites.acceptInvite, { inviteToken: limitedToken, idempotencyKey: "limited-first", correlationId: "limited-first-c" });
     await expect(t.withIdentity({ ...contributorIdentity, tokenIdentifier: "https://realworld.test|second-guest", subject: "second-guest" }).mutation(api.invites.acceptInvite, { inviteToken: limitedToken, idempotencyKey: "limited-second", correlationId: "limited-second-c" })).rejects.toThrow("Invite is unavailable");
+  });
+
+  it("does not let an authenticated agent principal redeem a human invitation", async () => {
+    const { t, asOwner, result } = await createMission();
+    const roomId = await roomFor(t, result.missionId);
+    const token = "f".repeat(40);
+    await asOwner.mutation(api.invites.createInvite, { missionId: result.missionId, role: "observer", roomIds: [roomId], expiresAt: Date.now() + 60_000, maxUses: 1, inviteToken: token, idempotencyKey: "agent-invite", correlationId: "agent-c" });
+    const agentIdentity = { tokenIdentifier: "https://realworld.test|agent", subject: "agent", issuer: "https://realworld.test", name: "Agent" };
+    await t.run(async (ctx) => {
+      const now = Date.now();
+      await ctx.db.insert("principals", { type: "agent", state: "active", tokenIdentifier: agentIdentity.tokenIdentifier, createdAt: now, updatedAt: now, schemaVersion: 1 });
+    });
+    await expect(t.withIdentity(agentIdentity).mutation(api.invites.acceptInvite, { inviteToken: token, idempotencyKey: "agent-accept", correlationId: "agent-accept-c" })).rejects.toThrow("Unauthorized");
   });
 
   it("enforces canvas membership, OCC, and Mission isolation", async () => {
