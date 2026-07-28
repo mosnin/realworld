@@ -20,6 +20,22 @@ function title(value: string) {
   return trimmed;
 }
 
+/**
+ * A room write is intentionally narrower than Mission membership. A privileged
+ * collaborator can write either through their Mission-wide grant or an explicit
+ * grant for this room; every other case is indistinguishable from an unknown
+ * room to avoid turning mutation failures into room-discovery side channels.
+ */
+function requireRoomWriteAccess(
+  membership: Awaited<ReturnType<typeof requireActiveMembership>>,
+  roomId: string,
+) {
+  requireRole(membership, ["owner", "steward", "builder"]);
+  if (!membership.scope.includes("mission:*") && !membership.scope.includes(`room:${roomId}`)) {
+    throw new Error("Not found");
+  }
+}
+
 async function receipt(ctx: MutationCtx, scope: string, idempotencyKey: string) {
   return await ctx.db.query("operationReceipts").withIndex("by_scope_and_idempotency_key", (index) => index.eq("scope", scope).eq("idempotencyKey", idempotencyKey)).unique();
 }
@@ -75,7 +91,7 @@ export const updateRoomLayout = mutation({
   returns: v.object({ roomId: v.id("rooms"), layoutVersion: v.number() }),
   handler: async (ctx, args) => {
     const room = await ctx.db.get(args.roomId); if (!room) throw new Error("Not found");
-    const member = await requireActiveMembership(ctx, room.missionId); requireRole(member, ["owner", "steward", "builder"]); validLayout(args.layout);
+    const member = await requireActiveMembership(ctx, room.missionId); requireRoomWriteAccess(member, room._id); validLayout(args.layout);
     const scope = `room:${room._id}:layout`; const commandFingerprint = JSON.stringify({ command: "updateRoomLayout", layout: args.layout, expectedLayoutVersion: args.expectedLayoutVersion }); const prior = await receipt(ctx, scope, args.idempotencyKey);
     if (prior) { if (prior.commandFingerprint !== commandFingerprint) throw new Error("Idempotency key reuse with a different command"); return { roomId: room._id, layoutVersion: prior.resultVersion }; }
     if (room.state !== "active") throw new Error("Not found"); await requireWritableMission(ctx, room.missionId);
@@ -91,7 +107,7 @@ export const renameRoom = mutation({
   args: { roomId: v.id("rooms"), expectedVersion: v.number(), title: v.string(), idempotencyKey: v.string() },
   returns: v.object({ roomId: v.id("rooms"), currentVersion: v.number() }),
   handler: async (ctx, args) => {
-    const room = await ctx.db.get(args.roomId); if (!room) throw new Error("Not found"); const member = await requireActiveMembership(ctx, room.missionId); requireRole(member, ["owner", "steward", "builder"]);
+    const room = await ctx.db.get(args.roomId); if (!room) throw new Error("Not found"); const member = await requireActiveMembership(ctx, room.missionId); requireRoomWriteAccess(member, room._id);
     const scope = `room:${room._id}:rename`; const nextTitle = title(args.title); const commandFingerprint = JSON.stringify({ command: "renameRoom", expectedVersion: args.expectedVersion, title: nextTitle }); const prior = await receipt(ctx, scope, args.idempotencyKey);
     if (prior) { if (prior.commandFingerprint !== commandFingerprint) throw new Error("Idempotency key reuse with a different command"); return { roomId: room._id, currentVersion: prior.resultVersion }; }
     if (room.state !== "active") throw new Error("Not found"); await requireWritableMission(ctx, room.missionId);
@@ -104,7 +120,7 @@ export const archiveRoom = mutation({
   args: { roomId: v.id("rooms"), expectedVersion: v.number(), idempotencyKey: v.string() },
   returns: v.object({ roomId: v.id("rooms"), currentVersion: v.number() }),
   handler: async (ctx, args) => {
-    const room = await ctx.db.get(args.roomId); if (!room) throw new Error("Not found"); const member = await requireActiveMembership(ctx, room.missionId); requireRole(member, ["owner", "steward", "builder"]);
+    const room = await ctx.db.get(args.roomId); if (!room) throw new Error("Not found"); const member = await requireActiveMembership(ctx, room.missionId); requireRoomWriteAccess(member, room._id);
     const scope = `room:${room._id}:archive`; const commandFingerprint = JSON.stringify({ command: "archiveRoom", expectedVersion: args.expectedVersion }); const prior = await receipt(ctx, scope, args.idempotencyKey);
     if (prior) { if (prior.commandFingerprint !== commandFingerprint) throw new Error("Idempotency key reuse with a different command"); return { roomId: room._id, currentVersion: prior.resultVersion }; }
     if (room.state !== "active") throw new Error("Not found"); await requireWritableMission(ctx, room.missionId);
