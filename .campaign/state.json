@@ -5,23 +5,23 @@
   "currentPhase": 1,
   "phaseName": "Production foundation",
   "startedAt": "2026-07-27T00:00:00-04:00",
-  "lastUpdatedAt": "2026-07-27T21:26:42-04:00",
+  "lastUpdatedAt": "2026-07-27T21:37:34-04:00",
   "exactNextActions": [
     "Create or connect a cloud Convex development deployment and verify the current preview creates and reloads a durable Mission",
-    "Add reconnect and concurrent layout-conflict recovery evidence for two authorized editors",
-    "Expand the automated role matrix across Mission and room lifecycle mutations"
+    "Push and reproduce the ten-journey conflict-recovery gate in GitHub Actions",
+    "Implement authenticated Mission edit, archive, and restore controls with replayable history"
   ],
   "teams": {
     "worldNetwork": {"status":"complete","model":"gpt-5.6-terra","writeScope":"docs/program/world-network-system.md","lastMeaningfulHeartbeatAt":"2026-07-27T18:52:00-04:00","evidence":"commit 0ca7a39","exactNextAction":"Review the product contract against the room interaction specification"},
-    "experienceInteraction": {"status":"review","model":"gpt-5.6-terra","writeScope":"design/ and docs/design/","lastMeaningfulHeartbeatAt":"2026-07-27T21:22:00-04:00","evidence":"commits ddfacd3, 6d66216, eec1dae, 2149261, and 92f1893; customizable canvas, keyboard and reduced-motion paths, mobile room entry, and scoped two-context reactive movement pass locally","exactNextAction":"Add visible reconnect and layout-conflict recovery evidence"},
+    "experienceInteraction": {"status":"review","model":"gpt-5.6-terra","writeScope":"design/ and docs/design/","lastMeaningfulHeartbeatAt":"2026-07-27T21:37:00-04:00","evidence":"commits ddfacd3, 6d66216, eec1dae, 2149261, 92f1893, and e350642; customizable canvas, keyboard, reduced motion, mobile, scoped live movement, and visible concurrent conflict recovery pass locally","exactNextAction":"Extend recovery evidence to an actual disconnect and reconnect cycle"},
     "clientPlatform": {"status":"review","model":"gpt-5.6-terra","writeScope":"app client and design system","lastMeaningfulHeartbeatAt":"2026-07-27T21:22:00-04:00","evidence":"commits 51c86cf, 23b6172, 04f0483, eec1dae, 04c9e66, 2149261, and 92f1893; authenticated Mission launch, reactive membership, invitations, durable responsive canvas, and live cross-context movement pass locally","exactNextAction":"Verify the same flow on the connected cloud preview"},
     "missionKernel": {"status":"active","model":"gpt-5.6-terra","writeScope":"convex durable domain","lastMeaningfulHeartbeatAt":"2026-07-27T21:22:00-04:00","evidence":"commits 8c7d594, dcdc19c, 51c86cf, 04f0483, c2543b4, 04c9e66, and e90d1ee; local Convex push and typecheck passed; 14 focused invitation, membership, scoped room visibility, room lifecycle, idempotency, event-sequence, and OCC tests pass","exactNextAction":"Push the schema, auth, and functions to a cloud development deployment and create a durable Mission","blocker":"Cloud Convex development authentication and preview environment setup require founder action"},
     "realtimeSystems": {"status":"review","model":"gpt-5.6-terra","writeScope":"Ably and presence layer","lastMeaningfulHeartbeatAt":"2026-07-27T18:20:00-04:00","evidence":"protocol commit 143c73e; no Ably application or runtime connection yet","exactNextAction":"Wait for authenticated Mission identity, then implement scoped Ably token issuance"},
-    "agentRuntime": {"status":"review","model":"gpt-5.6-terra","writeScope":"docs/program/platform-architecture.md","lastMeaningfulHeartbeatAt":"2026-07-27T18:58:00-04:00","evidence":"commit 01153f4","exactNextAction":"Qualify concrete provider APIs before implementing the adapter"},
+    "agentRuntime": {"status":"review","model":"gpt-5.6-terra","writeScope":"docs/program/platform-architecture.md","lastMeaningfulHeartbeatAt":"2026-07-27T21:36:00-04:00","evidence":"commit 01153f4 plus official-document review: Agents SDK supports an OpenAI-compatible base URL and OpenRouter documents DeepSeek tool/structured-output capability metadata; no credentialed runtime call has been made","exactNextAction":"After credential approval, run a capped Chat Completions adapter spike with one typed tool, strict structured output, and one bounded continuation","blocker":"OpenRouter credential and capped test-budget approval are not yet provided"},
     "artifactStudio": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"artifact domain and surfaces","exactNextAction":"Wait for client, realtime, and agent contracts"},
     "discoverySocial": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"discovery and contribution surfaces","exactNextAction":"Wait for Artifact Studio and reputation contracts"},
-    "trustGovernance": {"status":"review","model":"gpt-5.6-terra","writeScope":"docs/program/trust-quality-release.md","lastMeaningfulHeartbeatAt":"2026-07-27T21:22:00-04:00","evidence":"commits c1f156b and e90d1ee; durable room scope is deny-by-default and has focused owner/contributor isolation coverage","exactNextAction":"Expand the role matrix across Mission and room lifecycle mutations"},
-    "qualityOperations": {"status":"review","model":"gpt-5.6-terra","writeScope":"CI and verification infrastructure","lastMeaningfulHeartbeatAt":"2026-07-27T21:26:00-04:00","evidence":"GitHub Actions run 30320163658 passed install, lint, typecheck, 15 Vitest tests, Convex validation, production build, nine authenticated Chromium journeys with scoped live cross-context movement, and foundation evidence","exactNextAction":"Add reconnect, concurrent conflict, and broader role-matrix evidence"}
+    "trustGovernance": {"status":"review","model":"gpt-5.6-terra","writeScope":"docs/program/trust-quality-release.md","lastMeaningfulHeartbeatAt":"2026-07-27T21:37:00-04:00","evidence":"commits c1f156b, e90d1ee, and 44d944b; deny-by-default room scope and nine actor states have automated Mission, invitation, and room boundary coverage","exactNextAction":"Complete remaining rename, archive, and layout variants for every eligible role"},
+    "qualityOperations": {"status":"active","model":"gpt-5.6-terra","writeScope":"CI and verification infrastructure","lastMeaningfulHeartbeatAt":"2026-07-27T21:37:00-04:00","evidence":"GitHub Actions run 30320282531 passed the prior nine-journey gate; current local gate passes lint, typecheck, 16 Vitest tests, production build, and ten authenticated Chromium journeys including a real concurrent OCC race and convergence","exactNextAction":"Push and reproduce the ten-journey conflict-recovery gate in GitHub Actions"}
   },
   "orchestration": {
     "preferredRuntime": "orca",
@@ -40,8 +40,8 @@
   },
   "productionReadiness": {
     "estimate": "below_1_percent",
-    "currentEvidence": ["source_review","local_automated","local_render","local_interaction","vercel_preview_build","local_convex_push","local_auth_round_trip","local_durable_mission","local_two_user_membership","local_shared_canvas_persistence","local_two_user_canvas_sync","mobile_interaction"],
-    "missingCriticalEvidence": ["cloud_auth_round_trip","cloud_convex_push","cloud_two_user_sync","reconnect_conflict_recovery","ably_runtime","agent_runtime","role_matrix","recovery","load"]
+    "currentEvidence": ["source_review","local_automated","local_render","local_interaction","vercel_preview_build","local_convex_push","local_auth_round_trip","local_durable_mission","local_two_user_membership","local_shared_canvas_persistence","local_two_user_canvas_sync","local_conflict_recovery","local_role_matrix_partial","mobile_interaction"],
+    "missingCriticalEvidence": ["cloud_auth_round_trip","cloud_convex_push","cloud_two_user_sync","disconnect_reconnect","ably_runtime","agent_runtime","full_role_matrix","recovery","load"]
   },
   "notificationPolicy": {
     "suppressNoOpUpdates": true,

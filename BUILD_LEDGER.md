@@ -50,6 +50,7 @@ Deliverables:
 - Secure owner invitation and acceptance flow: commits `04f0483`, `c2543b4`, and `eec1dae`; raw tokens remain client-held, Convex stores token hashes, working roles and room scopes are enforced, and a second authenticated browser context retains contributor membership after reload
 - Durable customizable Mission canvas: commits `04c9e66` and `2149261`; room query, create, rename, archive, and OCC layout updates are Mission-scoped Convex state with corrected room events and atomic Mission event sequencing, while density, accent, zoom, pan, and layout lock remain per-person presentation preferences
 - Scoped reactive collaboration proof: commits `e90d1ee` and `92f1893`; room discovery is deny-by-default outside durable membership scope, and a second authenticated browser observes an authorized Workshop move without reload and retains it after reload
+- Concurrent recovery and role-boundary proof: commits `44d944b` and `e350642`; the automated matrix covers nine actor states across Mission, invitation, and room boundaries, while a real owner/builder race surfaces an OCC conflict, converges both open clients to Convex authority, and survives reload
 - Local browser authentication evidence: synthetic account creation, sign-out, sign-in, and protected Mission World restoration passed on 2026-07-27
 - Cloud Convex deployment and cloud authentication remain unverified; password auth is a private-alpha bridge, not the final passkey decision
 - Vercel preview: `https://realworld-4r7u1kand-mosnins-projects.vercel.app` built successfully from commit `f7d4230`; GitHub repository connected
@@ -63,9 +64,9 @@ Deliverables:
 Evidence boundary:
 
 - The current Mission World and Workshop still use fixture content for occupants, activity, and artifacts. Room identity, titles, lifecycle, and coordinates are now durable Convex state; presentation preferences and layout lock intentionally remain personal and browser-local.
-- The authenticated Mission title, membership role, invitation issuance, invitation acceptance, room lifecycle, layout persistence, scoped visibility, and cross-browser reactive Workshop movement are real local Convex evidence. They do not prove cloud deployment, Ably presence, reconnect conflict recovery, agent runtime, recovery, load, or production readiness.
+- The authenticated Mission title, membership role, invitation issuance, invitation acceptance, room lifecycle, layout persistence, scoped visibility, cross-browser reactive movement, and concurrent conflict recovery are real local Convex evidence. They do not prove cloud deployment, Ably presence, exhaustive role coverage, agent runtime, disaster recovery, load, or production readiness.
 - Overall production capability remains below one percent until the same flows pass against the connected cloud backend and current preview.
-- Nine browser journeys pass locally and in GitHub CI run `30320163658` against an ephemeral Convex deployment with real private-alpha account creation, including mobile room entry, durable room create/rename/move/archive/reload, deny-by-default scoped discovery, and live scoped two-context movement.
+- Ten browser journeys pass locally against an ephemeral Convex deployment with real private-alpha account creation, including mobile room entry, durable room lifecycle, deny-by-default scoped discovery, live two-context movement, and a concurrent owner/builder OCC race with visible recovery. GitHub CI run `30320282531` is green for the prior nine-journey slice; the conflict-recovery journey awaits CI reproduction.
 
 Exit gates:
 
@@ -78,7 +79,7 @@ Current gate status:
 
 - CI and production build: passed in GitHub Actions run `30320163658`
 - Signed-in responsive shell: passed with local ephemeral Convex Auth
-- Authorization boundaries: fourteen focused Convex tests pass
+- Authorization boundaries: fifteen focused Convex tests pass
 - Reproducible current preview and connected cloud Convex state: still open
 
 ## Phase 2 — Mission kernel
