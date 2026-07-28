@@ -33,6 +33,8 @@ jobs:
         run: pnpm typecheck
       - name: Unit tests
         run: pnpm test
+      - name: Verify production dependency overrides
+        run: pnpm verify:dependencies
       - name: Convex tests
         run: pnpm exec vitest run tests/convex
       - name: Production build

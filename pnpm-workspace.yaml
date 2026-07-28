@@ -2,5 +2,8 @@ allowBuilds:
   esbuild: true
   sharp: false
   unrs-resolver: false
+overrides:
+  postcss: 8.5.23
+  sharp: 0.35.3
 minimumReleaseAgeExclude:
   - '@types/node@26.1.2'
