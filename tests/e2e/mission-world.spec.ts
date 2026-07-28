@@ -215,4 +215,87 @@ test.describe("a reactive scoped Mission canvas", () => {
     await participantContext.close();
   }
   });
+
+  test("concurrent builders receive conflict recovery and reconnect to the authoritative Workshop layout", async ({ browser, page }) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: "Invite collaborators" }).click();
+
+    const invitations = page.getByRole("dialog", { name: "Invite collaborators" });
+    await expect(invitations.getByRole("heading", { name: "Invite collaborators" })).toBeVisible();
+    await invitations.getByLabel("Role").selectOption("builder");
+    await invitations.getByRole("checkbox", { name: /Workshop/i }).check();
+    await invitations.getByRole("button", { name: "Create invitation" }).click();
+
+    const inviteUrl = await invitations.getByLabel("Invitation link").inputValue();
+    const builderContext = await browser.newContext();
+    try {
+      const builder = await builderContext.newPage();
+      await builder.goto(inviteUrl);
+      await builder.getByLabel("Email").fill(
+        `builder-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`,
+      );
+      await builder.getByLabel("Password").fill("Realworld-browser-test-2026");
+      await builder.getByRole("button", { name: "Need an invitation? Create an account" }).click();
+      await builder.getByRole("button", { name: "Create private-alpha account" }).click();
+      await expect(builder.getByRole("heading", { name: "You have a Mission invitation." })).toBeVisible({ timeout: 15_000 });
+      await builder.getByRole("button", { name: "Join Mission" }).click();
+      await builder.getByRole("link", { name: "Enter the Mission World" }).click();
+
+      await expect(builder.getByText("builder", { exact: true })).toBeVisible();
+      const ownerWorkshop = page.getByRole("button", { name: /Workshop\. 4 active people/i });
+      const builderWorkshop = builder.getByRole("button", { name: /Workshop\. 4 active people/i });
+      await expect(ownerWorkshop).toBeVisible();
+      await expect(builderWorkshop).toBeVisible();
+      await page.getByRole("button", { name: "Close invitations" }).click();
+      await expect(page.getByRole("button", { name: "Layout unlocked" })).toBeVisible();
+      await expect(builder.getByRole("button", { name: "Layout unlocked" })).toBeVisible();
+
+      const initialOwnerPosition = await ownerWorkshop.evaluate((element) => ({
+        left: (element as HTMLElement).style.left,
+        top: (element as HTMLElement).style.top,
+      }));
+      const initialBuilderPosition = await builderWorkshop.evaluate((element) => ({
+        left: (element as HTMLElement).style.left,
+        top: (element as HTMLElement).style.top,
+      }));
+      expect(initialBuilderPosition).toEqual(initialOwnerPosition);
+
+      await Promise.all([ownerWorkshop.focus(), builderWorkshop.focus()]);
+      await Promise.all([
+        page.keyboard.press("Alt+ArrowRight"),
+        builder.keyboard.press("Alt+ArrowLeft"),
+      ]);
+
+      const conflictMessage = "That room changed elsewhere. The live map has been refreshed.";
+      await expect.poll(async () => {
+        const [ownerConflictCount, builderConflictCount] = await Promise.all([
+          page.getByText(conflictMessage).count(),
+          builder.getByText(conflictMessage).count(),
+        ]);
+        return ownerConflictCount + builderConflictCount;
+      }, { timeout: 15_000 }).toBeGreaterThan(0);
+
+      await expect.poll(async () => {
+        const [ownerPosition, builderPosition] = await Promise.all([
+          ownerWorkshop.evaluate((element) => ({ left: (element as HTMLElement).style.left, top: (element as HTMLElement).style.top })),
+          builderWorkshop.evaluate((element) => ({ left: (element as HTMLElement).style.left, top: (element as HTMLElement).style.top })),
+        ]);
+        return ownerPosition.left === builderPosition.left && ownerPosition.top === builderPosition.top;
+      }, { timeout: 15_000 }).toBe(true);
+      const authoritativePosition = await ownerWorkshop.evaluate((element) => ({
+        left: (element as HTMLElement).style.left,
+        top: (element as HTMLElement).style.top,
+      }));
+      expect(authoritativePosition).not.toEqual(initialOwnerPosition);
+
+      await builder.reload();
+      await expect(builder.getByRole("heading", { name: "Company sprint" })).toBeVisible();
+      await expect.poll(async () => builder.getByRole("button", { name: /Workshop\. 4 active people/i }).evaluate((element) => ({
+        left: (element as HTMLElement).style.left,
+        top: (element as HTMLElement).style.top,
+      }))).toEqual(authoritativePosition);
+    } finally {
+      await builderContext.close();
+    }
+  });
 });
