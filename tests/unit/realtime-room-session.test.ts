@@ -86,6 +86,12 @@ async function flush() {
   await Promise.resolve();
 }
 
+function deferred<T>() {
+  let resolve: (value: T | PromiseLike<T>) => void = () => undefined;
+  const promise = new Promise<T>((next) => { resolve = next; });
+  return { promise, resolve };
+}
+
 describe("RealtimeRoomSession", () => {
   it("connects with the exact Mission/room scope and keeps durable state outside the session", async () => {
     const clock = new FakeClock();
@@ -422,6 +428,235 @@ describe("RealtimeRoomSession", () => {
     expect(connect).toHaveBeenCalledTimes(1);
     expect(session.state).toBe("degraded");
     expect(clock.delays).toContain(500);
+  });
+
+  it("bounds token acquisition, degrades and reconnects, and ignores a late token after the deadline", async () => {
+    const clock = new FakeClock();
+    const { transport, connect } = createTransport();
+    const delayedToken = deferred<RealtimeToken>();
+    const tokenProvider = vi
+      .fn<() => Promise<RealtimeToken>>()
+      .mockImplementationOnce(() => delayedToken.promise)
+      .mockImplementationOnce(async () => token(clock.now() + 300_000));
+    const states: string[] = [];
+    const failures: unknown[] = [];
+    const session = new RealtimeRoomSession({
+      tokenProvider,
+      transport,
+      clock,
+      tokenAcquisitionTimeoutMs: 7,
+      reconnectDelayMs: () => 11,
+      onStateChange: (state) => states.push(state),
+      onTransportFailure: (error) => failures.push(error),
+    });
+    const scope = { missionId: "mission-a", roomId: "room-a" };
+    const start = session.start(scope);
+
+    await flush();
+    expect(tokenProvider).toHaveBeenCalledTimes(1);
+    expect(connect).not.toHaveBeenCalled();
+
+    clock.advance(7);
+    await flush();
+    await start;
+
+    expect(session.state).toBe("degraded");
+    expect(failures).toHaveLength(1);
+    expect(connect).not.toHaveBeenCalled();
+    expect(clock.delays).toEqual(expect.arrayContaining([7, 11]));
+
+    delayedToken.resolve(token(clock.now() + 300_000));
+    await flush();
+    expect(connect).not.toHaveBeenCalled();
+    expect(session.state).toBe("degraded");
+
+    clock.advance(11);
+    await flush();
+
+    expect(tokenProvider).toHaveBeenCalledTimes(2);
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(session.state).toBe("live");
+    expect(states).toEqual(expect.arrayContaining(["connecting", "degraded", "reconnecting", "live"]));
+  });
+
+  it("contains synchronous and rejected token provider failures without opening a transport connection", async () => {
+    const providerSecret = "token-provider-secret";
+    const providers = [
+      () => { throw new Error(providerSecret); },
+      () => Promise.reject(new Error(providerSecret)),
+    ];
+
+    for (const tokenProvider of providers) {
+      const clock = new FakeClock();
+      const { transport, connect } = createTransport();
+      const failures: unknown[] = [];
+      const session = new RealtimeRoomSession({
+        tokenProvider,
+        transport,
+        clock,
+        maxReconnectAttempts: 0,
+        onTransportFailure: (error) => failures.push(error),
+      });
+
+      await session.start({ missionId: "mission-a", roomId: "room-a" });
+
+      expect(session.state).toBe("degraded");
+      expect(connect).not.toHaveBeenCalled();
+      expect(failures).toHaveLength(1);
+      expect(String(failures[0])).not.toContain(providerSecret);
+    }
+  });
+
+  it("contains hostile resolved token getters without connecting or exposing provider details", async () => {
+    const providerSecret = "hostile-token-getter-secret";
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      const hostileTokens = [
+        Object.defineProperties({ tokenRequest: { synthetic: true }, authorizationVersion: 1 }, {
+          expiresAt: { get: () => { throw new Error(providerSecret); } },
+        }),
+        Object.defineProperties({ tokenRequest: { synthetic: true }, expiresAt: 1_300_000 }, {
+          authorizationVersion: { get: () => { throw new Error(providerSecret); } },
+        }),
+      ];
+
+      for (const hostileToken of hostileTokens) {
+        const clock = new FakeClock();
+        const { transport, connect } = createTransport();
+        const failures: unknown[] = [];
+        const session = new RealtimeRoomSession({
+          tokenProvider: async () => hostileToken as RealtimeToken,
+          transport,
+          clock,
+          maxReconnectAttempts: 0,
+          onTransportFailure: (error) => failures.push(error),
+        });
+
+        await session.start({ missionId: "mission-a", roomId: "room-a" });
+
+        expect(session.state).toBe("degraded");
+        expect(connect).not.toHaveBeenCalled();
+        expect(failures).toHaveLength(1);
+        expect(failures[0]).toEqual(expect.objectContaining({ message: expect.stringMatching(/^Realtime /) }));
+        expect(String(failures[0])).not.toContain(providerSecret);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
+  it("connects when a token arrives before its bounded deadline and normalizes an invalid deadline option", async () => {
+    const clock = new FakeClock();
+    const { transport, connect } = createTransport();
+    const tokenProvider = vi.fn(async () => token(clock.now() + 300_000));
+    const session = new RealtimeRoomSession({
+      tokenProvider,
+      transport,
+      clock,
+      tokenAcquisitionTimeoutMs: Number.NaN,
+    });
+
+    await session.start({ missionId: "mission-a", roomId: "room-a" });
+
+    expect(session.state).toBe("live");
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(clock.delays).toContain(10_000);
+
+    const timelyClock = new FakeClock();
+    const { transport: timelyTransport, connect: timelyConnect } = createTransport();
+    const timelyToken = deferred<RealtimeToken>();
+    const timelySession = new RealtimeRoomSession({
+      tokenProvider: () => timelyToken.promise,
+      transport: timelyTransport,
+      clock: timelyClock,
+      tokenAcquisitionTimeoutMs: 7,
+    });
+    const start = timelySession.start({ missionId: "mission-a", roomId: "room-a" });
+
+    await flush();
+    timelyClock.advance(6);
+    await flush();
+    expect(timelyConnect).not.toHaveBeenCalled();
+    timelyToken.resolve(token(timelyClock.now() + 300_000));
+    await start;
+    timelyClock.advance(1);
+    await flush();
+
+    expect(timelySession.state).toBe("live");
+    expect(timelyConnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels pending token acquisition on stop and scope handoff without allowing stale deadlines or tokens to connect", async () => {
+    const clock = new FakeClock();
+    const { transport, connect } = createTransport();
+    const stoppedToken = deferred<RealtimeToken>();
+    const handedOffToken = deferred<RealtimeToken>();
+    const oldScope = { missionId: "mission-a", roomId: "room-a" };
+    const newScope = { missionId: "mission-a", roomId: "room-b" };
+    const tokenProvider = vi.fn((scope: { missionId: string; roomId: string }) => {
+      if (scope.roomId === "room-b") return Promise.resolve(token(clock.now() + 300_000));
+      return tokenProvider.mock.calls.filter(([requestedScope]) => requestedScope.roomId === "room-a").length === 1
+        ? stoppedToken.promise
+        : handedOffToken.promise;
+    });
+    const failures: unknown[] = [];
+    const states: string[] = [];
+    const session = new RealtimeRoomSession({
+      tokenProvider,
+      transport,
+      clock,
+      tokenAcquisitionTimeoutMs: 7,
+      onTransportFailure: (error) => failures.push(error),
+      onStateChange: (state) => states.push(state),
+    });
+
+    const stoppedStart = session.start(oldScope);
+    let stoppedStartSettled = false;
+    void stoppedStart.then(() => { stoppedStartSettled = true; });
+    await flush();
+    expect(tokenProvider).toHaveBeenCalledTimes(1);
+
+    await session.stop();
+    await flush();
+    expect(stoppedStartSettled).toBe(true);
+    expect(session.state).toBe("stopped");
+    clock.advance(7);
+    await flush();
+    expect(failures).toEqual([]);
+    expect(connect).not.toHaveBeenCalled();
+
+    stoppedToken.resolve(token(clock.now() + 300_000));
+    await flush();
+    expect(connect).not.toHaveBeenCalled();
+
+    const handedOffStart = session.start(oldScope);
+    let handedOffStartSettled = false;
+    void handedOffStart.then(() => { handedOffStartSettled = true; });
+    await flush();
+    expect(tokenProvider).toHaveBeenCalledTimes(2);
+
+    await session.start(newScope);
+    await flush();
+    expect(handedOffStartSettled).toBe(true);
+    expect(session.state).toBe("live");
+    expect(session.scope).toEqual(newScope);
+    expect(connect).toHaveBeenCalledTimes(1);
+
+    clock.advance(7);
+    await flush();
+    expect(session.state).toBe("live");
+    expect(failures).toEqual([]);
+    expect(connect).toHaveBeenCalledTimes(1);
+
+    handedOffToken.resolve(token(clock.now() + 300_000));
+    await flush();
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(session.scope).toEqual(newScope);
+    expect(states).not.toContain("degraded");
   });
 
   it("expires accepted transient messages on their visibility deadline", async () => {

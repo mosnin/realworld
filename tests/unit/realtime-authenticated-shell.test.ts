@@ -248,7 +248,7 @@ describe("authenticated Mission realtime shell", () => {
       authenticatedTokenRequester: requester,
       transportFactory,
     })).toBeNull();
-    await flush();
+    await vi.waitFor(() => expect(fake.connect).toHaveBeenCalledTimes(1));
 
     expect(seams.composition).toHaveBeenCalledTimes(1);
     expect(transportFactory).toHaveBeenCalledWith(currentReadiness);

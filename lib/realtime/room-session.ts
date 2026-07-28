@@ -67,6 +67,7 @@ export type RoomSessionOptions = Readonly<{
   onTransientStateCleared?: (reason: "authorization-changed" | "reconnect" | "scope-changed" | "stopped") => void;
   onTransportFailure?: (error: unknown) => void;
   clock?: RealtimeClock;
+  tokenAcquisitionTimeoutMs?: number;
   refreshSkewMs?: number;
   minimumRefreshDelayMs?: number;
   reconnectDelayMs?: (attempt: number) => number;
@@ -89,6 +90,8 @@ const defaultClock: RealtimeClock = {
 };
 const defaultRefreshSkewMs = 30_000;
 const defaultMinimumRefreshDelayMs = 1_000;
+const defaultTokenAcquisitionTimeoutMs = 10_000;
+const maximumTokenAcquisitionTimeoutMs = 30_000;
 const maximumReconnectDelayMs = 30_000;
 const defaultMaxReconnectAttempts = 5;
 const defaultMaxMessageTtlMs = 45_000;
@@ -145,6 +148,19 @@ function isNonEmptyString(value: unknown): value is string {
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
+}
+
+function snapshotRealtimeToken(value: unknown): RealtimeToken | undefined {
+  try {
+    if (!isRecord(value)) return undefined;
+    const tokenRequest = value.tokenRequest;
+    const expiresAt = value.expiresAt;
+    const authorizationVersion = value.authorizationVersion;
+    if (!isFiniteNumber(expiresAt) || !isFiniteNumber(authorizationVersion)) return undefined;
+    return { tokenRequest, expiresAt, authorizationVersion };
+  } catch {
+    return undefined;
+  }
 }
 
 function hasSerializedPayloadWithinLimit(value: unknown, maxBytes: number) {
@@ -223,6 +239,7 @@ function parseEnvelopeUnchecked(
  */
 export class RealtimeRoomSession {
   private readonly clock: RealtimeClock;
+  private readonly tokenAcquisitionTimeoutMs: number;
   private readonly refreshSkewMs: number;
   private readonly minimumRefreshDelayMs: number;
   private readonly reconnectDelayMs: (attempt: number) => number;
@@ -242,6 +259,7 @@ export class RealtimeRoomSession {
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private connectInFlight: Promise<void> | undefined;
+  private cancelTokenAcquisition: (() => void) | undefined;
   private readonly seenMessageExpiry = new Map<string, number>();
   private readonly messageExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly senderEpoch = new Map<string, number>();
@@ -249,6 +267,11 @@ export class RealtimeRoomSession {
 
   constructor(private readonly options: RoomSessionOptions) {
     this.clock = options.clock ?? defaultClock;
+    this.tokenAcquisitionTimeoutMs = normalizedBoundedPositive(
+      options.tokenAcquisitionTimeoutMs,
+      defaultTokenAcquisitionTimeoutMs,
+      maximumTokenAcquisitionTimeoutMs,
+    );
     this.refreshSkewMs = normalizedNonNegative(options.refreshSkewMs, defaultRefreshSkewMs);
     this.minimumRefreshDelayMs = normalizedPositive(options.minimumRefreshDelayMs, defaultMinimumRefreshDelayMs);
     const random = options.random ?? Math.random;
@@ -346,6 +369,7 @@ export class RealtimeRoomSession {
   }
 
   private async stopInternal(reason: "scope-changed" | "stopped", nextState: RoomSessionState) {
+    this.cancelTokenAcquisition?.();
     this.generation += 1;
     // A prior token/connect promise may still settle, but its generation is
     // invalid. Do not let it monopolize the next room's connection slot.
@@ -370,6 +394,46 @@ export class RealtimeRoomSession {
     return attempt;
   }
 
+  private acquireToken(scope: RealtimeRoomScope): Promise<RealtimeToken> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let settled = false;
+    return new Promise<RealtimeToken>((resolve, reject) => {
+      const finish = (error?: Error, token?: RealtimeToken) => {
+        if (settled) return;
+        settled = true;
+        if (timer !== undefined) this.clock.clearTimeout(timer);
+        if (this.cancelTokenAcquisition === cancel) this.cancelTokenAcquisition = undefined;
+        if (error) reject(error);
+        else resolve(token as RealtimeToken);
+      };
+      const cancel = () => finish(new Error("Realtime token acquisition cancelled"));
+      this.cancelTokenAcquisition = cancel;
+      timer = this.clock.setTimeout(
+        () => finish(new Error("Realtime token acquisition timed out")),
+        this.tokenAcquisitionTimeoutMs,
+      );
+      let tokenPromise: Promise<RealtimeToken>;
+      try {
+        tokenPromise = Promise.resolve(this.options.tokenProvider(scope));
+      } catch {
+        finish(new Error("Realtime token acquisition failed"));
+        return;
+      }
+      void tokenPromise.then(
+        (candidate) => {
+          if (settled) return;
+          const token = snapshotRealtimeToken(candidate);
+          if (!token) {
+            finish(new Error("Realtime token acquisition failed"));
+            return;
+          }
+          finish(undefined, token);
+        },
+        () => finish(new Error("Realtime token acquisition failed")),
+      );
+    });
+  }
+
   private async connect(nextState: "connecting" | "reconnecting") {
     const scope = this.scopeValue;
     if (!scope) return;
@@ -382,7 +446,7 @@ export class RealtimeRoomSession {
     }
     this.setState(nextState);
     try {
-      const token = await this.options.tokenProvider(scope);
+      const token = await this.acquireToken(scope);
       if (generation !== this.generation || this.scopeValue !== scope) return;
       if (!Number.isFinite(token.expiresAt) || token.expiresAt <= this.clock.now()) throw new Error("Realtime token is expired");
       const authorizationChanged = this.token !== undefined && this.token.authorizationVersion !== token.authorizationVersion;
