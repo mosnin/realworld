@@ -625,6 +625,97 @@ test("an owner can reject, resubmit, verify, and reload a durable room Proof", a
   await expect(proofDialog.getByRole("button", { name: `Reject ${updatedTitle}` })).toHaveCount(0);
 });
 
+test("an owner and scoped reviewer complete a reactive Proof handoff", async ({ browser, page }) => {
+  const title = `Review the live Workshop handoff ${Date.now()}`;
+  const claim = "The Workshop handoff is visible to its scoped reviewer.";
+  const evidence = "The owner submitted this evidence while the reviewer was already in the Mission.";
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Invite collaborators" }).click();
+  const invitations = page.getByRole("dialog", { name: "Invite collaborators" });
+  await invitations.getByLabel("Role").selectOption("reviewer");
+  await invitations.getByRole("checkbox", { name: /Workshop/i }).check();
+  await invitations.getByRole("button", { name: "Create invitation" }).click();
+  const inviteUrl = await invitations.getByLabel("Invitation link").inputValue();
+  expect(inviteUrl).toContain("/invite/");
+
+  const reviewerContext = await browser.newContext();
+  try {
+    const reviewer = await reviewerContext.newPage();
+    await reviewer.goto(inviteUrl);
+    await reviewer.getByLabel("Email").fill(
+      `proof-reviewer-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`,
+    );
+    await reviewer.getByLabel("Password").fill("Realworld-browser-test-2026");
+    await reviewer.getByRole("button", { name: "Need an invitation? Create an account" }).click();
+    await reviewer.getByRole("button", { name: "Create private-alpha account" }).click();
+    await expect(reviewer.getByRole("heading", { name: "You have a Mission invitation." })).toBeVisible({ timeout: 15_000 });
+    await reviewer.getByRole("button", { name: "Join Mission" }).click();
+    await expect(reviewer.getByText("You joined the Mission.")).toBeVisible();
+    await reviewer.getByRole("link", { name: "Enter the Mission World" }).click();
+    await expect(reviewer.getByRole("heading", { name: "Company sprint" })).toBeVisible();
+    await expect(reviewer.getByText("reviewer", { exact: true })).toBeVisible();
+    await expect(reviewer.getByRole("button", { name: /View Proofs/ })).toBeVisible();
+
+    await page.getByRole("button", { name: "Close invitations" }).click();
+    await page.getByRole("button", { name: /Open Proofs/ }).click();
+    const ownerDialog = page.getByRole("dialog", { name: "Make the work verifiable" });
+    await ownerDialog.getByLabel("Proof title").fill(title);
+    await ownerDialog.getByLabel("Claim").fill(claim);
+    await ownerDialog.getByLabel("Evidence note").fill(evidence);
+    await ownerDialog.getByLabel("Room").selectOption({ label: "Workshop" });
+    await ownerDialog.getByRole("button", { name: "Submit Proof" }).click();
+    await expect(ownerDialog.getByText("Proof submitted.")).toBeVisible();
+
+    const reviewerBeacon = reviewer.getByRole("button", { name: `Open Proof: ${title}, submitted` });
+    await expect(reviewerBeacon).toBeVisible({ timeout: 15_000 });
+    await reviewerBeacon.click();
+    const reviewerDialog = reviewer.getByRole("dialog", { name: "Make the work verifiable" });
+    const reviewerDetails = reviewerDialog.getByLabel(`Proof details for ${title}`);
+    await expect(reviewerDetails.getByText(claim, { exact: true })).toBeVisible();
+    await expect(reviewerDetails.getByText(evidence, { exact: true })).toBeVisible();
+    await expect(reviewerDetails.getByText("Room: Workshop", { exact: true })).toBeVisible();
+    await expect(reviewerDialog.getByLabel("Mission Proofs read-only")).toBeVisible();
+    await expect(reviewerDialog.getByLabel("Proof title")).toHaveCount(0);
+    await expect(reviewerDialog.getByRole("button", { name: "Submit another Proof" })).toHaveCount(0);
+    await expect(reviewerDialog.getByRole("button", { name: `Resubmit ${title}` })).toHaveCount(0);
+
+    await reviewerDialog.getByRole("button", { name: `Verify ${title}` }).click();
+    await expect(reviewerDetails.getByText("verified", { exact: true })).toBeVisible();
+    await expect(reviewerDetails.getByText(/^Verified /)).toBeVisible();
+    await expect(reviewerDialog.getByRole("button", { name: `Verify ${title}` })).toHaveCount(0);
+
+    await expect(page.getByRole("button", { name: `Open Proof: ${title}, verified` })).toBeVisible({ timeout: 15_000 });
+    await ownerDialog.getByRole("button", { name: "Close Proofs" }).click();
+    await page.getByRole("button", { name: `Open Proof: ${title}, verified` }).click();
+    const ownerDetails = ownerDialog.getByLabel(`Proof details for ${title}`);
+    await expect(ownerDetails.getByText("verified", { exact: true })).toBeVisible();
+    await expect(ownerDetails.getByText(/^Verified /)).toBeVisible();
+    await expect(ownerDialog.getByLabel("Proof title")).toHaveCount(0);
+
+    await ownerDialog.getByRole("button", { name: "Close Proofs" }).click();
+    await page.reload();
+    await page.getByRole("button", { name: `Open Proof: ${title}, verified` }).click();
+    const reloadedOwnerDialog = page.getByRole("dialog", { name: "Make the work verifiable" });
+    const reloadedOwnerDetails = reloadedOwnerDialog.getByLabel(`Proof details for ${title}`);
+    await expect(reloadedOwnerDetails.getByText(claim, { exact: true })).toBeVisible();
+    await expect(reloadedOwnerDetails.getByText(evidence, { exact: true })).toBeVisible();
+    await expect(reloadedOwnerDetails.getByText(/^Verified /)).toBeVisible();
+    await reloadedOwnerDialog.getByRole("button", { name: "Close Proofs" }).click();
+
+    const pulse = page.getByLabel("Mission activity Pulse");
+    const openPulse = pulse.getByRole("button", { name: /Open Mission Pulse/ });
+    await openPulse.focus();
+    await page.keyboard.press("Enter");
+    const activity = pulse.getByLabel("Recent durable Mission activity");
+    const verifiedEvent = activity.getByRole("button", { name: /Proof verified/ }).first();
+    await expect(verifiedEvent).toBeVisible();
+    await expect(verifiedEvent.locator("small")).toHaveText(/reviewer · Workshop · (just now|\d+m ago)/);
+  } finally {
+    await reviewerContext.close();
+  }
+});
+
 test("a durable Workshop Move appears in Pulse and remains readable after reload and archive", async ({ page }) => {
   const moveTitle = "Record the Pulse handoff";
 
