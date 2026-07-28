@@ -134,7 +134,11 @@ test("a participant can customize and persist a personal canvas layout", async (
   await expect(page.getByRole("button", { name: /Launch Cabin\. 0 active people/i })).toHaveCount(0);
 });
 
-test("an owner can invite a second authenticated participant into the durable Mission", async ({ browser, page }) => {
+// The following invitation journey handles a bearer URL. Do not retain it in Playwright traces.
+test.use({ trace: "off" });
+
+test.describe("a reactive scoped Mission canvas", () => {
+  test("an owner can invite a participant and their Workshop map reacts without a reload", async ({ browser, page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Invite collaborators" }).click();
 
@@ -164,10 +168,51 @@ test("an owner can invite a second authenticated participant into the durable Mi
 
     await expect(participant.getByRole("heading", { name: "Company sprint" })).toBeVisible();
     await expect(participant.getByText("contributor", { exact: true })).toBeVisible();
+    await expect(participant.getByRole("button", { name: /Mission Core\./i })).toHaveCount(0);
+    await expect(participant.getByRole("button", { name: /Review Deck\./i })).toHaveCount(0);
+
+    const participantWorkshop = participant.getByRole("button", { name: /Workshop\. 4 active people/i });
+    await expect(participantWorkshop).toBeVisible();
+    const initialParticipantPosition = await participantWorkshop.evaluate((element) => ({
+      left: (element as HTMLElement).style.left,
+      top: (element as HTMLElement).style.top,
+    }));
+
+    await page.getByRole("button", { name: "Close invitations" }).click();
+    await expect(invitations).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Layout unlocked" })).toBeVisible();
+
+    const ownerWorkshop = page.getByRole("button", { name: /Workshop\. 4 active people/i });
+    const initialOwnerPosition = await ownerWorkshop.evaluate((element) => ({
+      left: (element as HTMLElement).style.left,
+      top: (element as HTMLElement).style.top,
+    }));
+    await ownerWorkshop.focus();
+    await page.keyboard.press("Alt+ArrowRight");
+
+    await expect.poll(async () => ownerWorkshop.evaluate((element) => ({
+      left: (element as HTMLElement).style.left,
+      top: (element as HTMLElement).style.top,
+    }))).not.toEqual(initialOwnerPosition);
+    const updatedOwnerPosition = await ownerWorkshop.evaluate((element) => ({
+      left: (element as HTMLElement).style.left,
+      top: (element as HTMLElement).style.top,
+    }));
+    expect(updatedOwnerPosition).not.toEqual(initialParticipantPosition);
+
+    await expect.poll(async () => participantWorkshop.evaluate((element) => ({
+      left: (element as HTMLElement).style.left,
+      top: (element as HTMLElement).style.top,
+    })), { timeout: 15_000 }).toEqual(updatedOwnerPosition);
+
     await participant.reload();
     await expect(participant.getByRole("heading", { name: "Company sprint" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Company sprint" })).toBeVisible();
+    await expect.poll(async () => participant.getByRole("button", { name: /Workshop\. 4 active people/i }).evaluate((element) => ({
+      left: (element as HTMLElement).style.left,
+      top: (element as HTMLElement).style.top,
+    }))).toEqual(updatedOwnerPosition);
   } finally {
     await participantContext.close();
   }
+  });
 });
