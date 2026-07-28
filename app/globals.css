@@ -59,6 +59,11 @@ button,a { font:inherit; } button { cursor:pointer; } a { color:inherit; text-de
 .mission-world[data-decoration="reduced"] .contours { opacity:.18; }
 .mission-world[data-decoration="reduced"] .world-routes .world-routes__active { animation:none; stroke-dasharray:none; }
 .mission-world[data-decoration="reduced"] .landmark,.mission-world[data-decoration="reduced"] .world-inspector,.mission-world[data-decoration="reduced"] .stage-toolbar { box-shadow:none; }
+
+@media (max-width: 767px) {
+  /* The fixed inspector otherwise overlays directory actions at narrow widths. */
+  .room-directory + .world-inspector { display:none; }
+}
 .mission-world[data-decoration="reduced"] .pulse-rail__route { display:none; }
 .preference-panel { position:fixed; z-index:30; top:66px; right:86px; width:min(360px,calc(100vw - 28px)); padding:20px; border:1px solid #dfe6f0; border-radius:12px; background:#fff; box-shadow:0 18px 50px rgb(16 24 40 / 16%); }
 .preference-panel__header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }.preference-panel__header h2 { margin:0; font-size:19px; letter-spacing:-.04em; }.preference-panel__header .icon-button { margin:-5px -5px 0 0; }
