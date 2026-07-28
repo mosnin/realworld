@@ -413,6 +413,12 @@ export function MissionWorld() {
   const [roomError, setRoomError] = useState<string | null>(null);
   const canvasRooms = roomRecords?.map(canvasRoom) ?? [];
   const selectedRoom = canvasRooms.find((room) => room.id === selectedRoomId) ?? canvasRooms[0];
+  const realtimeRoomReadiness = useQuery(
+    api.missions.getRealtimeRoomReadiness,
+    activeMission?.lifecycle === "active" && selectedRoom !== undefined
+      ? { missionId: activeMission._id, roomId: selectedRoom.id as Id<"rooms"> }
+      : "skip",
+  );
   const selectedRoomHash = selectedRoom?.id;
   const visibleRooms = canvasRooms;
   const activeFractureCount = missionFractures?.filter((fracture) => fracture.status === "open" || fracture.status === "investigating").length ?? 0;
@@ -600,12 +606,12 @@ export function MissionWorld() {
   const missionWritable = activeMission.lifecycle === "active";
 
   if (view === "workshop") {
-    return <Workshop mission={activeMission} onExit={() => setView("world")} />;
+    return <><AuthenticatedMissionRealtimeLifecycle expectedMissionId={activeMission._id} expectedRoomId={selectedRoom.id} membershipGrantVersion={activeMission.grantVersion} readiness={realtimeRoomReadiness} /><Workshop mission={activeMission} onExit={() => setView("world")} /></>;
   }
 
   return (
     <div className="mission-world" aria-label="Realworld Mission World" data-accent={preferences.accent} data-density={preferences.density} data-decoration={preferences.reducedDecoration ? "reduced" : "standard"}>
-      <AuthenticatedMissionRealtimeLifecycle />
+      <AuthenticatedMissionRealtimeLifecycle expectedMissionId={activeMission._id} expectedRoomId={selectedRoom.id} membershipGrantVersion={activeMission.grantVersion} readiness={realtimeRoomReadiness} />
       <header className="world-topbar">
         <a className="brand" href="#core" aria-label="Realworld Mission World"><Icon name="spark" /> <span>Realworld</span></a>
         <nav aria-label="Primary navigation">

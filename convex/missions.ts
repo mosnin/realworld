@@ -222,7 +222,7 @@ export const getPrivateMissionBySlug = query({
 
 export const listMyMissions = query({
   args: {},
-  returns: v.array(v.object({ _id: v.id("missions"), title: v.string(), slug: v.string(), summary: v.string(), constitution: v.optional(v.string()), desiredOutcomes: v.optional(v.array(v.string())), templateKey: v.optional(v.string()), role: v.string(), lifecycle: missionLifecycle, currentVersion: v.number() })),
+  returns: v.array(v.object({ _id: v.id("missions"), title: v.string(), slug: v.string(), summary: v.string(), constitution: v.optional(v.string()), desiredOutcomes: v.optional(v.array(v.string())), templateKey: v.optional(v.string()), role: v.string(), grantVersion: v.number(), lifecycle: missionLifecycle, currentVersion: v.number() })),
   handler: async (ctx) => {
     const tokenIdentifier = await requireAuthenticatedTokenIdentifier(ctx);
     const principal = await ctx.db
@@ -232,8 +232,49 @@ export const listMyMissions = query({
     if (principal === null) return [];
     if (principal.type !== "human" || principal.state !== "active") throw new Error("Unauthorized");
     const memberships = await ctx.db.query("missionMembers").withIndex("by_principal_and_state", q => q.eq("principalId", principal._id).eq("state", "active")).take(100);
-    const values = await Promise.all(memberships.filter((membership) => isActiveMembership(membership)).map(async membership => { const mission = await ctx.db.get(membership.missionId); if (mission === null) return null; return { _id: mission._id, title: mission.title, slug: mission.slug, summary: mission.summary, constitution: mission.constitution, desiredOutcomes: mission.desiredOutcomes, templateKey: mission.templateKey, role: membership.role, lifecycle: mission.lifecycle, currentVersion: mission.currentVersion }; }));
+    const values = await Promise.all(memberships.filter((membership) => isActiveMembership(membership)).map(async membership => { const mission = await ctx.db.get(membership.missionId); if (mission === null) return null; return { _id: mission._id, title: mission.title, slug: mission.slug, summary: mission.summary, constitution: mission.constitution, desiredOutcomes: mission.desiredOutcomes, templateKey: mission.templateKey, role: membership.role, grantVersion: membership.grantVersion, lifecycle: mission.lifecycle, currentVersion: mission.currentVersion }; }));
     return values.filter((value): value is NonNullable<typeof value> => value !== null);
+  },
+});
+
+/**
+ * An authoritative, deliberately narrow precondition for a future ephemeral
+ * room session. It proves the current human grant, active Mission, and active
+ * accessible room at one durable Convex read boundary; it creates no token or
+ * transport capability.
+ */
+export const getRealtimeRoomReadiness = query({
+  args: { missionId: v.id("missions"), roomId: v.id("rooms") },
+  returns: v.union(
+    v.null(),
+    v.object({
+      missionId: v.id("missions"),
+      roomId: v.id("rooms"),
+      grantVersion: v.number(),
+      missionLifecycle: v.literal("active"),
+      roomState: v.literal("active"),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    const principal = await requireExistingHumanPrincipal(ctx);
+    const [mission, room, membership] = await Promise.all([
+      ctx.db.get(args.missionId),
+      ctx.db.get(args.roomId),
+      ctx.db.query("missionMembers")
+        .withIndex("by_mission_and_principal", (index) => index.eq("missionId", args.missionId).eq("principalId", principal._id))
+        .unique(),
+    ]);
+    if (mission === null || mission.visibility !== "private" || mission.lifecycle !== "active") return null;
+    if (room === null || room.missionId !== mission._id || room.state !== "active") return null;
+    if (membership === null || membership.role === "agent" || !isActiveMembership(membership)) return null;
+    if (!membership.scope.includes("mission:*") && !membership.scope.includes(`room:${room._id}`)) return null;
+    return {
+      missionId: mission._id,
+      roomId: room._id,
+      grantVersion: membership.grantVersion,
+      missionLifecycle: "active" as const,
+      roomState: "active" as const,
+    };
   },
 });
 

@@ -265,7 +265,93 @@ describe("missions", () => {
     });
     await asOwner.mutation(api.missions.archivePrivateMission, { missionId: result.missionId, expectedVersion: 1, idempotencyKey: "history-archive", correlationId: "history" });
 
-    expect(await t.withIdentity(contributorIdentity).query(api.missions.listMyMissions, {})).toEqual([expect.objectContaining({ _id: result.missionId, lifecycle: "archived", role: "observer" })]);
+    expect(await t.withIdentity(contributorIdentity).query(api.missions.listMyMissions, {})).toEqual([expect.objectContaining({ _id: result.missionId, lifecycle: "archived", role: "observer", grantVersion: 1 })]);
+  });
+
+  it("returns realtime room readiness only for the exact active human Mission, room, and grant", async () => {
+    const { t, asOwner, result } = await createMission();
+    const roomId = await t.run(async (ctx) => ctx.db.insert("rooms", {
+      missionId: result.missionId,
+      kind: "workshop",
+      title: "Realtime Workshop",
+      accessPolicy: "mission",
+      mapType: "field",
+      layout: { x: 0, y: 0, width: 220, height: 140 },
+      layoutVersion: 1,
+      state: "active",
+      currentVersion: 1,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      schemaVersion: 1,
+    }));
+    const readinessArgs = { missionId: result.missionId, roomId };
+
+    await expect(asOwner.query(api.missions.getRealtimeRoomReadiness, readinessArgs)).resolves.toEqual({
+      missionId: result.missionId,
+      roomId,
+      grantVersion: 1,
+      missionLifecycle: "active",
+      roomState: "active",
+    });
+    expect(await asOwner.query(api.missions.listMyMissions, {})).toEqual([
+      expect.objectContaining({ _id: result.missionId, role: "owner", grantVersion: 1, lifecycle: "active" }),
+    ]);
+
+    const otherMission = await asOwner.mutation(api.missions.createPrivateMission, {
+      ...createArgs,
+      slug: "other-realtime-mission",
+      title: "Other realtime Mission",
+      idempotencyKey: "create-other-realtime-mission",
+      correlationId: "other-realtime-mission",
+    });
+    const wrongRoomId = await t.run(async (ctx) => ctx.db.insert("rooms", {
+      missionId: otherMission.missionId,
+      kind: "observatory",
+      title: "Other room",
+      accessPolicy: "mission",
+      mapType: "field",
+      layout: { x: 0, y: 0, width: 220, height: 140 },
+      layoutVersion: 1,
+      state: "active",
+      currentVersion: 1,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      schemaVersion: 1,
+    }));
+    await expect(asOwner.query(api.missions.getRealtimeRoomReadiness, { missionId: result.missionId, roomId: wrongRoomId })).resolves.toBeNull();
+
+    const ownerMembershipId = await t.run(async (ctx) => {
+      const mission = await ctx.db.get(result.missionId);
+      const membership = await ctx.db.query("missionMembers")
+        .withIndex("by_mission_and_principal", (index) => index.eq("missionId", result.missionId).eq("principalId", mission!.ownerPrincipalId))
+        .unique();
+      return membership!._id;
+    });
+    await t.run(async (ctx) => { await ctx.db.patch(ownerMembershipId, { scope: [] }); });
+    await expect(asOwner.query(api.missions.getRealtimeRoomReadiness, readinessArgs)).resolves.toBeNull();
+    await t.run(async (ctx) => { await ctx.db.patch(ownerMembershipId, { scope: ["mission:*"] }); });
+
+    await t.run(async (ctx) => { await ctx.db.patch(ownerMembershipId, { state: "revoked" }); });
+    await expect(asOwner.query(api.missions.getRealtimeRoomReadiness, readinessArgs)).resolves.toBeNull();
+    await t.run(async (ctx) => { await ctx.db.patch(ownerMembershipId, { state: "active", expiresAt: Date.now() - 1 }); });
+    await expect(asOwner.query(api.missions.getRealtimeRoomReadiness, readinessArgs)).resolves.toBeNull();
+    await t.run(async (ctx) => { await ctx.db.patch(ownerMembershipId, { expiresAt: Date.now() + 60_000, role: "agent" }); });
+    await expect(asOwner.query(api.missions.getRealtimeRoomReadiness, readinessArgs)).resolves.toBeNull();
+    await t.run(async (ctx) => { await ctx.db.patch(ownerMembershipId, { role: "owner" }); });
+
+    await t.run(async (ctx) => { await ctx.db.patch(roomId, { state: "archived" }); });
+    await expect(asOwner.query(api.missions.getRealtimeRoomReadiness, readinessArgs)).resolves.toBeNull();
+    await t.run(async (ctx) => { await ctx.db.patch(roomId, { state: "active" }); await ctx.db.patch(result.missionId, { lifecycle: "archived" }); });
+    await expect(asOwner.query(api.missions.getRealtimeRoomReadiness, readinessArgs)).resolves.toBeNull();
+    await t.run(async (ctx) => { await ctx.db.patch(result.missionId, { lifecycle: "active" }); });
+
+    const agentIdentity = { tokenIdentifier: "https://realworld.test|readiness-agent", subject: "readiness-agent", issuer: "https://realworld.test", name: "Readiness agent" };
+    await t.run(async (ctx) => {
+      const now = Date.now();
+      const agentPrincipalId = await ctx.db.insert("principals", { type: "agent", state: "active", tokenIdentifier: agentIdentity.tokenIdentifier, createdAt: now, updatedAt: now, schemaVersion: 1 });
+      await ctx.db.insert("missionMembers", { missionId: result.missionId, principalId: agentPrincipalId, role: "agent", state: "active", scope: ["mission:*"], grantVersion: 1, createdAt: now, updatedAt: now, schemaVersion: 1 });
+    });
+    await expect(t.withIdentity(agentIdentity).query(api.missions.getRealtimeRoomReadiness, readinessArgs)).rejects.toThrow("Unauthorized");
   });
 });
 
