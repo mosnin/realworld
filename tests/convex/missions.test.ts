@@ -249,11 +249,40 @@ describe("invites and durable canvas", () => {
     await t.run(async (ctx) => { const stored = await ctx.db.get(invite.inviteId); expect(stored?.tokenHash).not.toBe(token); expect(stored).toMatchObject({ uses: 1, state: "revoked" }); });
   });
 
+  it("exposes active rooms to members but reserves the issuing console for the owner", async () => {
+    const { t, asOwner, result } = await createMission();
+    const roomId = await roomFor(t, result.missionId);
+    const ownerContext = await asOwner.query(api.invites.inviteManagerContext, { missionId: result.missionId });
+    expect(ownerContext).toMatchObject({ mission: { _id: result.missionId, title: createArgs.title }, role: "owner", canIssue: true });
+    expect(ownerContext.rooms).toEqual([expect.objectContaining({ _id: roomId, title: "Workshop", kind: "workshop" })]);
+
+    await t.run(async (ctx) => {
+      const now = Date.now();
+      const contributorPrincipalId = await ctx.db.insert("principals", { type: "human", state: "active", tokenIdentifier: contributorIdentity.tokenIdentifier, createdAt: now, updatedAt: now, schemaVersion: 1 });
+      await ctx.db.insert("missionMembers", { missionId: result.missionId, principalId: contributorPrincipalId, role: "contributor", state: "active", scope: [`room:${roomId}`], grantVersion: 1, createdAt: now, updatedAt: now, schemaVersion: 1 });
+    });
+    await expect(t.withIdentity(contributorIdentity).query(api.invites.inviteManagerContext, { missionId: result.missionId })).resolves.toMatchObject({ role: "contributor", canIssue: false });
+  });
+
   it("rejects owner/steward grants, expired/max-use tokens, non-owner issuers, and cross-mission rooms", async () => {
     const { t, asOwner, result } = await createMission(); const roomId = await roomFor(t, result.missionId); const guest = t.withIdentity(contributorIdentity);
     await expect(asOwner.mutation(api.invites.createInvite, { missionId: result.missionId, role: "owner" as never, roomIds: [roomId], expiresAt: Date.now() + 60_000, maxUses: 1, inviteToken: "b".repeat(40), idempotencyKey: "bad-role", correlationId: "c" })).rejects.toThrow();
     await t.run(async (ctx) => { const id = await ctx.db.insert("principals", { type: "human", state: "active", tokenIdentifier: contributorIdentity.tokenIdentifier, createdAt: Date.now(), updatedAt: Date.now(), schemaVersion: 1 }); await ctx.db.insert("missionMembers", { missionId: result.missionId, principalId: id, role: "contributor", state: "active", scope: [], grantVersion: 1, createdAt: Date.now(), updatedAt: Date.now(), schemaVersion: 1 }); });
     await expect(guest.mutation(api.invites.createInvite, { missionId: result.missionId, role: "observer", roomIds: [roomId], expiresAt: Date.now() + 60_000, maxUses: 1, inviteToken: "c".repeat(40), idempotencyKey: "guest-invite", correlationId: "c" })).rejects.toThrow("Not found");
+  });
+
+  it("rejects fresh acceptance after revocation or maximum-use exhaustion", async () => {
+    const { t, asOwner, result } = await createMission();
+    const roomId = await roomFor(t, result.missionId);
+    const revokedToken = "d".repeat(40);
+    const revoked = await asOwner.mutation(api.invites.createInvite, { missionId: result.missionId, role: "observer", roomIds: [roomId], expiresAt: Date.now() + 60_000, maxUses: 2, inviteToken: revokedToken, idempotencyKey: "revoked-invite", correlationId: "revoked-c" });
+    await asOwner.mutation(api.invites.revokeInvite, { inviteId: revoked.inviteId, idempotencyKey: "revoke-before-accept", correlationId: "revoke-c" });
+    await expect(t.withIdentity(contributorIdentity).mutation(api.invites.acceptInvite, { inviteToken: revokedToken, idempotencyKey: "revoked-accept", correlationId: "revoked-accept-c" })).rejects.toThrow("Invite is unavailable");
+
+    const limitedToken = "e".repeat(40);
+    await asOwner.mutation(api.invites.createInvite, { missionId: result.missionId, role: "observer", roomIds: [roomId], expiresAt: Date.now() + 60_000, maxUses: 1, inviteToken: limitedToken, idempotencyKey: "limited-invite", correlationId: "limited-c" });
+    await t.withIdentity(contributorIdentity).mutation(api.invites.acceptInvite, { inviteToken: limitedToken, idempotencyKey: "limited-first", correlationId: "limited-first-c" });
+    await expect(t.withIdentity({ ...contributorIdentity, tokenIdentifier: "https://realworld.test|second-guest", subject: "second-guest" }).mutation(api.invites.acceptInvite, { inviteToken: limitedToken, idempotencyKey: "limited-second", correlationId: "limited-second-c" })).rejects.toThrow("Invite is unavailable");
   });
 
   it("enforces canvas membership, OCC, and Mission isolation", async () => {

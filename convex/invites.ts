@@ -1,11 +1,43 @@
 import { v } from "convex/values";
-import { mutation } from "./_generated/server";
+import { mutation, query } from "./_generated/server";
 import { requireActiveMembership, requireAuthenticatedTokenIdentifier, requireRole } from "./lib/auth";
 
 const inviteRole = v.union(v.literal("builder"), v.literal("reviewer"), v.literal("contributor"), v.literal("observer"));
+const membershipRole = v.union(v.literal("owner"), v.literal("steward"), v.literal("builder"), v.literal("reviewer"), v.literal("contributor"), v.literal("observer"), v.literal("agent"));
 const receiptMs = 30 * 86400000;
 async function tokenHash(token: string) { const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token))); return Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join(""); }
 function validToken(token: string) { if (token.length < 32 || token.length > 512) throw new Error("Invalid invite token"); return token; }
+
+/**
+ * The issuing console intentionally exposes a narrower policy than the service
+ * mutation: only an owner sees issuance controls. The mutation retains steward
+ * support for future audited/operator workflows, but never allows privileged
+ * roles to be granted by an invitation.
+ */
+export const inviteManagerContext = query({
+  args: { missionId: v.id("missions") },
+  returns: v.object({
+    mission: v.object({ _id: v.id("missions"), title: v.string() }),
+    role: membershipRole,
+    canIssue: v.boolean(),
+    rooms: v.array(v.object({ _id: v.id("rooms"), title: v.string(), kind: v.string() })),
+  }),
+  handler: async (ctx, args) => {
+    const membership = await requireActiveMembership(ctx, args.missionId);
+    const mission = await ctx.db.get(args.missionId);
+    if (!mission || mission.visibility !== "private") throw new Error("Not found");
+    const rooms = await ctx.db
+      .query("rooms")
+      .withIndex("by_mission_and_state", (index) => index.eq("missionId", args.missionId).eq("state", "active"))
+      .take(100);
+    return {
+      mission: { _id: mission._id, title: mission.title },
+      role: membership.role,
+      canIssue: membership.role === "owner",
+      rooms: rooms.map((room) => ({ _id: room._id, title: room.title, kind: room.kind })),
+    };
+  },
+});
 
 export const createInvite = mutation({
   args: { missionId: v.id("missions"), role: inviteRole, roomIds: v.array(v.id("rooms")), expiresAt: v.number(), maxUses: v.number(), inviteToken: v.string(), idempotencyKey: v.string(), correlationId: v.string() },
