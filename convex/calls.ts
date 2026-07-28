@@ -97,11 +97,12 @@ async function requireVisibleLinkedMove(
   ctx: MutationCtx,
   missionId: Id<"missions">,
   membership: Awaited<ReturnType<typeof requireActiveMembership>>,
+  callRoomId: Id<"rooms"> | undefined,
   linkedMoveId: Id<"moves"> | undefined,
 ) {
   if (linkedMoveId === undefined) return;
   const move = await ctx.db.get(linkedMoveId);
-  if (!move || move.missionId !== missionId || !canReadCall(membership, move)) throw new Error("Not found");
+  if (!move || move.missionId !== missionId || move.roomId !== callRoomId || !canReadCall(membership, move)) throw new Error("Not found");
 }
 
 async function recordCallEvent(
@@ -225,7 +226,7 @@ export const createCall = mutation({
     }
     await requireWritableMission(ctx, args.missionId);
     await requireCallRoom(ctx, args.missionId, args.roomId);
-    await requireVisibleLinkedMove(ctx, args.missionId, membership, args.linkedMoveId);
+    await requireVisibleLinkedMove(ctx, args.missionId, membership, args.roomId, args.linkedMoveId);
     const now = Date.now();
     const callId = await ctx.db.insert("calls", {
       missionId: args.missionId,
@@ -274,11 +275,12 @@ export const updateCall = mutation({
       if (prior.commandFingerprint !== commandFingerprint || prior.callId === undefined) throw new Error("Idempotency key reuse with a different command");
       return { callId: prior.callId, eventId: prior.eventId, operationReceiptId: prior._id, currentVersion: prior.resultVersion };
     }
+    if (call.status === "resolved" || call.status === "cancelled") throw new Error("Terminal Calls cannot be updated");
     await requireWritableMission(ctx, call.missionId);
     if (call.currentVersion !== args.expectedVersion) throw new Error("Call version conflict");
     requireCallWrite(membership, { roomId: args.roomId });
     await requireCallRoom(ctx, call.missionId, args.roomId);
-    await requireVisibleLinkedMove(ctx, call.missionId, membership, linkedMoveId);
+    await requireVisibleLinkedMove(ctx, call.missionId, membership, args.roomId, linkedMoveId);
     const nextVersion = call.currentVersion + 1;
     const event = await recordCallEvent(ctx, call, membership, "call.updated", idempotencyKey, correlationId, "Call details updated", call.currentVersion, nextVersion);
     await ctx.db.patch(call._id, { roomId: args.roomId, linkedMoveId, title, detail, currentVersion: nextVersion, updatedAt: event.now });
