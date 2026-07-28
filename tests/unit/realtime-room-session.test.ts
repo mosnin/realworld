@@ -2988,6 +2988,176 @@ describe("RealtimeRoomSession", () => {
     }
   });
 
+  it("captures message TTL and future-issued limits once and preserves their exact acceptance boundaries after mutation", async () => {
+    const providerSecret = "message-limit-mutation-secret";
+    const clock = new FakeClock();
+    const { transport, connections } = createTransport();
+    const received: RealtimeEnvelope[] = [];
+    const reads = { maxMessageTtlMs: 0, maxFutureIssuedAtMs: 0 };
+    let maxMessageTtlMs: unknown = 10;
+    let maxFutureIssuedAtMs: unknown = 5;
+    const options = {
+      tokenProvider: async () => token(clock.now() + 300_000),
+      transport,
+      clock,
+      onMessage: (value: RealtimeEnvelope) => received.push(value),
+    } as unknown as RoomSessionOptions;
+    Object.defineProperties(options, {
+      maxMessageTtlMs: {
+        get: () => {
+          reads.maxMessageTtlMs += 1;
+          return maxMessageTtlMs;
+        },
+      },
+      maxFutureIssuedAtMs: {
+        get: () => {
+          reads.maxFutureIssuedAtMs += 1;
+          return maxFutureIssuedAtMs;
+        },
+      },
+    });
+    const session = new RealtimeRoomSession(options);
+    maxMessageTtlMs = providerSecret;
+    maxFutureIssuedAtMs = providerSecret;
+
+    await session.start({ missionId: "mission-a", roomId: "room-a" });
+    const current = clock.now();
+    connections[0]!.input.onMessage(message(clock, {
+      messageId: "ttl-boundary",
+      issuedAtMs: current,
+      expiresAtMs: current + 10,
+      clientSeq: 1,
+    }));
+    connections[0]!.input.onMessage(message(clock, {
+      messageId: "ttl-over-limit",
+      issuedAtMs: current,
+      expiresAtMs: current + 11,
+      clientSeq: 2,
+    }));
+    connections[0]!.input.onMessage(message(clock, {
+      messageId: "future-boundary",
+      issuedAtMs: current + 5,
+      expiresAtMs: current + 15,
+      clientSeq: 2,
+    }));
+    connections[0]!.input.onMessage(message(clock, {
+      messageId: "future-over-limit",
+      issuedAtMs: current + 6,
+      expiresAtMs: current + 16,
+      clientSeq: 3,
+    }));
+
+    expect(reads).toEqual({ maxMessageTtlMs: 1, maxFutureIssuedAtMs: 1 });
+    expect(received.map((value) => value.messageId)).toEqual(["ttl-boundary", "future-boundary"]);
+    await session.stop();
+  });
+
+  it("contains malformed, hostile, async, and bounded message-limit getters with exact accept and reject boundaries", async () => {
+    const providerSecret = "hostile-message-limit-secret";
+    const cases: Array<{
+      label: string;
+      maxMessageTtlMs?: unknown;
+      maxFutureIssuedAtMs?: unknown;
+      acceptedTtl: number;
+      rejectedTtl: number;
+      acceptedFuture: number;
+      rejectedFuture: number;
+    }> = [
+      { label: "missing", acceptedTtl: 45_000, rejectedTtl: 45_001, acceptedFuture: 5_000, rejectedFuture: 5_001 },
+      { label: "malformed", maxMessageTtlMs: providerSecret, maxFutureIssuedAtMs: providerSecret, acceptedTtl: 45_000, rejectedTtl: 45_001, acceptedFuture: 5_000, rejectedFuture: 5_001 },
+      { label: "nan", maxMessageTtlMs: Number.NaN, maxFutureIssuedAtMs: Number.NaN, acceptedTtl: 45_000, rejectedTtl: 45_001, acceptedFuture: 5_000, rejectedFuture: 5_001 },
+      { label: "infinite", maxMessageTtlMs: Number.POSITIVE_INFINITY, maxFutureIssuedAtMs: Number.POSITIVE_INFINITY, acceptedTtl: 45_000, rejectedTtl: 45_001, acceptedFuture: 5_000, rejectedFuture: 5_001 },
+      { label: "negative", maxMessageTtlMs: -1, maxFutureIssuedAtMs: -1, acceptedTtl: 1, rejectedTtl: 2, acceptedFuture: 0, rejectedFuture: 1 },
+      { label: "zero", maxMessageTtlMs: 0, maxFutureIssuedAtMs: 0, acceptedTtl: 1, rejectedTtl: 2, acceptedFuture: 0, rejectedFuture: 1 },
+      { label: "fractional", maxMessageTtlMs: 2.9, maxFutureIssuedAtMs: 2.9, acceptedTtl: 2, rejectedTtl: 3, acceptedFuture: 2, rejectedFuture: 3 },
+      { label: "throwing-getter", acceptedTtl: 45_000, rejectedTtl: 45_001, acceptedFuture: 5_000, rejectedFuture: 5_001 },
+      { label: "rejected-promise", acceptedTtl: 45_000, rejectedTtl: 45_001, acceptedFuture: 5_000, rejectedFuture: 5_001 },
+      { label: "hostile-then", acceptedTtl: 45_000, rejectedTtl: 45_001, acceptedFuture: 5_000, rejectedFuture: 5_001 },
+    ];
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      for (const { label, maxMessageTtlMs, maxFutureIssuedAtMs, acceptedTtl, rejectedTtl, acceptedFuture, rejectedFuture } of cases) {
+        const clock = new FakeClock();
+        const { transport, connections } = createTransport();
+        const received: RealtimeEnvelope[] = [];
+        const failures: unknown[] = [];
+        const reads = { maxMessageTtlMs: 0, maxFutureIssuedAtMs: 0 };
+        let thenReads = 0;
+        const options = {
+          tokenProvider: async () => token(clock.now() + 300_000),
+          transport,
+          clock,
+          onMessage: (value: RealtimeEnvelope) => received.push(value),
+          onTransportFailure: (error: unknown) => failures.push(error),
+        } as unknown as RoomSessionOptions;
+        for (const property of ["maxMessageTtlMs", "maxFutureIssuedAtMs"] as const) {
+          Object.defineProperty(options, property, {
+            get: () => {
+              reads[property] += 1;
+              if (label === "throwing-getter") throw new Error(providerSecret);
+              if (label === "rejected-promise") return Promise.reject(new Error(providerSecret));
+              if (label === "hostile-then") {
+                const hostileThenable = {};
+                Object.defineProperty(hostileThenable, "then", {
+                  get: () => {
+                    thenReads += 1;
+                    throw new Error(providerSecret);
+                  },
+                });
+                return hostileThenable;
+              }
+              return property === "maxMessageTtlMs" ? maxMessageTtlMs : maxFutureIssuedAtMs;
+            },
+          });
+        }
+        let session: RealtimeRoomSession | undefined;
+        expect(() => { session = new RealtimeRoomSession(options); }).not.toThrow();
+        await session!.start({ missionId: "mission-a", roomId: "room-a" });
+        const current = clock.now();
+        const boundaryTtl = message(clock, {
+          messageId: `${label}-ttl-boundary`,
+          issuedAtMs: current,
+          expiresAtMs: current + acceptedTtl,
+          clientSeq: 1,
+        });
+        const overTtl = message(clock, {
+          messageId: `${label}-ttl-over`,
+          issuedAtMs: current,
+          expiresAtMs: current + rejectedTtl,
+          clientSeq: 2,
+        });
+        const boundaryFuture = message(clock, {
+          messageId: `${label}-future-boundary`,
+          issuedAtMs: current + acceptedFuture,
+          expiresAtMs: current + acceptedFuture + acceptedTtl,
+          clientSeq: 2,
+        });
+        const overFuture = message(clock, {
+          messageId: `${label}-future-over`,
+          issuedAtMs: current + rejectedFuture,
+          expiresAtMs: current + rejectedFuture + acceptedTtl,
+          clientSeq: 3,
+        });
+        connections[0]!.input.onMessage(boundaryTtl);
+        connections[0]!.input.onMessage(overTtl);
+        connections[0]!.input.onMessage(boundaryFuture);
+        connections[0]!.input.onMessage(overFuture);
+
+        expect(reads).toEqual({ maxMessageTtlMs: 1, maxFutureIssuedAtMs: 1 });
+        if (label === "hostile-then") expect(thenReads).toBe(2);
+        expect(received.map((value) => value.messageId)).toEqual([boundaryTtl.messageId, boundaryFuture.messageId]);
+        expect(failures).toEqual([]);
+        await session!.stop();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
   it("snapshots recovery policy getters and receivers once, ignoring later replacements", async () => {
     const providerSecret = "recovery-policy-replacement-secret";
     for (const policy of ["random", "reconnect"] as const) {

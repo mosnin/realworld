@@ -259,6 +259,13 @@ function snapshotRefreshTiming(options: RoomSessionOptions) {
   };
 }
 
+function snapshotMessageAcceptanceLimits(options: RoomSessionOptions) {
+  return {
+    maxMessageTtl: snapshotPositive(() => options.maxMessageTtlMs, defaultMaxMessageTtlMs),
+    maxFutureIssuedAt: snapshotNonNegative(() => options.maxFutureIssuedAtMs, defaultMaxFutureIssuedAtMs),
+  };
+}
+
 function snapshotOperationTimeouts(options: RoomSessionOptions) {
   return {
     tokenAcquisition: snapshotBoundedPositive(
@@ -696,6 +703,7 @@ export class RealtimeRoomSession {
     this.transportConnect = snapshotTransportConnect(options);
     const operationTimeouts = snapshotOperationTimeouts(options);
     const refreshTiming = snapshotRefreshTiming(options);
+    const messageAcceptanceLimits = snapshotMessageAcceptanceLimits(options);
     this.onStateChange = snapshotObserver(options, () => options.onStateChange);
     this.onMessage = snapshotObserver(options, () => options.onMessage);
     this.onTransientMessageExpired = snapshotObserver(options, () => options.onTransientMessageExpired);
@@ -711,8 +719,8 @@ export class RealtimeRoomSession {
     const random = snapshotRandom(options);
     this.reconnectDelayMs = snapshotReconnectDelay(options, random);
     this.maxReconnectAttempts = snapshotAttemptLimit(() => options.maxReconnectAttempts, defaultMaxReconnectAttempts);
-    this.maxMessageTtlMs = normalizedPositive(options.maxMessageTtlMs, defaultMaxMessageTtlMs);
-    this.maxFutureIssuedAtMs = normalizedNonNegative(options.maxFutureIssuedAtMs, defaultMaxFutureIssuedAtMs);
+    this.maxMessageTtlMs = messageAcceptanceLimits.maxMessageTtl;
+    this.maxFutureIssuedAtMs = messageAcceptanceLimits.maxFutureIssuedAt;
     this.maxSerializedPayloadBytes = normalizedPositive(options.maxSerializedPayloadBytes, defaultMaxSerializedPayloadBytes);
     this.maxTrackedMessageIds = normalizedBoundedPositive(options.maxTrackedMessageIds, defaultMaxTrackedMessageIds, maximumMaxTrackedMessageIds);
     this.maxTrackedSenderStreams = normalizedBoundedPositive(options.maxTrackedSenderStreams, defaultMaxTrackedSenderStreams, maximumMaxTrackedSenderStreams);
