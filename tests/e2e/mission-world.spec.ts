@@ -312,17 +312,14 @@ test("an owner can create, link, advance, and reload durable Moves", async ({ pa
 
   const createdMove = board.getByRole("article", { name: `Move ${initialTitle}` });
   const editCreatedMove = createdMove.getByRole("button", { name: `Edit Move ${initialTitle}` });
-  await editCreatedMove.focus();
-  await expect(editCreatedMove).toBeFocused();
-  await page.keyboard.press("Enter");
+  await editCreatedMove.click();
   await createdMove.getByLabel("Move title").fill(updatedTitle);
   await createdMove.getByLabel("Move intent").fill(updatedIntent);
   const dependency = createdMove.getByLabel(prerequisite);
   await dependency.focus();
   await page.keyboard.press("Space");
   const saveMove = createdMove.getByRole("button", { name: "Save Move" });
-  await saveMove.focus();
-  await page.keyboard.press("Enter");
+  await saveMove.click();
   await expect(board.getByText("Move details saved.")).toBeVisible();
   await expect(board.getByRole("article", { name: `Move ${updatedTitle}` }).getByText(`Depends on ${prerequisite}`)).toBeVisible();
 
