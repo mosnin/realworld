@@ -21,7 +21,7 @@ export type DurableRoomReadiness = Readonly<{
  * integration. This module never issues a token, imports a provider, or reads
  * runtime configuration.
  */
-export type DurableRoomTokenProviderFactory = (readiness: DurableRoomReadiness) => unknown;
+export type DurableRoomTokenProviderFactory = (readiness: DurableRoomReadiness) => RealtimeTokenProvider | undefined;
 export type DurableRoomTransportFactory = (readiness: DurableRoomReadiness) => unknown;
 export type DurableRoomSessionFactory = (readiness: DurableRoomReadiness) => BrowserRoomSession | undefined;
 
