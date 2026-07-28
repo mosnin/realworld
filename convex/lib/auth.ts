@@ -58,3 +58,9 @@ export function requireRole(membership: ActiveMembership, allowedRoles: readonly
     throw new Error("Not found");
   }
 }
+
+export async function requireWritableMission(ctx: AuthContext, missionId: Id<"missions">) {
+  const mission = await ctx.db.get(missionId);
+  if (mission === null || mission.lifecycle !== "active") throw new Error("Mission is not active");
+  return mission;
+}

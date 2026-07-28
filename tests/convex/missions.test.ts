@@ -297,6 +297,13 @@ describe("invites and durable canvas", () => {
     await expect(t.withIdentity({ ...contributorIdentity, tokenIdentifier: "https://realworld.test|second-guest", subject: "second-guest" }).mutation(api.invites.acceptInvite, { inviteToken: limitedToken, idempotencyKey: "limited-second", correlationId: "limited-second-c" })).rejects.toThrow("Invite is unavailable");
   });
 
+  it("freezes room and invitation writes while a Mission is archived", async () => {
+    const { t, asOwner, result } = await createMission(); const roomId = await roomFor(t, result.missionId);
+    await asOwner.mutation(api.missions.archivePrivateMission, { missionId: result.missionId, expectedVersion: 1, idempotencyKey: "freeze-archive", correlationId: "freeze" });
+    await expect(asOwner.mutation(api.canvas.updateRoomLayout, { roomId, expectedLayoutVersion: 1, layout: { x: 20, y: 20, width: 220, height: 140 }, idempotencyKey: "freeze-layout" })).rejects.toThrow("Mission is not active");
+    await expect(asOwner.mutation(api.invites.createInvite, { missionId: result.missionId, role: "observer", roomIds: [roomId], expiresAt: Date.now() + 60_000, maxUses: 1, inviteToken: "q".repeat(40), idempotencyKey: "freeze-invite", correlationId: "freeze" })).rejects.toThrow("Mission is not active");
+  });
+
   it("does not let an authenticated agent principal redeem a human invitation", async () => {
     const { t, asOwner, result } = await createMission();
     const roomId = await roomFor(t, result.missionId);
