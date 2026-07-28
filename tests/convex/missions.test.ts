@@ -325,6 +325,62 @@ describe("invites and durable canvas", () => {
     expect((await t.withIdentity(contributorIdentity).query(api.canvas.roomLayouts, { missionId: result.missionId })).map((room) => room._id)).toEqual([allowedRoomId]);
   });
 
+  it("enforces the Mission role matrix across archive, invites, and durable rooms", async () => {
+    const { t, asOwner, result } = await createMission();
+    const sharedRoomId = await roomFor(t, result.missionId);
+    const identities = {
+      steward: { tokenIdentifier: "https://realworld.test|steward", subject: "steward", issuer: "https://realworld.test", name: "Steward" },
+      builder: { tokenIdentifier: "https://realworld.test|builder", subject: "builder", issuer: "https://realworld.test", name: "Builder" },
+      reviewer: { tokenIdentifier: "https://realworld.test|reviewer", subject: "reviewer", issuer: "https://realworld.test", name: "Reviewer" },
+      observer: { tokenIdentifier: "https://realworld.test|observer", subject: "observer", issuer: "https://realworld.test", name: "Observer" },
+      agent: { tokenIdentifier: "https://realworld.test|agent-matrix", subject: "agent-matrix", issuer: "https://realworld.test", name: "Agent" },
+      revoked: { tokenIdentifier: "https://realworld.test|revoked", subject: "revoked", issuer: "https://realworld.test", name: "Revoked" },
+    };
+    await t.run(async (ctx) => {
+      const now = Date.now();
+      for (const [role, identity] of Object.entries(identities)) {
+        const isAgent = role === "agent";
+        const isRevoked = role === "revoked";
+        const principalId = await ctx.db.insert("principals", { type: isAgent ? "agent" : "human", state: "active", tokenIdentifier: identity.tokenIdentifier, createdAt: now, updatedAt: now, schemaVersion: 1 });
+        await ctx.db.insert("missionMembers", { missionId: result.missionId, principalId, role: isAgent ? "agent" : isRevoked ? "observer" : role as "steward" | "builder" | "reviewer" | "observer", state: isRevoked ? "revoked" : "active", scope: role === "reviewer" || role === "observer" ? [`room:${sharedRoomId}`] : ["mission:*"], grantVersion: 1, createdAt: now, updatedAt: now, schemaVersion: 1 });
+      }
+      const contributorPrincipalId = await ctx.db.insert("principals", { type: "human", state: "active", tokenIdentifier: contributorIdentity.tokenIdentifier, createdAt: now, updatedAt: now, schemaVersion: 1 });
+      await ctx.db.insert("missionMembers", { missionId: result.missionId, principalId: contributorPrincipalId, role: "contributor", state: "active", scope: [`room:${sharedRoomId}`], grantVersion: 1, createdAt: now, updatedAt: now, schemaVersion: 1 });
+    });
+
+    const asSteward = t.withIdentity(identities.steward);
+    const asBuilder = t.withIdentity(identities.builder);
+    const asReviewer = t.withIdentity(identities.reviewer);
+    const asContributor = t.withIdentity(contributorIdentity);
+    const asObserver = t.withIdentity(identities.observer);
+    const asAgent = t.withIdentity(identities.agent);
+    const asRevoked = t.withIdentity(identities.revoked);
+
+    expect((await asSteward.query(api.canvas.roomLayouts, { missionId: result.missionId })).map((room) => room._id)).toEqual([sharedRoomId]);
+    expect((await asBuilder.query(api.canvas.roomLayouts, { missionId: result.missionId })).map((room) => room._id)).toEqual([sharedRoomId]);
+    expect((await asReviewer.query(api.canvas.roomLayouts, { missionId: result.missionId })).map((room) => room._id)).toEqual([sharedRoomId]);
+    expect((await asContributor.query(api.canvas.roomLayouts, { missionId: result.missionId })).map((room) => room._id)).toEqual([sharedRoomId]);
+    expect((await asObserver.query(api.canvas.roomLayouts, { missionId: result.missionId })).map((room) => room._id)).toEqual([sharedRoomId]);
+    await expect(t.query(api.canvas.roomLayouts, { missionId: result.missionId })).rejects.toThrow("Unauthorized");
+    await expect(asAgent.query(api.canvas.roomLayouts, { missionId: result.missionId })).rejects.toThrow("Unauthorized");
+    await expect(asRevoked.query(api.canvas.roomLayouts, { missionId: result.missionId })).rejects.toThrow("Not found");
+
+    const roomCommand = (title: string, idempotencyKey: string) => ({ missionId: result.missionId, title, kind: "branchLab" as const, layout: { x: 100, y: 200, width: 220, height: 140 }, idempotencyKey });
+    await expect(asSteward.mutation(api.canvas.createRoom, roomCommand("Steward room", "matrix-steward-room"))).resolves.toMatchObject({ layoutVersion: 1 });
+    await expect(asBuilder.mutation(api.canvas.createRoom, roomCommand("Builder room", "matrix-builder-room"))).resolves.toMatchObject({ layoutVersion: 1 });
+    for (const [label, actor] of [["reviewer", asReviewer], ["contributor", asContributor], ["observer", asObserver], ["agent", asAgent], ["revoked", asRevoked]] as const) {
+      await expect(actor.mutation(api.canvas.createRoom, roomCommand(`${label} room`, `matrix-${label}-room`))).rejects.toThrow();
+    }
+
+    const ownerInvite = await asOwner.mutation(api.invites.createInvite, { missionId: result.missionId, role: "observer", roomIds: [sharedRoomId], expiresAt: Date.now() + 60_000, maxUses: 1, inviteToken: "g".repeat(40), idempotencyKey: "matrix-owner-invite", correlationId: "matrix" });
+    await expect(asSteward.mutation(api.invites.revokeInvite, { inviteId: ownerInvite.inviteId, idempotencyKey: "matrix-steward-revoke", correlationId: "matrix" })).resolves.toMatchObject({ inviteId: ownerInvite.inviteId });
+    await expect(asSteward.mutation(api.invites.createInvite, { missionId: result.missionId, role: "observer", roomIds: [sharedRoomId], expiresAt: Date.now() + 60_000, maxUses: 1, inviteToken: "h".repeat(40), idempotencyKey: "matrix-steward-invite", correlationId: "matrix" })).resolves.toMatchObject({ inviteId: expect.any(String) });
+    for (const [label, actor] of [["builder", asBuilder], ["reviewer", asReviewer], ["contributor", asContributor], ["observer", asObserver], ["agent", asAgent], ["revoked", asRevoked]] as const) {
+      await expect(actor.mutation(api.invites.createInvite, { missionId: result.missionId, role: "observer", roomIds: [sharedRoomId], expiresAt: Date.now() + 60_000, maxUses: 1, inviteToken: `${label.padEnd(32, "x")}`, idempotencyKey: `matrix-${label}-invite`, correlationId: "matrix" })).rejects.toThrow();
+    }
+    await expect(asSteward.mutation(api.missions.archivePrivateMission, { missionId: result.missionId, expectedVersion: 1, idempotencyKey: "matrix-steward-archive", correlationId: "matrix" })).rejects.toThrow("Not found");
+  });
+
   it("creates, renames, and archives rooms with role checks and room-version OCC", async () => {
     const { t, asOwner, result } = await createMission();
     await t.run(async (ctx) => {
