@@ -22,11 +22,13 @@ Already complete:
 - [x] GitHub is connected and the authenticated release gate runs in Actions.
 - [x] Vercel is linked to the `realworld` project and has produced a preview build.
 
-Do not add Ably, OpenAI, or OpenRouter credentials for this gate; the current runtime does not consume them yet.
+Do not add Ably, OpenAI, or OpenRouter credentials before this cloud-preview gate passes.
 
-## Needed after the cloud preview gate
+## Needed immediately after the cloud preview gate
 
-- [ ] Create an Ably development application when scoped token issuance is implemented; keep Convex authoritative for durable state and Ably limited to ephemeral presence.
+- [ ] Create a dedicated Ably **development** application; keep Convex authoritative for durable state and Ably limited to ephemeral presence.
+- [ ] In the connected Convex development deployment, set encrypted `REALWORLD_APP_ENV=preview` and `ABLY_API_KEY` from that development-only Ably application. Never place the key in Vercel browser variables, source, chat, or Notion.
+- [ ] Run the first scoped connection and revocation/reconnect checks before any participant-facing presence UI. Production token issuance remains hard-disabled in code.
 - [ ] Choose the primary domain after naming is confirmed.
 - [ ] Create production Convex, Ably, and Vercel environments only when the production release phase begins.
 

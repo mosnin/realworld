@@ -25,6 +25,14 @@ The trusted token issuer first asks Convex for the caller’s current principal,
 
 Tokens are environment-isolated, audience-restricted to the realtime transport, short-lived, and refreshable only after a fresh authorization check. Their contents, signatures, and provider credentials never reach logs or repositories.
 
+### Implemented non-production issuer boundary
+
+`api.realtime.issueTokenRequest` now implements the trusted boundary as a Convex action. It derives the caller from Convex Auth, rechecks the active human principal, Mission, room, membership, expiry, role, exact room scope, and durable grant version in a server-only query, then signs a five-minute Ably `TokenRequest`. The browser cannot supply its own role, scope, client identity, environment, or capability.
+
+Development, test, and preview namespaces are explicit and fail closed when `REALWORLD_APP_ENV` or the server-only `ABLY_API_KEY` is absent. Production issuance is unconditionally disabled in this release. Human writer roles receive only the exact operations in the matrix below, observers receive subscribe-only channels with no interaction channel, and `agent-status` remains subscribe-only for every human role. Client ids are pseudonymous and rotate when the durable membership grant version changes.
+
+This is offline issuer and authorization evidence only. No Ably application, credentialed provider request, client connection, presence session, network recovery, or load test has run. A revoked non-production token can remain usable until its five-minute expiry; a tested live disconnect/re-authentication path is therefore a production-enable gate.
+
 ## Channel namespace and capability design
 
 ### Names
@@ -263,7 +271,7 @@ All simulations use fixed clocks, seeded principal/client ids, deterministic net
 
 ## Decisions and blockers
 
-1. **Token issuer location is open.** It may be a narrow Vercel route handler or another trusted backend boundary, but must be selected after confirming Convex Auth/session verification and Ably token-issuance requirements. No browser-held API key is acceptable.
+1. **Token issuer location is decided.** The guarded Convex action is the trusted issuer boundary. Production remains disabled until credentialed connection, revocation/disconnect, refresh, namespace isolation, and degraded-mode checks pass. No browser-held API key is acceptable.
 2. **Artifact collaboration engine is still open.** This protocol supports presence around object/range identifiers; rich-text/code/media conflict and selection semantics need a chosen engine and tested version model before implementation.
 3. **Presence retention window is open.** The policy must set the retention period for server/analytics presence metadata and declare whether anonymous aggregate occupancy is retained. Payload contents should not be retained by default.
 4. **Voice is intentionally excluded from Phase 3.** The `surge` channel only supports lightweight coordination signals. A later voice provider requires a separate privacy, consent, recording, moderation, and capacity contract.
