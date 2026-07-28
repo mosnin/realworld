@@ -612,6 +612,79 @@ describe("development Ably room transport", () => {
     }
   });
 
+  it("bounds client-factory resolution and makes rejected, throwing, and late candidates inert", async () => {
+    const providerSecret = "provider-secret-client-factory";
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    const connectInput = {
+      scope,
+      token: tokenRequest({ [names().world]: ["subscribe"] }),
+      connectionEpoch: 1,
+      onMessage: vi.fn(),
+      onFailure: vi.fn(),
+    };
+    const assertImmediateFailure = async (clientFactory: () => Promise<AblyRealtimeClient>) => {
+      const adapter = createDevelopmentAblyRoomTransport({
+        environment: "preview",
+        clientFactory,
+        providerOperationTimeoutMs: 7,
+        now: () => 1_000_000,
+      });
+      const failure = await adapter.connect(connectInput).catch((error: unknown) => error);
+      expect(failure).toEqual(expect.objectContaining({ message: expect.stringMatching(/^Realtime /) }));
+      expect(String(failure)).not.toContain(providerSecret);
+    };
+    const assertLateCandidate = async (candidate: unknown, assertCandidate: () => void) => {
+      const scheduler = controlledTimer();
+      const lateClient = deferred<unknown>();
+      const factory = vi.fn(() => lateClient.promise as Promise<AblyRealtimeClient>);
+      const adapter = createDevelopmentAblyRoomTransport({
+        environment: "preview",
+        clientFactory: factory,
+        timer: scheduler.timer,
+        connectionReadyTimeoutMs: 50,
+        providerOperationTimeoutMs: 7,
+        now: () => 1_000_000,
+      });
+      const pending = adapter.connect(connectInput);
+      await vi.waitFor(() => expect(factory).toHaveBeenCalledTimes(1));
+      scheduler.fire(7);
+      const failure = await pending.catch((error: unknown) => error);
+      expect(failure).toEqual(expect.objectContaining({ message: expect.stringMatching(/^Realtime /) }));
+      expect(String(failure)).not.toContain(providerSecret);
+      lateClient.resolve(candidate);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assertCandidate();
+    };
+    try {
+      await assertImmediateFailure(async () => { throw new Error(providerSecret); });
+      await assertImmediateFailure(() => { throw new Error(providerSecret); });
+
+      const lateValid = fakeClient();
+      await assertLateCandidate(lateValid.client, () => {
+        expect(lateValid.get).not.toHaveBeenCalled();
+        expect(lateValid.on).not.toHaveBeenCalled();
+        expect(lateValid.client.connect).not.toHaveBeenCalled();
+        expect(lateValid.listeners).toEqual(new Map());
+        expect(lateValid.presenceListeners).toEqual(new Map());
+      });
+      await vi.waitFor(() => expect(lateValid.client.close).toHaveBeenCalledTimes(1));
+
+      await assertLateCandidate({}, () => undefined);
+      const hostileLateCandidate = new Proxy({}, {
+        get: (_target, key) => {
+          if (key === "then") return undefined;
+          throw new Error(providerSecret);
+        },
+      });
+      await assertLateCandidate(hostileLateCandidate, () => undefined);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
   it("bounds never-settling publish and presence operations without mutating late local state", async () => {
     const scheduler = controlledTimer();
     const providerSecret = "provider-secret-timeout-publish";

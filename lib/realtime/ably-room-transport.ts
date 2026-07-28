@@ -229,17 +229,18 @@ async function awaitBoundedProvider<Return>(
   options: Readonly<{
     timer: AblyConnectionTimer;
     timeoutMs: number;
-    undoLateSuccess?: () => void | Promise<void>;
+    undoOnFailure?: () => void | Promise<void>;
+    undoLateSuccess?: (value: Return) => void | Promise<void>;
   }>,
 ): Promise<Return> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let settled = false;
   let timedOut = false;
-  const undoLateSuccess = () => {
-    if (!options.undoLateSuccess) return;
+  const undoOnFailure = () => {
+    if (!options.undoOnFailure) return;
     void (async () => {
       try {
-        await awaitBoundedProvider("cleanup", options.undoLateSuccess!, {
+        await awaitBoundedProvider("cleanup", options.undoOnFailure!, {
           timer: options.timer,
           timeoutMs: options.timeoutMs,
         });
@@ -259,24 +260,50 @@ async function awaitBoundedProvider<Return>(
       timer = options.timer.setTimeout(() => {
         timedOut = true;
         finish(providerOperationError(operation));
-        undoLateSuccess();
+        undoOnFailure();
       }, options.timeoutMs);
       void (async () => {
         try {
           const value = await awaitProvider(operation, callback);
           if (settled) {
-            if (timedOut) undoLateSuccess();
+            if (timedOut && options.undoLateSuccess) {
+              void (async () => {
+                try {
+                  await awaitBoundedProvider("cleanup", () => options.undoLateSuccess!(value), {
+                    timer: options.timer,
+                    timeoutMs: options.timeoutMs,
+                  });
+                } catch {
+                  // The caller already received the bounded generic failure.
+                }
+              })();
+            }
             return;
           }
           finish(undefined, value);
         } catch (error) {
-          if (!settled) undoLateSuccess();
+          if (!settled) undoOnFailure();
           finish(error);
         }
       })();
     });
   } finally {
     if (timer !== undefined) options.timer.clearTimeout(timer);
+  }
+}
+
+async function closeLateFactoryClient(
+  candidate: unknown,
+  timer: AblyConnectionTimer,
+  timeoutMs: number,
+) {
+  try {
+    if (!isRecord(candidate)) return;
+    const close = candidate.close;
+    if (typeof close !== "function") return;
+    await awaitBoundedProvider("cleanup", () => Reflect.apply(close, candidate, []), { timer, timeoutMs });
+  } catch {
+    // A late client is never used, and its provider details stay contained.
   }
 }
 
@@ -453,7 +480,15 @@ export class DevelopmentAblyRoomTransport implements RealtimeTransportAdapter {
     }
     let unvalidatedClient: unknown;
     try {
-      unvalidatedClient = await this.clientFactory(tokenRequest);
+      unvalidatedClient = await awaitBoundedProvider(
+        "connection",
+        () => this.clientFactory(tokenRequest),
+        {
+          timer: this.timer,
+          timeoutMs: this.providerOperationTimeoutMs,
+          undoLateSuccess: (candidate) => closeLateFactoryClient(candidate, this.timer, this.providerOperationTimeoutMs),
+        },
+      );
     } catch {
       this.emitTelemetry({ event: "connect_failed", reason: "connection_unavailable", state: "degraded" });
       throw new Error("Realtime client contract is invalid");
@@ -472,7 +507,8 @@ export class DevelopmentAblyRoomTransport implements RealtimeTransportAdapter {
     ) => awaitBoundedProvider(operation, callback, {
       timer: this.timer,
       timeoutMs: this.providerOperationTimeoutMs,
-      undoLateSuccess,
+      undoOnFailure: undoLateSuccess,
+      undoLateSuccess: () => undoLateSuccess?.(),
     });
     const listeners: Array<Readonly<{ channel: AblyRoomChannel; listener: (message: AblyInboundMessage) => void; presence: boolean }>> = [];
     const enteredPresence = new Set<AblyRoomChannel>();
