@@ -1,5 +1,27 @@
 import { expect, test } from "@playwright/test";
 
+test.beforeEach(async ({ page }, testInfo) => {
+  await page.goto("/");
+
+  const missionHeading = page.getByRole("heading", {
+    name: "Build Realworld into a living multiplayer work platform",
+  });
+  if (await missionHeading.isVisible()) {
+    return;
+  }
+
+  await expect(page.getByRole("heading", { name: "Enter the Mission World." })).toBeVisible();
+  await page.getByLabel("Email").fill(
+    `browser-${testInfo.workerIndex}-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`,
+  );
+  await page.getByLabel("Password").fill("Realworld-browser-test-2026");
+  await page.getByRole("button", { name: "Need an invitation? Create an account" }).click();
+  const createAccount = page.getByRole("button", { name: "Create private-alpha account" });
+  await expect(createAccount).toBeVisible();
+  await createAccount.click();
+  await expect(missionHeading).toBeVisible({ timeout: 15_000 });
+});
+
 test("a participant can inspect and enter Workshop from the Mission World", async ({ page }) => {
   await page.goto("/");
 

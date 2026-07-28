@@ -17,6 +17,7 @@ export function PrivateAlphaSignIn() {
     setIsSubmitting(true);
     try {
       await signIn("password", { email, password, flow: mode });
+      window.location.reload();
     } catch {
       setError("We could not complete that request. Check the details and try again.");
     } finally {

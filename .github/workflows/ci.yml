@@ -40,7 +40,7 @@ jobs:
       - name: Install browser
         run: pnpm exec playwright install --with-deps chromium
       - name: Browser tests
-        run: pnpm test:e2e
+        run: pnpm exec convex dev --once --tail-logs disable --start "node scripts/verification/run-authenticated-e2e.mjs"
       - name: Verify foundation evidence
         env:
           RW_EVIDENCE_AUTOMATED: install,lint,typecheck,unit,convex-tests,build,chromium

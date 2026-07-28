@@ -21,9 +21,16 @@ function AuthNotConfigured() {
   );
 }
 
-export function MissionAccessGate({ children }: Readonly<{ children: ReactNode }>) {
+export function MissionAccessGate({
+  children,
+  initialAuthenticated,
+}: Readonly<{ children: ReactNode; initialAuthenticated: boolean }>) {
   if (!hasConvexAuthConfiguration()) {
     return <AuthNotConfigured />;
+  }
+
+  if (!initialAuthenticated) {
+    return <PrivateAlphaSignIn />;
   }
 
   return (
