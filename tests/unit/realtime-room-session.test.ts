@@ -4094,6 +4094,52 @@ describe("RealtimeRoomSession", () => {
     await session.stop();
   });
 
+  it("contains a synchronous retained reconnect timer without stale degraded state or duplicate retry", async () => {
+    const baseClock = new FakeClock();
+    let synchronouslyReconnect = false;
+    let heldReconnectCallback: (() => void) | undefined;
+    const clearedHandles: number[] = [];
+    const clock = {
+      now: () => baseClock.now(),
+      setTimeout: (callback: () => void, delayMs: number) => {
+        if (synchronouslyReconnect && delayMs === 11) {
+          synchronouslyReconnect = false;
+          callback();
+          heldReconnectCallback = callback;
+          return 4_444 as unknown as ReturnType<typeof setTimeout>;
+        }
+        return baseClock.setTimeout(callback, delayMs);
+      },
+      clearTimeout: (timer: ReturnType<typeof setTimeout>) => {
+        if (timer === (4_444 as unknown as ReturnType<typeof setTimeout>)) { clearedHandles.push(4_444); return; }
+        baseClock.clearTimeout(timer);
+      },
+    };
+    const { transport, connect, connections } = createTransport();
+    const failures: unknown[] = [];
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      const session = new RealtimeRoomSession({ tokenProvider: async () => token(baseClock.now() + 300_000), transport, clock, reconnectDelayMs: () => 11, maxReconnectAttempts: 1, onTransportFailure: (error) => failures.push(error) });
+      await session.start({ missionId: "mission-a", roomId: "room-a" });
+      synchronouslyReconnect = true;
+      connections[0]!.input.onFailure(new Error("ordinary failure"));
+      await vi.waitFor(() => expect(session.state).toBe("live"));
+      expect(connect).toHaveBeenCalledTimes(2);
+      expect(failures).toHaveLength(1);
+      expect(clearedHandles).toEqual([4_444]);
+      expect(heldReconnectCallback).toBeTypeOf("function");
+      heldReconnectCallback?.();
+      await flush();
+      expect(session.state).toBe("live");
+      expect(connect).toHaveBeenCalledTimes(2);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+      await session.stop();
+    } finally { process.off("unhandledRejection", observeUnhandled); }
+  });
+
   it("snapshots recovery policy getters and receivers once, ignoring later replacements", async () => {
     const providerSecret = "recovery-policy-replacement-secret";
     for (const policy of ["random", "reconnect"] as const) {

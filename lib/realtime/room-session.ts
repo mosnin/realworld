@@ -1248,14 +1248,29 @@ export class RealtimeRoomSession {
     if (failureGeneration !== this.generation) return;
     const delay = Number.isFinite(requestedDelay) ? Math.max(0, Math.min(maximumReconnectDelayMs, requestedDelay)) : maximumReconnectDelayMs;
     this.reconnectAttempt += 1;
-    this.reconnectTimer = this.clock.setTimeout(() => {
+    let reconnectStarted = false;
+    let reconnectFailureNotified = false;
+    const notifyReconnectFailure = () => {
+      if (reconnectFailureNotified || failureGeneration !== this.generation) return;
+      reconnectFailureNotified = true;
+      this.onTransportFailure?.(error);
+    };
+    const reconnectTimer = this.clock.setTimeout(() => {
       if (failureGeneration !== this.generation || !this.scopeValue || this.stateValue === "stopped") return;
+      reconnectStarted = true;
       this.setState("reconnecting");
+      if (failureGeneration !== this.generation || !this.scopeValue || this.stateValue !== "reconnecting") return;
+      notifyReconnectFailure();
       if (failureGeneration !== this.generation || !this.scopeValue || this.stateValue !== "reconnecting") return;
       void this.requestConnect("reconnecting");
     }, delay);
+    if (reconnectStarted) {
+      this.clock.clearTimeout(reconnectTimer);
+      return;
+    }
+    this.reconnectTimer = reconnectTimer;
     this.setState("degraded");
-    if (failureGeneration === this.generation) this.onTransportFailure?.(error);
+    notifyReconnectFailure();
   }
 
   private acceptMessage(value: unknown): RealtimeEnvelope | Exclude<RealtimeMessageDecision, "accepted"> {
