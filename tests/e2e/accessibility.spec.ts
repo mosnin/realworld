@@ -1,5 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, Page, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 async function expectNoSeriousOrCriticalAxeViolations(page: Page) {
   const results = await new AxeBuilder({ page }).analyze();
@@ -53,6 +53,66 @@ test("the authenticated Call dialog has no serious or critical axe violations", 
   await page.getByRole("button", { name: /Issue Call/ }).click();
   await expect(page.getByRole("dialog", { name: "Ask for a hand, in context" })).toBeVisible();
   await expectNoSeriousOrCriticalAxeViolations(page);
+});
+
+test("the authenticated Fracture dialog has no serious or critical axe violations", async ({ page }) => {
+  await launchPrivateMission(page);
+
+  await page.getByRole("button", { name: /Open Fractures/ }).click();
+  await expect(page.getByRole("dialog", { name: "Name the break, hold the line" })).toBeVisible();
+  await expectNoSeriousOrCriticalAxeViolations(page);
+});
+
+test("the authenticated Proof dialog has no serious or critical axe violations", async ({ page }) => {
+  await launchPrivateMission(page);
+
+  await page.getByRole("button", { name: /Open Proofs/ }).click();
+  await expect(page.getByRole("dialog", { name: "Make the work verifiable" })).toBeVisible();
+  await expectNoSeriousOrCriticalAxeViolations(page);
+});
+
+test.describe("on an expanded desktop Mission World", () => {
+  test.use({ viewport: { width: 1728, height: 1117 } });
+
+  test("the full Mission Momentum header has no serious or critical axe violations", async ({
+    page,
+  }) => {
+    await launchPrivateMission(page);
+    const momentum = page.getByLabel(/Mission Momentum: strong/);
+    const newMission = page.getByRole("button", { name: "New Mission" });
+    await expect(momentum).toBeVisible();
+    await expect(newMission).toBeVisible();
+    await expect
+      .poll(async () => {
+        const momentumBox = await momentum.boundingBox();
+        const newMissionBox = await newMission.boundingBox();
+        return (
+          momentumBox !== null &&
+          newMissionBox !== null &&
+          momentumBox.x + momentumBox.width <= newMissionBox.x
+        );
+      })
+      .toBe(true);
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+      .toBe(true);
+
+    await expectNoSeriousOrCriticalAxeViolations(page);
+  });
+});
+
+test.describe("on a constrained desktop Mission World", () => {
+  test.use({ viewport: { width: 1600, height: 1057 } });
+
+  test("the action rail stays readable without overlapping Mission Momentum", async ({ page }) => {
+    await launchPrivateMission(page);
+
+    await expect(page.getByLabel(/Mission Momentum: strong/)).toBeHidden();
+    await expect(page.getByRole("button", { name: "New Mission" })).toBeVisible();
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+      .toBe(true);
+  });
 });
 
 test.describe("on a phone-sized reduced-motion Mission World", () => {
