@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useMutation, useQuery } from "convex/react";
 
+import { api } from "@/convex/_generated/api";
 import { SessionControl } from "@/app/auth/session-control";
 import { Icon, type IconName } from "@/app/ui/icons";
 
@@ -362,6 +364,13 @@ function PreferencePanel({
 }
 
 export function MissionWorld() {
+  const templateOptions = [{ key: "companySprint", label: "Company sprint" }, { key: "classroomProject", label: "Classroom project" }, { key: "contentProduction", label: "Content production" }, { key: "openChallenge", label: "Open challenge" }];
+  const missions = useQuery(api.missions.listMyMissions, {});
+  const launch = useMutation(api.launch.createMissionFromTemplate);
+  const [launching, setLaunching] = useState<string | null>(null);
+  if (missions === undefined) return <main id="main-content" className="foundation">Loading your Mission World…</main>;
+  if (missions.length === 0) return <main id="main-content" className="foundation"><p className="wordmark">Realworld</p><h1>Start a Mission with a real work shape.</h1><p>Choose a room ecology for the work ahead.</p>{templateOptions.map(({ key, label }) => <button key={key} disabled={launching !== null} onClick={async () => { setLaunching(key); try { await launch({ templateKey: key, slug: `${key}-${crypto.randomUUID().slice(0, 8)}`, title: label, idempotencyKey: crypto.randomUUID(), correlationId: crypto.randomUUID() }); } finally { setLaunching(null); } }} type="button">{launching === key ? "Launching…" : `Launch ${label}`}</button>)}</main>;
+  const activeMission = missions[0]!;
   const [selectedRoomId, setSelectedRoomId] = useState<RoomId>("workshop");
   const [view, setView] = useState<"world" | "workshop">("world");
   const [showDirectory, setShowDirectory] = useState(false);
@@ -466,7 +475,7 @@ export function MissionWorld() {
 
       <section className="mission-summary" aria-labelledby="mission-title">
         <p className="eyebrow">Mission</p>
-        <h1 id="mission-title">Build Realworld into a living multiplayer work platform</h1>
+        <h1 id="mission-title">{activeMission.title}</h1>
         <p>Give humans and autonomous agents shared Missions, live rooms, durable Artifacts, and the tools to accomplish ambitious work together.</p>
         <div className="mission-summary__facts"><span><i /> Active</span><span>18 humans</span><span>7 agents</span><span>Updated 2m ago</span></div>
         <div className="summary-pulse"><strong>Pulse</strong><svg viewBox="0 0 220 34" aria-hidden="true"><path d="M1 21 C20 30 26 6 45 17 S70 26 88 11 S113 9 130 22 S155 25 169 14 S194 12 219 9" /></svg></div>
