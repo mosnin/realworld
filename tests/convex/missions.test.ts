@@ -304,5 +304,34 @@ describe("invites and durable canvas", () => {
     await expect(guest.query(api.canvas.roomLayouts, { missionId: result.missionId })).rejects.toThrow("Unauthorized");
     const moved = await asOwner.mutation(api.canvas.updateRoomLayout, { roomId, expectedLayoutVersion: 1, layout: { x: 20, y: 30, width: 300, height: 200 }, idempotencyKey: "layout-1" }); expect(moved.layoutVersion).toBe(2);
     await expect(asOwner.mutation(api.canvas.updateRoomLayout, { roomId, expectedLayoutVersion: 1, layout: { x: 21, y: 30, width: 300, height: 200 }, idempotencyKey: "layout-stale" })).rejects.toThrow("Room layout version conflict");
+    await t.run(async (ctx) => {
+      const mission = await ctx.db.get(result.missionId);
+      const events = await ctx.db.query("missionEvents").withIndex("by_mission_and_sequence", (query) => query.eq("missionId", result.missionId)).collect();
+      expect(mission?.eventSequence).toBe(2);
+      expect(events.map((event) => [event.missionSequence, event.type])).toEqual([[1, "mission.created"], [2, "room.layoutUpdated"]]);
+    });
+  });
+
+  it("creates, renames, and archives rooms with role checks and room-version OCC", async () => {
+    const { t, asOwner, result } = await createMission();
+    await t.run(async (ctx) => {
+      const now = Date.now();
+      const contributorPrincipalId = await ctx.db.insert("principals", { type: "human", state: "active", tokenIdentifier: contributorIdentity.tokenIdentifier, createdAt: now, updatedAt: now, schemaVersion: 1 });
+      await ctx.db.insert("missionMembers", { missionId: result.missionId, principalId: contributorPrincipalId, role: "contributor", state: "active", scope: ["mission:read"], grantVersion: 1, createdAt: now, updatedAt: now, schemaVersion: 1 });
+    });
+    await expect(t.withIdentity(contributorIdentity).mutation(api.canvas.createRoom, { missionId: result.missionId, title: "Unauthorized", kind: "branchLab", layout: { x: 100, y: 200, width: 220, height: 140 }, idempotencyKey: "unauthorized-create" })).rejects.toThrow("Not found");
+    const created = await asOwner.mutation(api.canvas.createRoom, { missionId: result.missionId, title: "Sound check", kind: "branchLab", layout: { x: 100, y: 200, width: 220, height: 140 }, idempotencyKey: "room-create" });
+    expect(await asOwner.mutation(api.canvas.createRoom, { missionId: result.missionId, title: "Sound check", kind: "branchLab", layout: { x: 100, y: 200, width: 220, height: 140 }, idempotencyKey: "room-create" })).toEqual(created);
+    const renamed = await asOwner.mutation(api.canvas.renameRoom, { roomId: created.roomId, title: "Audio check", expectedVersion: 1, idempotencyKey: "room-rename" });
+    expect(renamed.currentVersion).toBe(2);
+    await expect(asOwner.mutation(api.canvas.archiveRoom, { roomId: created.roomId, expectedVersion: 1, idempotencyKey: "room-archive-stale" })).rejects.toThrow("Room version conflict");
+    const archived = await asOwner.mutation(api.canvas.archiveRoom, { roomId: created.roomId, expectedVersion: 2, idempotencyKey: "room-archive" });
+    expect(archived.currentVersion).toBe(3);
+    await t.run(async (ctx) => {
+      const room = await ctx.db.get(created.roomId);
+      const mission = await ctx.db.get(result.missionId);
+      expect(room).toMatchObject({ title: "Audio check", state: "archived", currentVersion: 3 });
+      expect(mission?.eventSequence).toBe(4);
+    });
   });
 });

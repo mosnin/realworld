@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 
 import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import { SessionControl } from "@/app/auth/session-control";
 import { OwnerInvitePanel } from "@/app/invitations/owner-invite-panel";
 import { Icon, type IconName } from "@/app/ui/icons";
@@ -26,6 +27,9 @@ type Room = {
   y: number;
   custom?: boolean;
   archived?: boolean;
+  layoutVersion?: number;
+  currentVersion?: number;
+  layout?: { x: number; y: number; width: number; height: number };
 };
 
 type Density = "focus" | "standard" | "compact";
@@ -38,7 +42,9 @@ type Preferences = {
   defaultView: DefaultView;
 };
 
-const missionWorldStorageKey = "realworld:mission-world-state:v2";
+function missionWorldStorageKey(missionId: Id<"missions">) {
+  return `realworld:mission-world-preferences:v3:${missionId}`;
+}
 const defaultPreferences: Preferences = {
   density: "standard",
   accent: "blue",
@@ -146,10 +152,19 @@ function clamp(value: number, lower: number, upper: number) {
   return Math.min(upper, Math.max(lower, value));
 }
 
-function isStoredRoom(value: unknown): value is Room {
-  if (!value || typeof value !== "object") return false;
-  const candidate = value as Partial<Room>;
-  return typeof candidate.id === "string" && typeof candidate.name === "string" && typeof candidate.x === "number" && typeof candidate.y === "number";
+function canvasRoom(record: { _id: Id<"rooms">; title: string; kind: string; layout: { x: number; y: number; width: number; height: number }; layoutVersion: number; currentVersion: number }): Room {
+  const fallback = rooms.find((room) => room.position === ({ missionCore: "core", workshop: "workshop", observatory: "observatory", branchLab: "branch", reviewDeck: "library", signalTower: "observatory", surgeHall: "surge" }[record.kind] ?? "core")) ?? rooms[0]!;
+  return {
+    ...fallback,
+    id: record._id,
+    name: record.title,
+    x: clamp((record.layout.x / 1600) * 100, 5, 95),
+    y: clamp((record.layout.y / 1200) * 100, 6, 92),
+    layout: record.layout,
+    layoutVersion: record.layoutVersion,
+    currentVersion: record.currentVersion,
+    custom: record.kind === "branchLab" && record.title !== "Branch Lab",
+  };
 }
 
 const people = ["Priya", "Marco", "Lina", "Aisha", "SonicAgent", "Ira", "Noah", "Tess"];
@@ -216,11 +231,13 @@ function RoomLandmark({
         const canvas = target.closest<HTMLElement>(".world-map");
         if (!canvas) return;
         target.setPointerCapture(event.pointerId);
+        let finalPosition = { x: room.x, y: room.y };
         const move = (pointerEvent: PointerEvent) => {
           const bounds = canvas.getBoundingClientRect();
-          onReposition(room.id, ((pointerEvent.clientX - bounds.left) / bounds.width) * 100, ((pointerEvent.clientY - bounds.top) / bounds.height) * 100);
+          finalPosition = { x: ((pointerEvent.clientX - bounds.left) / bounds.width) * 100, y: ((pointerEvent.clientY - bounds.top) / bounds.height) * 100 };
         };
         const release = () => {
+          void onReposition(room.id, finalPosition.x, finalPosition.y);
           target.removeEventListener("pointermove", move);
           target.removeEventListener("pointerup", release);
           target.removeEventListener("pointercancel", release);
@@ -367,28 +384,37 @@ function PreferencePanel({
 export function MissionWorld() {
   const templateOptions = [{ key: "companySprint", label: "Company sprint" }, { key: "classroomProject", label: "Classroom project" }, { key: "contentProduction", label: "Content production" }, { key: "openChallenge", label: "Open challenge" }];
   const missions = useQuery(api.missions.listMyMissions, {});
+  const activeMission = missions?.[0];
+  const roomRecords = useQuery(api.canvas.roomLayouts, activeMission === undefined ? "skip" : { missionId: activeMission._id });
   const launch = useMutation(api.launch.createMissionFromTemplate);
+  const createRoomMutation = useMutation(api.canvas.createRoom);
+  const updateRoomLayout = useMutation(api.canvas.updateRoomLayout);
+  const renameRoomMutation = useMutation(api.canvas.renameRoom);
+  const archiveRoomMutation = useMutation(api.canvas.archiveRoom);
   const [launching, setLaunching] = useState<string | null>(null);
   const [launchError, setLaunchError] = useState<string | null>(null);
-  const [selectedRoomId, setSelectedRoomId] = useState<RoomId>("workshop");
+  const [selectedRoomId, setSelectedRoomId] = useState<RoomId>("");
   const [view, setView] = useState<"world" | "workshop">("world");
   const [showDirectory, setShowDirectory] = useState(false);
   const [preferences, setPreferences] = useState<Preferences>(defaultPreferences);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [invitePanelOpen, setInvitePanelOpen] = useState(false);
   const [preferencesLoaded, setPreferencesLoaded] = useState(false);
-  const [canvasRooms, setCanvasRooms] = useState<Room[]>(rooms);
   const [canvas, setCanvas] = useState<CanvasState>(defaultCanvasState);
   const [newRoomName, setNewRoomName] = useState("");
-  const selectedRoom = canvasRooms.find((room) => room.id === selectedRoomId && !room.archived) ?? canvasRooms.find((room) => !room.archived) ?? rooms[0]!;
-  const visibleRooms = canvasRooms.filter((room) => !room.archived);
+  const [roomError, setRoomError] = useState<string | null>(null);
+  const canvasRooms = roomRecords?.map(canvasRoom) ?? [];
+  const selectedRoom = canvasRooms.find((room) => room.id === selectedRoomId) ?? canvasRooms[0];
+  const selectedRoomHash = selectedRoom?.id;
+  const visibleRooms = canvasRooms;
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       try {
-        const stored = window.localStorage.getItem(missionWorldStorageKey);
+        if (activeMission === undefined) return;
+        const stored = window.localStorage.getItem(missionWorldStorageKey(activeMission._id));
         if (stored) {
-        const candidate = JSON.parse(stored) as Partial<Preferences> & { version?: number; preferences?: Partial<Preferences>; canvas?: Partial<CanvasState>; rooms?: unknown[] };
+        const candidate = JSON.parse(stored) as Partial<Preferences> & { version?: number; preferences?: Partial<Preferences>; canvas?: Partial<CanvasState> };
         const storedPreferences = candidate.preferences ?? candidate;
         const next: Preferences = {
           density: storedPreferences.density === "focus" || storedPreferences.density === "compact" ? storedPreferences.density : "standard",
@@ -399,7 +425,6 @@ export function MissionWorld() {
         setPreferences(next);
         setShowDirectory(next.defaultView === "list");
         if (candidate.canvas) setCanvas({ zoom: clamp(candidate.canvas.zoom ?? 1, 0.7, 1.35), panX: clamp(candidate.canvas.panX ?? 0, -18, 18), panY: clamp(candidate.canvas.panY ?? 0, -18, 18), locked: candidate.canvas.locked === true });
-        if (Array.isArray(candidate.rooms) && candidate.rooms.length > 0 && candidate.rooms.every(isStoredRoom)) setCanvasRooms(candidate.rooms.map((room) => ({ ...room, x: clamp(room.x, 4, 96), y: clamp(room.y, 5, 94) })));
         }
       } catch {
         // An unavailable or malformed local preference must never block the Mission World.
@@ -408,17 +433,17 @@ export function MissionWorld() {
       }
     });
     return () => window.cancelAnimationFrame(frame);
-  }, []);
+  }, [activeMission]);
 
   useEffect(() => {
-    if (preferencesLoaded) {
-      window.localStorage.setItem(missionWorldStorageKey, JSON.stringify({ version: 2, preferences, canvas, rooms: canvasRooms }));
+    if (preferencesLoaded && activeMission !== undefined) {
+      window.localStorage.setItem(missionWorldStorageKey(activeMission._id), JSON.stringify({ version: 3, preferences, canvas }));
     }
-  }, [canvas, canvasRooms, preferences, preferencesLoaded]);
+  }, [activeMission, canvas, preferences, preferencesLoaded]);
 
   useEffect(() => {
-    window.history.replaceState(null, "", view === "workshop" ? "#workshop" : `#${selectedRoom.id}`);
-  }, [selectedRoom.id, view]);
+    if (selectedRoomHash !== undefined) window.history.replaceState(null, "", view === "workshop" ? "#workshop" : `#${selectedRoomHash}`);
+  }, [selectedRoomHash, view]);
 
   function enterRoom(roomId: RoomId) {
     setSelectedRoomId(roomId);
@@ -428,23 +453,40 @@ export function MissionWorld() {
     }
   }
 
-  function repositionRoom(roomId: RoomId, x: number, y: number) {
-    setCanvasRooms((current) => current.map((room) => room.id === roomId ? { ...room, x: clamp(x, 5, 95), y: clamp(y, 6, 92) } : room));
+  async function repositionRoom(roomId: RoomId, x: number, y: number) {
+    const room = canvasRooms.find((candidate) => candidate.id === roomId);
+    if (!room?.layout || room.layoutVersion === undefined) return;
+    setRoomError(null);
+    try {
+      await updateRoomLayout({ roomId: roomId as Id<"rooms">, expectedLayoutVersion: room.layoutVersion, layout: { ...room.layout, x: (clamp(x, 5, 95) / 100) * 1600, y: (clamp(y, 6, 92) / 100) * 1200 }, idempotencyKey: crypto.randomUUID() });
+    } catch {
+      setRoomError("That room changed elsewhere. The live map has been refreshed.");
+    }
   }
 
-  function createRoom() {
+  async function createRoom() {
     const name = newRoomName.trim();
     if (!name) return;
-    const id = `custom-${Date.now()}`;
-    const room: Room = { id, name, eyebrow: "Custom room", description: "A room shaped for this Mission's next mode of work.", active: 0, agents: 0, accent: "blue", icon: "spark", activity: "Ready for its first Move.", action: "Open room", position: "custom", x: 63, y: 66, custom: true };
-    setCanvasRooms((current) => [...current, room]);
-    setSelectedRoomId(id);
-    setNewRoomName("");
+    if (activeMission === undefined) return;
+    setRoomError(null);
+    try {
+      const created = await createRoomMutation({ missionId: activeMission._id, title: name, kind: "branchLab", layout: { x: 1008, y: 792, width: 220, height: 140 }, idempotencyKey: crypto.randomUUID() });
+      setSelectedRoomId(created.roomId);
+      setNewRoomName("");
+    } catch {
+      setRoomError("The room could not be created. Check your Mission role and try again.");
+    }
   }
 
-  function renameSelectedRoom(name: string) {
+  async function renameSelectedRoom(name: string) {
     const trimmed = name.trim();
-    if (trimmed) setCanvasRooms((current) => current.map((room) => room.id === selectedRoom.id ? { ...room, name: trimmed } : room));
+    if (!trimmed || selectedRoom?.currentVersion === undefined || trimmed === selectedRoom.name) return;
+    setRoomError(null);
+    try {
+      await renameRoomMutation({ roomId: selectedRoom.id as Id<"rooms">, expectedVersion: selectedRoom.currentVersion, title: trimmed, idempotencyKey: crypto.randomUUID() });
+    } catch {
+      setRoomError("That room changed elsewhere. The live map has been refreshed.");
+    }
   }
 
   if (missions === undefined) {
@@ -488,7 +530,9 @@ export function MissionWorld() {
     );
   }
 
-  const activeMission = missions[0]!;
+  if (roomRecords === undefined || selectedRoom === undefined || activeMission === undefined) {
+    return <main id="main-content" className="foundation">Loading your shared room map…</main>;
+  }
 
   if (view === "workshop") {
     return <Workshop onExit={() => setView("world")} />;
@@ -537,6 +581,7 @@ export function MissionWorld() {
       </section>
 
       <main className="world-stage" id="main-content" tabIndex={-1}>
+        {roomError === null ? null : <p aria-live="polite">{roomError}</p>}
         <div className="stage-toolbar" aria-label="Mission World view controls">
           <button className={!showDirectory ? "is-active" : ""} onClick={() => setShowDirectory(false)} type="button">Map</button>
           <button className={showDirectory ? "is-active" : ""} onClick={() => setShowDirectory(true)} type="button">Room directory</button>
@@ -546,7 +591,7 @@ export function MissionWorld() {
           <button aria-pressed={canvas.locked} onClick={() => setCanvas((current) => ({ ...current, locked: !current.locked }))} type="button">{canvas.locked ? "Layout locked" : "Layout unlocked"}</button>
           <span>Alt + arrows moves a focused Room</span>
         </div>
-        <form className="room-create" onSubmit={(event) => { event.preventDefault(); createRoom(); }}>
+        <form className="room-create" onSubmit={(event) => { event.preventDefault(); void createRoom(); }}>
           <label htmlFor="new-room-name">New room</label><input id="new-room-name" onChange={(event) => setNewRoomName(event.target.value)} placeholder="e.g. Sound check" value={newRoomName} /><button type="submit">Create room</button>
         </form>
         <div className="contours" aria-hidden="true" />
@@ -584,7 +629,11 @@ export function MissionWorld() {
           <div className="inspector-status"><span><i /> {selectedRoom.active} active</span><span><Icon name="agent" /> {selectedRoom.agents} agent{selectedRoom.agents === 1 ? "" : "s"}</span></div>
           <section><h3>In this room</h3><ul className="inspector-people"><li><PersonToken name="Priya" index={0} /> Priya <small>shaping flow</small></li><li><PersonToken name="SonicAgent" index={1} /> SonicAgent <small>running evals</small></li><li><PersonToken name="Marco" index={2} /> Marco <small>reviewing Proof</small></li></ul></section>
           <section><h3>Recent artifacts</h3><ul className="artifact-list"><li>mission-world.tsx <small>UI component</small></li><li>realtime-room-protocol.md <small>systems contract</small></li><li>mission-kernel-contract.md <small>architecture</small></li></ul></section>
-          {selectedRoom.custom ? <section className="custom-room-tools"><h3>Customize room</h3><label htmlFor="rename-room">Room name</label><input defaultValue={selectedRoom.name} id="rename-room" onBlur={(event) => renameSelectedRoom(event.target.value)} /><button className="archive-room" onClick={() => { setCanvasRooms((current) => current.map((room) => room.id === selectedRoom.id ? { ...room, archived: true } : room)); setSelectedRoomId("core"); }} type="button">Archive room</button></section> : null}
+          {activeMission.role === "owner" || activeMission.role === "steward" || activeMission.role === "builder" ? <section className="custom-room-tools"><h3>Room controls</h3><label htmlFor="rename-room">Room name</label><input defaultValue={selectedRoom.name} id="rename-room" key={`${selectedRoom.id}-${selectedRoom.currentVersion}`} onBlur={(event) => void renameSelectedRoom(event.target.value)} /><button className="archive-room" onClick={() => {
+            if (selectedRoom.currentVersion === undefined) return;
+            setRoomError(null);
+            void archiveRoomMutation({ roomId: selectedRoom.id as Id<"rooms">, expectedVersion: selectedRoom.currentVersion, idempotencyKey: crypto.randomUUID() }).then(() => setSelectedRoomId("")).catch(() => setRoomError("That room changed elsewhere. The live map has been refreshed."));
+          }} type="button">Archive room</button></section> : null}
           <button className="primary-button" onClick={() => enterRoom(selectedRoom.id)} type="button">{selectedRoom.action}</button>
           <button className="secondary-button" type="button">Follow Priya</button>
         </aside>
