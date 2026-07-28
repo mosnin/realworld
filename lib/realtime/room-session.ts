@@ -1085,6 +1085,10 @@ export class RealtimeRoomSession {
         () => finish(new Error("Realtime token acquisition timed out")),
         this.tokenAcquisitionTimeoutMs,
       );
+      if (settled) {
+        this.clock.clearTimeout(timer);
+        return;
+      }
       let tokenPromise: Promise<RealtimeToken>;
       try {
         tokenPromise = Promise.resolve(this.tokenProvider(scope));

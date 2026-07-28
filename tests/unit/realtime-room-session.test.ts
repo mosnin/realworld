@@ -3903,6 +3903,52 @@ describe("RealtimeRoomSession", () => {
     } finally { process.off("unhandledRejection", observeUnhandled); }
   });
 
+  it("settles a synchronous token-acquisition deadline before invoking the token provider", async () => {
+    const baseClock = new FakeClock();
+    const retainedCallbacks = new Map<number, () => void>();
+    const clearedHandles: number[] = [];
+    const clock = {
+      now: () => baseClock.now(),
+      setTimeout: (callback: () => void, delayMs: number) => {
+        if (delayMs === 7) {
+          callback();
+          retainedCallbacks.set(8_888, callback);
+          return 8_888 as unknown as ReturnType<typeof setTimeout>;
+        }
+        return baseClock.setTimeout(callback, delayMs);
+      },
+      clearTimeout: (timer: ReturnType<typeof setTimeout>) => {
+        if (timer === (8_888 as unknown as ReturnType<typeof setTimeout>)) {
+          clearedHandles.push(8_888);
+          retainedCallbacks.delete(8_888);
+          return;
+        }
+        baseClock.clearTimeout(timer);
+      },
+    };
+    const { transport, connect } = createTransport();
+    const tokenProvider = vi.fn(async () => token(baseClock.now() + 300_000));
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      const session = new RealtimeRoomSession({ tokenProvider, transport, clock, tokenAcquisitionTimeoutMs: 7, maxReconnectAttempts: 0 });
+      await session.start({ missionId: "mission-a", roomId: "room-a" });
+      expect(session.state).toBe("degraded");
+      expect(tokenProvider).not.toHaveBeenCalled();
+      expect(connect).not.toHaveBeenCalled();
+      expect(clearedHandles).toEqual([8_888]);
+      expect(retainedCallbacks).toEqual(new Map());
+      for (const callback of retainedCallbacks.values()) callback();
+      await flush();
+      expect(tokenProvider).not.toHaveBeenCalled();
+      expect(connect).not.toHaveBeenCalled();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+      await session.stop();
+    } finally { process.off("unhandledRejection", observeUnhandled); }
+  });
+
   it("snapshots recovery policy getters and receivers once, ignoring later replacements", async () => {
     const providerSecret = "recovery-policy-replacement-secret";
     for (const policy of ["random", "reconnect"] as const) {
