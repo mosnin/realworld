@@ -191,6 +191,38 @@ function snapshotObserver<Arguments extends unknown[]>(
   }
 }
 
+function invokeUnauthorizedClassifier(classifier: (...args: unknown[]) => unknown, receiver: unknown, error: unknown): boolean {
+  let decision: unknown;
+  try {
+    decision = Reflect.apply(classifier, receiver, [error]);
+  } catch {
+    return false;
+  }
+  if (typeof decision === "boolean") return decision;
+  if ((typeof decision === "object" && decision !== null) || typeof decision === "function") {
+    try {
+      void Promise.resolve(decision).catch(() => undefined);
+    } catch {
+      // Classifier thenables are advisory and never control recovery.
+    }
+  }
+  return false;
+}
+
+function snapshotUnauthorizedClassifier(
+  receiver: object,
+  read: () => unknown,
+): (error: unknown) => boolean {
+  try {
+    const classifier = read();
+    if (classifier === undefined) return (error) => invokeUnauthorizedClassifier(defaultUnauthorizedError, undefined, error);
+    if (typeof classifier !== "function") return () => false;
+    return (error) => invokeUnauthorizedClassifier(classifier as (...args: unknown[]) => unknown, receiver, error);
+  } catch {
+    return () => false;
+  }
+}
+
 type TransportSubscriptionSnapshot = Readonly<{
   subscription?: RealtimeTransportSubscription;
   disposable?: RealtimeTransportSubscription;
@@ -429,7 +461,7 @@ export class RealtimeRoomSession {
     this.maxSerializedPayloadBytes = normalizedPositive(options.maxSerializedPayloadBytes, defaultMaxSerializedPayloadBytes);
     this.maxTrackedMessageIds = normalizedBoundedPositive(options.maxTrackedMessageIds, defaultMaxTrackedMessageIds, maximumMaxTrackedMessageIds);
     this.maxTrackedSenderStreams = normalizedBoundedPositive(options.maxTrackedSenderStreams, defaultMaxTrackedSenderStreams, maximumMaxTrackedSenderStreams);
-    this.isUnauthorizedError = options.isUnauthorizedError ?? defaultUnauthorizedError;
+    this.isUnauthorizedError = snapshotUnauthorizedClassifier(options, () => options.isUnauthorizedError);
   }
 
   get state() {
@@ -748,7 +780,9 @@ export class RealtimeRoomSession {
     const failureGeneration = ++this.generation;
     this.detachSubscription();
     this.clearTimers();
-    if (this.isUnauthorizedError(error)) {
+    const unauthorized = this.isUnauthorizedError(error);
+    if (failureGeneration !== this.generation) return;
+    if (unauthorized) {
       this.token = undefined;
       this.clearTransient("authorization-changed");
       this.setState("unauthorized");

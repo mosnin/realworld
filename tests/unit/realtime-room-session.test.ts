@@ -1777,6 +1777,253 @@ describe("RealtimeRoomSession", () => {
     }
   });
 
+  it("snapshots the synchronous unauthorized classifier once and contains hostile option surfaces", async () => {
+    const providerSecret = "unauthorized-classifier-secret";
+    const modes = ["receiver", "throwing-getter", "nonfunction", "throwing-classifier"] as const;
+    for (const mode of modes) {
+      const clock = new FakeClock();
+      const { transport, connect } = createTransport([new Error("connection failed")]);
+      const failures: unknown[] = [];
+      const receivers: unknown[] = [];
+      let reads = 0;
+      const options: RoomSessionOptions = {
+        tokenProvider: async () => token(clock.now() + 300_000),
+        transport,
+        clock,
+        maxReconnectAttempts: 0,
+        onTransportFailure: (error) => failures.push(error),
+      };
+      Object.defineProperty(options, "isUnauthorizedError", {
+        get: () => {
+          reads += 1;
+          if (mode === "throwing-getter") throw new Error(providerSecret);
+          if (mode === "nonfunction") return providerSecret;
+          return function (this: unknown) {
+            receivers.push(this);
+            if (mode === "throwing-classifier") throw new Error(providerSecret);
+            return false;
+          };
+        },
+      });
+
+      const session = new RealtimeRoomSession(options);
+      await session.start({ missionId: "mission-a", roomId: "room-a" });
+
+      expect(session.state).toBe("degraded");
+      expect(connect).toHaveBeenCalledTimes(1);
+      expect(reads).toBe(1);
+      expect(failures).toEqual([expect.objectContaining({ message: expect.stringMatching(/^Realtime /) })]);
+      expect(String(failures[0])).not.toContain(providerSecret);
+      if (mode === "receiver" || mode === "throwing-classifier") expect(receivers).toEqual([options]);
+      else expect(receivers).toEqual([]);
+
+      clock.advance(30_000);
+      await flush();
+      expect(connect).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("lets reentrant unauthorized classification stop or hand off without stale failure recovery", async () => {
+    const oldScope = { missionId: "mission-a", roomId: "room-a" };
+    const newScope = { missionId: "mission-a", roomId: "room-b" };
+    for (const action of ["stop", "handoff"] as const) {
+      const clock = new FakeClock();
+      const { transport, connect, connections } = createTransport(["success", "success"]);
+      const failures: unknown[] = [];
+      const unhandled: unknown[] = [];
+      const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+      process.on("unhandledRejection", observeUnhandled);
+      try {
+        const session = new RealtimeRoomSession({
+          tokenProvider: async () => token(clock.now() + 300_000),
+          transport,
+          clock,
+          reconnectDelayMs: () => 11,
+          onTransportFailure: (error) => failures.push(error),
+          isUnauthorizedError: () => {
+            if (action === "stop") void session.stop();
+            else void session.start(newScope);
+            return false;
+          },
+        });
+        await session.start(oldScope);
+        connections[0]!.input.onFailure(new Error("network failure"));
+        await vi.waitFor(() => expect(session.state).toBe(action === "stop" ? "stopped" : "live"));
+
+        expect(connections[0]!.unsubscribe).toHaveBeenCalledTimes(1);
+        expect(failures).toEqual([]);
+        if (action === "stop") {
+          expect(session.scope).toBeUndefined();
+          expect(connect).toHaveBeenCalledTimes(1);
+        } else {
+          expect(session.scope).toEqual(newScope);
+          expect(connect).toHaveBeenCalledTimes(2);
+          expect(connections[1]!.input.scope).toEqual(newScope);
+        }
+
+        const callsBeforeAdvance = connect.mock.calls.length;
+        clock.advance(30_000);
+        await flush();
+        expect(session.state).toBe(action === "stop" ? "stopped" : "live");
+        expect(connect).toHaveBeenCalledTimes(callsBeforeAdvance);
+        expect(failures).toEqual([]);
+        expect(unhandled).toEqual([]);
+      } finally {
+        process.off("unhandledRejection", observeUnhandled);
+      }
+    }
+  });
+
+  it("keeps literal true unauthorized decisions immediate and preserves default matching only when the classifier is absent", async () => {
+    const clock = new FakeClock();
+    const { transport, connect, connections } = createTransport();
+    const session = new RealtimeRoomSession({
+      tokenProvider: async () => token(clock.now() + 300_000),
+      transport,
+      clock,
+      reconnectDelayMs: () => 11,
+      isUnauthorizedError: () => true,
+    });
+    await session.start({ missionId: "mission-a", roomId: "room-a" });
+    connections[0]!.input.onFailure(new Error("ordinary provider failure"));
+
+    expect(session.state).toBe("unauthorized");
+    expect(connections[0]!.unsubscribe).toHaveBeenCalledTimes(1);
+    clock.advance(30_000);
+    await flush();
+    expect(connect).toHaveBeenCalledTimes(1);
+
+    const defaultClock = new FakeClock();
+    const { transport: defaultTransport, connect: defaultConnect, connections: defaultConnections } = createTransport();
+    const defaultSession = new RealtimeRoomSession({
+      tokenProvider: async () => token(defaultClock.now() + 300_000),
+      transport: defaultTransport,
+      clock: defaultClock,
+    });
+    await defaultSession.start({ missionId: "mission-a", roomId: "room-a" });
+    defaultConnections[0]!.input.onFailure(new Error("Unauthorized"));
+    expect(defaultSession.state).toBe("unauthorized");
+    defaultClock.advance(30_000);
+    await flush();
+    expect(defaultConnect).toHaveBeenCalledTimes(1);
+
+    for (const mode of ["throwing-getter", "nonfunction", "throwing-classifier"] as const) {
+      const fallbackClock = new FakeClock();
+      const { transport: fallbackTransport, connect: fallbackConnect, connections: fallbackConnections } = createTransport();
+      const options: RoomSessionOptions = {
+        tokenProvider: async () => token(fallbackClock.now() + 300_000),
+        transport: fallbackTransport,
+        clock: fallbackClock,
+        maxReconnectAttempts: 0,
+      };
+      Object.defineProperty(options, "isUnauthorizedError", {
+        get: () => {
+          if (mode === "throwing-getter") throw new Error("classifier getter failure");
+          if (mode === "nonfunction") return "not-a-classifier";
+          return () => { throw new Error("classifier invocation failure"); };
+        },
+      });
+      const fallbackSession = new RealtimeRoomSession(options);
+      await fallbackSession.start({ missionId: "mission-a", roomId: "room-a" });
+      fallbackConnections[0]!.input.onFailure(new Error("Unauthorized"));
+
+      expect(fallbackSession.state).toBe("degraded");
+      expect(fallbackConnections[0]!.unsubscribe).toHaveBeenCalledTimes(1);
+      fallbackClock.advance(30_000);
+      await flush();
+      expect(fallbackConnect).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("treats runtime promise and thenable classifier results as false without awaiting or leaking their rejection", async () => {
+    const providerSecret = "classifier-thenable-secret";
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      const lateDecision = deferred<boolean>();
+      const decisions = [
+        () => Promise.reject(new Error(providerSecret)),
+        () => Object.defineProperty({}, "then", { get: () => { throw new Error(providerSecret); } }),
+        () => lateDecision.promise,
+      ];
+      for (const classifier of decisions) {
+        const clock = new FakeClock();
+        const { transport, connect } = createTransport([new Error("connection failed"), "success"]);
+        const failures: unknown[] = [];
+        const session = new RealtimeRoomSession({
+          tokenProvider: async () => token(clock.now() + 300_000),
+          transport,
+          clock,
+          reconnectDelayMs: () => 11,
+          onTransportFailure: (error) => failures.push(error),
+          isUnauthorizedError: classifier as unknown as (error: unknown) => boolean,
+        });
+
+        await session.start({ missionId: "mission-a", roomId: "room-a" });
+        expect(session.state).toBe("degraded");
+        expect(failures).toEqual([expect.objectContaining({ message: expect.stringMatching(/^Realtime /) })]);
+        expect(String(failures[0])).not.toContain(providerSecret);
+
+        if (classifier === decisions[2]) lateDecision.reject(new Error(providerSecret));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        clock.advance(11);
+        await vi.waitFor(() => expect(session.state).toBe("live"));
+        expect(connect).toHaveBeenCalledTimes(2);
+      }
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
+  it("contains hostile Error-prototype values under the absent-classifier default without interrupting ordinary failure recovery", async () => {
+    const providerSecret = "hostile-default-classifier-secret";
+    const hostileErrors = [
+      Object.defineProperties(Object.create(Error.prototype), {
+        name: { get: () => { throw new Error(providerSecret); } },
+        message: { value: "ordinary failure" },
+      }),
+      Object.defineProperties(Object.create(Error.prototype), {
+        name: { value: "OrdinaryError" },
+        message: { get: () => { throw new Error(providerSecret); } },
+      }),
+    ];
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      for (const hostileError of hostileErrors) {
+        const clock = new FakeClock();
+        const { transport, connect, connections } = createTransport();
+        const failures: unknown[] = [];
+        const session = new RealtimeRoomSession({
+          tokenProvider: async () => token(clock.now() + 300_000),
+          transport,
+          clock,
+          maxReconnectAttempts: 0,
+          onTransportFailure: (error) => failures.push(error),
+        });
+        await session.start({ missionId: "mission-a", roomId: "room-a" });
+
+        expect(() => connections[0]!.input.onFailure(hostileError)).not.toThrow();
+        expect(session.state).toBe("degraded");
+        expect(connections[0]!.unsubscribe).toHaveBeenCalledTimes(1);
+        expect(failures).toHaveLength(1);
+        expect(failures[0]).toBe(hostileError);
+
+        clock.advance(30_000);
+        await flush();
+        expect(session.state).toBe("degraded");
+        expect(connect).toHaveBeenCalledTimes(1);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
   it("expires accepted transient messages on their visibility deadline", async () => {
     const clock = new FakeClock();
     const { transport, connections } = createTransport();
