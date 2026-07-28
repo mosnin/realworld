@@ -10,18 +10,27 @@ import type { TokenRequest } from "ably";
 
 import { channelFamilyForKind, isSupportedRealtimeKind, parseRealtimePayload } from "./message-schema";
 import {
+  disabledRealtimeTelemetry,
+  type PrivacySafeRealtimeTelemetry,
+} from "./privacy-telemetry";
+import {
   validateRealtimeEnvelope,
   type RealtimeEnvelope,
   type RealtimeRoomScope,
   type RealtimeTransportAdapter,
   type RealtimeTransportSubscription,
 } from "./room-session";
+import {
+  createRealtimePublishGovernor,
+  RealtimePublishRateLimitError,
+  type RealtimePublishGovernor,
+} from "./signal-governor";
 
 type AblyOperation = "publish" | "subscribe" | "presence";
 type AblyDevelopmentEnvironment = "development" | "test" | "preview";
 export type AblyAdapterEnvironment = AblyDevelopmentEnvironment | "production";
 
-type AblyInboundMessage = Readonly<{ data: unknown; name?: string }>;
+type AblyInboundMessage = Readonly<{ data: unknown; name?: string; clientId?: string }>;
 type AblyConnectionState = Readonly<{ current?: string; reason?: unknown }>;
 export type AblyConnectionTimer = Readonly<{
   setTimeout: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>;
@@ -60,6 +69,8 @@ export type DevelopmentAblyRoomTransportOptions = Readonly<{
   connectionReadyTimeoutMs?: number;
   timer?: AblyConnectionTimer;
   now?: () => number;
+  publishGovernor?: Pick<RealtimePublishGovernor, "acquire">;
+  telemetry?: PrivacySafeRealtimeTelemetry;
 }>;
 
 type ChannelKind = "world" | "presence" | "interaction" | "surge" | "agent-status";
@@ -143,8 +154,8 @@ function parseCapabilities(
       }
       operations.add(operation as AblyOperation);
     }
-    if (kind === "presence" && operations.has("presence") && !isNonEmptyString(tokenRequest.clientId)) {
-      throw new Error("Realtime presence requires a token-bound client id");
+    if ((operations.has("publish") || operations.has("presence")) && !isNonEmptyString(tokenRequest.clientId)) {
+      throw new Error("Realtime publishing requires a token-bound client id");
     }
     granted.push({ name, kind, operations });
   }
@@ -152,9 +163,17 @@ function parseCapabilities(
   return granted;
 }
 
-function isExactFamilyMessage(value: unknown, kind: ChannelKind, scope: RealtimeRoomScope, now: number): value is RealtimeEnvelope {
+function isExactFamilyMessage(
+  value: unknown,
+  kind: ChannelKind,
+  scope: RealtimeRoomScope,
+  now: number,
+  authenticatedClientId?: string,
+): value is RealtimeEnvelope {
   const envelope = validateRealtimeEnvelope(value, now);
   return envelope !== undefined
+    && isNonEmptyString(authenticatedClientId)
+    && envelope.sender.clientId === authenticatedClientId
     && isSupportedRealtimeKind(envelope.kind)
     && channelFamilyForKind(envelope.kind) === kind
     && envelope.missionId === scope.missionId
@@ -195,25 +214,58 @@ export class DevelopmentAblyRoomTransport implements RealtimeTransportAdapter {
   private readonly clientFactory: AblyClientFactory;
   private readonly timer: AblyConnectionTimer;
   private readonly connectionReadyTimeoutMs: number;
+  private readonly publishGovernor: Pick<RealtimePublishGovernor, "acquire">;
+  private readonly telemetry: PrivacySafeRealtimeTelemetry;
 
   constructor(private readonly options: DevelopmentAblyRoomTransportOptions) {
     this.clientFactory = options.clientFactory ?? defaultClientFactory;
     this.timer = options.timer ?? defaultTimer;
     this.connectionReadyTimeoutMs = normalizedConnectionReadyTimeout(options.connectionReadyTimeoutMs);
+    this.publishGovernor = options.publishGovernor ?? createRealtimePublishGovernor({
+      clock: { now: options.now ?? (() => Date.now()) },
+    });
+    this.telemetry = options.telemetry ?? disabledRealtimeTelemetry;
+  }
+
+  private emitTelemetry(candidate: unknown) {
+    try {
+      this.telemetry.emit(candidate);
+    } catch {
+      // Even a nonconforming injected telemetry implementation is nonfatal.
+    }
   }
 
   async connect(input: Parameters<RealtimeTransportAdapter["connect"]>[0]): Promise<RealtimeTransportSubscription> {
+    this.emitTelemetry({ event: "connect_requested", state: "connecting" });
     if (this.options.environment === "production") {
+      this.emitTelemetry({ event: "connect_failed", reason: "authorization_denied", state: "unauthorized" });
       throw new Error("Realtime Ably transport is unsupported in production");
     }
-    if (!isTokenRequest(input.token.tokenRequest)) throw new Error("Realtime token request is malformed");
+    const tokenRequest = input.token.tokenRequest;
+    if (!isTokenRequest(tokenRequest)) {
+      this.emitTelemetry({ event: "connect_failed", reason: "authorization_denied", state: "unauthorized" });
+      throw new Error("Realtime token request is malformed");
+    }
 
-    const granted = parseCapabilities(input.token.tokenRequest, this.options.environment, input.scope);
-    const client = await this.clientFactory(input.token.tokenRequest);
+    let granted: GrantedChannel[];
+    try {
+      granted = parseCapabilities(tokenRequest, this.options.environment, input.scope);
+    } catch (error) {
+      this.emitTelemetry({ event: "connect_failed", reason: "capability_denied", state: "unauthorized" });
+      throw error;
+    }
+    let client: AblyRealtimeClient;
+    try {
+      client = await this.clientFactory(tokenRequest);
+    } catch (error) {
+      this.emitTelemetry({ event: "connect_failed", reason: "connection_unavailable", state: "degraded" });
+      throw error;
+    }
     const channels = new Map<ChannelKind, AblyRoomChannel>();
     const listeners: Array<Readonly<{ channel: AblyRoomChannel; listener: (message: AblyInboundMessage) => void; presence: boolean }>> = [];
     const enteredPresence = new Set<AblyRoomChannel>();
     let closed = false;
+    let ready = false;
 
     const getChannel = (grant: GrantedChannel) => {
       const existing = channels.get(grant.kind);
@@ -223,7 +275,10 @@ export class DevelopmentAblyRoomTransport implements RealtimeTransportAdapter {
       return channel;
     };
     const connectionFailure = (state: AblyConnectionState) => {
-      if (!closed) input.onFailure(errorFromConnectionState(state));
+      if (!closed) {
+        if (ready) this.emitTelemetry({ event: "connect_failed", reason: "connection_unavailable", state: "degraded" });
+        input.onFailure(errorFromConnectionState(state));
+      }
     };
     const waitForConnectionReady = async () => {
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -273,6 +328,7 @@ export class DevelopmentAblyRoomTransport implements RealtimeTransportAdapter {
       for (const channel of enteredPresence) await capture(() => channel.presence.leave());
       for (const channel of channels.values()) await capture(() => channel.detach());
       await capture(() => client.close());
+      this.emitTelemetry({ event: "cleanup", state: "stopped", subscriptions: listeners.length });
       if (errors[0] !== undefined) throw errors[0];
     };
 
@@ -282,7 +338,14 @@ export class DevelopmentAblyRoomTransport implements RealtimeTransportAdapter {
         const channel = getChannel(grant);
         if (!grant.operations.has("subscribe")) continue;
         const listener = (message: AblyInboundMessage) => {
-          if (!closed && isExactFamilyMessage(message.data, grant.kind, input.scope, this.options.now?.() ?? Date.now())) input.onMessage(message.data);
+          if (closed) return;
+          if (isExactFamilyMessage(message.data, grant.kind, input.scope, this.options.now?.() ?? Date.now(), message.clientId)) {
+            const envelope = message.data;
+            this.emitTelemetry({ event: "signal_received", kind: envelope.kind, family: grant.kind });
+            input.onMessage(envelope);
+          } else {
+            this.emitTelemetry({ event: "signal_dropped", reason: "malformed", family: grant.kind });
+          }
         };
         if (grant.kind === "presence") {
           await channel.presence.subscribe(listener);
@@ -293,7 +356,10 @@ export class DevelopmentAblyRoomTransport implements RealtimeTransportAdapter {
         }
       }
       await waitForConnectionReady();
+      ready = true;
+      this.emitTelemetry({ event: "connect_ready", state: "live", subscriptions: listeners.length });
     } catch (error) {
+      this.emitTelemetry({ event: "connect_failed", reason: "connection_unavailable", state: "degraded" });
       try {
         await cleanup();
       } catch {
@@ -305,19 +371,52 @@ export class DevelopmentAblyRoomTransport implements RealtimeTransportAdapter {
     return {
       unsubscribe: cleanup,
       publish: async (message) => {
-        if (closed) throw new Error("Realtime transport is closed");
-        if (!isExactFamilyMessage(message, targetForMessage(message) ?? "world", input.scope, this.options.now?.() ?? Date.now())) {
+        if (closed) {
+          this.emitTelemetry({ event: "signal_dropped", reason: "closed" });
+          throw new Error("Realtime transport is closed");
+        }
+        if (!isExactFamilyMessage(
+          message,
+          targetForMessage(message) ?? "world",
+          input.scope,
+          this.options.now?.() ?? Date.now(),
+          tokenRequest.clientId,
+        )) {
+          this.emitTelemetry({ event: "signal_dropped", reason: "malformed" });
           throw new Error("Realtime message is outside the active scope or family");
         }
         const target = targetForMessage(message);
         if (!target) throw new Error("Realtime message kind is unsupported");
         const grant = granted.find((candidate) => candidate.kind === target);
-        if (!grant) throw new Error("Realtime message channel is not granted");
+        if (!grant) {
+          this.emitTelemetry({ event: "signal_dropped", reason: "capability_denied", kind: message.kind, family: target });
+          throw new Error("Realtime message channel is not granted");
+        }
         const channel = getChannel(grant);
+        if (target === "presence" && !grant.operations.has("presence")) {
+          this.emitTelemetry({ event: "signal_dropped", reason: "capability_denied", kind: message.kind, family: target });
+          throw new Error("Realtime presence is not granted");
+        }
+        if (target !== "presence" && !grant.operations.has("publish")) {
+          this.emitTelemetry({ event: "signal_dropped", reason: "capability_denied", kind: message.kind, family: target });
+          throw new Error("Realtime publish is not granted");
+        }
+        const governorDecision = this.publishGovernor.acquire({
+          missionId: message.missionId,
+          roomId: message.roomId ?? "",
+          sender: message.sender,
+          kind: message.kind,
+        });
+        if (!governorDecision.allowed) {
+          this.emitTelemetry({ event: "governor_limited", reason: "rate_limited", kind: message.kind, family: target });
+          throw new RealtimePublishRateLimitError(governorDecision.retryAfterMs);
+        }
         if (target === "presence") {
-          if (!grant.operations.has("presence")) throw new Error("Realtime presence is not granted");
           if (message.kind === "presence.leave") {
-            if (enteredPresence.delete(channel)) await channel.presence.leave(message);
+            if (enteredPresence.delete(channel)) {
+              await channel.presence.leave(message);
+              this.emitTelemetry({ event: "signal_published", kind: message.kind, family: target });
+            }
             return;
           }
           if (enteredPresence.has(channel)) await channel.presence.update(message);
@@ -325,10 +424,11 @@ export class DevelopmentAblyRoomTransport implements RealtimeTransportAdapter {
             await channel.presence.enter(message);
             enteredPresence.add(channel);
           }
+          this.emitTelemetry({ event: "signal_published", kind: message.kind, family: target });
           return;
         }
-        if (!grant.operations.has("publish")) throw new Error("Realtime publish is not granted");
         await channel.publish(message.kind, message);
+        this.emitTelemetry({ event: "signal_published", kind: message.kind, family: target });
       },
     };
   }

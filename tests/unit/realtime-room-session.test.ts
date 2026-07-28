@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { RealtimePublishRateLimitError } from "../../lib/realtime/signal-governor";
 import {
   RealtimeRoomSession,
   type RealtimeEnvelope,
@@ -306,6 +307,31 @@ describe("RealtimeRoomSession", () => {
     expect(received).toEqual([]);
   });
 
+  it("bounds hostile inbound message ids and rotating client-instance streams", async () => {
+    const clock = new FakeClock();
+    const { transport, connections } = createTransport();
+    const received: RealtimeEnvelope[] = [];
+    const session = new RealtimeRoomSession({
+      tokenProvider: async () => token(clock.now() + 300_000),
+      transport,
+      clock,
+      maxTrackedMessageIds: 2,
+      maxTrackedSenderStreams: 1,
+      onMessage: (value) => received.push(value),
+    });
+    await session.start({ missionId: "mission-a", roomId: "room-a" });
+    const deliver = connections[0]!.input.onMessage;
+
+    deliver(message(clock, { messageId: "stream-a-1", sender: { clientId: "remote-client", clientInstanceId: "tab-a", connectionEpoch: 1 }, clientSeq: 1 }));
+    deliver(message(clock, { messageId: "stream-b-1", sender: { clientId: "remote-client", clientInstanceId: "tab-b", connectionEpoch: 1 }, clientSeq: 1 }));
+    deliver(message(clock, { messageId: "message-capacity", sender: { clientId: "remote-client", clientInstanceId: "tab-c", connectionEpoch: 1 }, clientSeq: 1 }));
+    expect(received.map((value) => value.messageId)).toEqual(["stream-a-1", "stream-b-1"]);
+
+    clock.advance(10_001);
+    deliver(message(clock, { messageId: "stream-a-reused", sender: { clientId: "remote-client", clientInstanceId: "tab-a", connectionEpoch: 1 }, clientSeq: 1 }));
+    expect(received.map((value) => value.messageId)).toEqual(["stream-a-1", "stream-b-1", "stream-a-reused"]);
+  });
+
   it("drops oversized and cyclic payloads without surfacing them to the transient view", async () => {
     const clock = new FakeClock();
     const { transport, connections } = createTransport();
@@ -348,6 +374,24 @@ describe("RealtimeRoomSession", () => {
     await expect(session.publish(message(clock, { payload: { targetId: "canvas-1", x: 0.5, y: 0.5, mode: "map", unexpected: true } }))).resolves.toBe(false);
 
     expect(connections[0]!.publish).not.toHaveBeenCalled();
+  });
+
+  it("treats local publish-rate denials as nonfatal flow control", async () => {
+    const clock = new FakeClock();
+    const { transport, connections } = createTransport();
+    const states: string[] = [];
+    const session = new RealtimeRoomSession({
+      tokenProvider: async () => token(clock.now() + 300_000),
+      transport,
+      clock,
+      onStateChange: (state) => states.push(state),
+    });
+    await session.start({ missionId: "mission-a", roomId: "room-a" });
+    connections[0]!.publish.mockRejectedValueOnce(new RealtimePublishRateLimitError(250));
+
+    await expect(session.publish(message(clock))).resolves.toBe(false);
+    expect(session.state).toBe("live");
+    expect(states).not.toContain("degraded");
   });
 
   it("deduplicates concurrent same-scope starts and fails safe for invalid numeric options", async () => {

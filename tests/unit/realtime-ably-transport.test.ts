@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createDevelopmentAblyRoomTransport, type AblyRealtimeClient, type AblyRoomChannel } from "../../lib/realtime/ably-room-transport";
 import { channelFamilyForKind, type SupportedRealtimeKind } from "../../lib/realtime/message-schema";
+import { createPrivacySafeRealtimeTelemetry, type PrivacySafeRealtimeTelemetryEvent } from "../../lib/realtime/privacy-telemetry";
 import type { RealtimeEnvelope, RealtimeToken } from "../../lib/realtime/room-session";
+import { createRealtimePublishGovernor, RealtimePublishRateLimitError } from "../../lib/realtime/signal-governor";
 
 const scope = { missionId: "mission_a", roomId: "room_a" };
 const tokenRequest = (capability: Record<string, string[]>): RealtimeToken => ({
@@ -48,15 +50,15 @@ function payload(kind: SupportedRealtimeKind): unknown {
 
 function envelope(kind: SupportedRealtimeKind, id: string = kind): RealtimeEnvelope {
   return {
-    v: 1, kind, messageId: id, sender: { clientId: "rw_sender", clientInstanceId: "tab_a", connectionEpoch: 1 },
+    v: 1, kind, messageId: id, sender: { clientId: "rw_test", clientInstanceId: "tab_a", connectionEpoch: 1 },
     missionId: scope.missionId, roomId: scope.roomId, issuedAtMs: 1_000_000, expiresAtMs: 1_010_000, clientSeq: 1, payload: payload(kind),
   };
 }
 
 function fakeClient(autoConnect = true) {
   const channels = new Map<string, AblyRoomChannel>();
-  const listeners = new Map<string, Array<(message: { data: unknown; name?: string }) => void>>();
-  const presenceListeners = new Map<string, Array<(message: { data: unknown; name?: string }) => void>>();
+  const listeners = new Map<string, Array<(message: { data: unknown; name?: string; clientId?: string }) => void>>();
+  const presenceListeners = new Map<string, Array<(message: { data: unknown; name?: string; clientId?: string }) => void>>();
   const connectionListeners: Array<{ events: string | string[]; listener: (state: { current?: string; reason?: unknown }) => void }> = [];
   const get = vi.fn((name: string): AblyRoomChannel => {
     const existing = channels.get(name);
@@ -181,16 +183,62 @@ describe("development Ably room transport", () => {
     await expect(subscription.publish?.({ ...envelope("world.transition"), v: 2 as 1 })).rejects.toThrow("outside");
     await expect(subscription.publish?.({ ...envelope("world.transition"), payload: { sourceRoomId: "room_a" } })).rejects.toThrow("outside");
 
-    for (const listener of fake.listeners.get(channelNames.world) ?? []) listener({ data: envelope("world.transition", "inbound") });
-    for (const listener of fake.listeners.get(channelNames.world) ?? []) listener({ data: { ...envelope("world.transition", "bad-envelope"), sender: {} } });
-    for (const listener of fake.listeners.get(channelNames.world) ?? []) listener({ data: { ...envelope("world.transition", "invalid"), payload: { sourceRoomId: "room_a" } } });
+    for (const listener of fake.listeners.get(channelNames.world) ?? []) listener({ data: envelope("world.transition", "inbound"), clientId: "rw_test" });
+    for (const listener of fake.listeners.get(channelNames.world) ?? []) listener({ data: envelope("world.transition", "spoofed"), clientId: "rw_other" });
+    for (const listener of fake.listeners.get(channelNames.world) ?? []) listener({ data: envelope("world.transition", "unbound") });
+    for (const listener of fake.listeners.get(channelNames.world) ?? []) listener({ data: { ...envelope("world.transition", "bad-envelope"), sender: {} }, clientId: "rw_test" });
+    for (const listener of fake.listeners.get(channelNames.world) ?? []) listener({ data: { ...envelope("world.transition", "invalid"), payload: { sourceRoomId: "room_a" } }, clientId: "rw_test" });
     expect(received).toHaveBeenCalledTimes(1);
     fake.emit("failed", new Error("lost"));
     expect(failed).toHaveBeenCalledWith(expect.objectContaining({ message: "lost" }));
     await subscription.unsubscribe();
     await subscription.unsubscribe();
-    for (const listener of fake.listeners.get(channelNames.world) ?? []) listener({ data: envelope("world.transition", "after-close") });
+    for (const listener of fake.listeners.get(channelNames.world) ?? []) listener({ data: envelope("world.transition", "after-close"), clientId: "rw_test" });
     expect(received).toHaveBeenCalledTimes(1);
     expect(fake.client.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("enforces per-kind publish budgets and emits only classified telemetry without degrading the connection", async () => {
+    const fake = fakeClient();
+    const telemetryEvents: PrivacySafeRealtimeTelemetryEvent[] = [];
+    let now = 1_000_000;
+    const telemetry = createPrivacySafeRealtimeTelemetry({ enabled: true, sink: (event) => telemetryEvents.push(event) });
+    const publishGovernor = createRealtimePublishGovernor({
+      clock: { now: () => now },
+      budgets: { kind: { "interaction.cursor": { capacity: 1, refillTokens: 1, refillIntervalMs: 1_000 } } },
+    });
+    const adapter = createDevelopmentAblyRoomTransport({
+      environment: "preview",
+      clientFactory: async () => fake.client,
+      now: () => now,
+      publishGovernor,
+      telemetry,
+    });
+    const subscription = await adapter.connect({
+      scope,
+      token: tokenRequest({ [names().interaction]: ["publish", "subscribe"] }),
+      connectionEpoch: 1,
+      onMessage: vi.fn(),
+      onFailure: vi.fn(),
+    });
+
+    await expect(subscription.publish?.({
+      ...envelope("interaction.cursor", "spoofed-outbound"),
+      sender: { clientId: "rw_other", clientInstanceId: "tab_a", connectionEpoch: 1 },
+    })).rejects.toThrow("outside");
+    await expect(subscription.publish?.(envelope("interaction.cursor", "cursor-1"))).resolves.toBeUndefined();
+    await expect(subscription.publish?.(envelope("interaction.cursor", "cursor-2"))).rejects.toBeInstanceOf(RealtimePublishRateLimitError);
+    expect(fake.channels.get(names().interaction)!.publish).toHaveBeenCalledTimes(1);
+    expect(telemetryEvents).toEqual(expect.arrayContaining([
+      { event: "connect_requested", state: "connecting" },
+      { event: "connect_ready", state: "live", subscriptions: 1 },
+      { event: "signal_published", kind: "interaction.cursor", family: "interaction" },
+      { event: "governor_limited", reason: "rate_limited", kind: "interaction.cursor", family: "interaction" },
+    ]));
+    expect(JSON.stringify(telemetryEvents)).not.toMatch(/mission_a|room_a|rw_test|tab_a|cursor-[12]/);
+
+    now += 1_000;
+    await expect(subscription.publish?.(envelope("interaction.cursor", "cursor-3"))).resolves.toBeUndefined();
+    expect(fake.channels.get(names().interaction)!.publish).toHaveBeenCalledTimes(2);
   });
 });

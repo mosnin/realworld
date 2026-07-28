@@ -1,4 +1,5 @@
 import { parseRealtimePayload } from "./message-schema";
+import { RealtimePublishRateLimitError } from "./signal-governor";
 
 /**
  * Provider-independent lifecycle for disposable room signals.
@@ -74,10 +75,12 @@ export type RoomSessionOptions = Readonly<{
   maxMessageTtlMs?: number;
   maxFutureIssuedAtMs?: number;
   maxSerializedPayloadBytes?: number;
+  maxTrackedMessageIds?: number;
+  maxTrackedSenderStreams?: number;
   isUnauthorizedError?: (error: unknown) => boolean;
 }>;
 
-export type RealtimeMessageDecision = "accepted" | "duplicate" | "expired" | "malformed" | "out-of-scope" | "stale-epoch" | "stale-sequence" | "inactive";
+export type RealtimeMessageDecision = "accepted" | "duplicate" | "expired" | "malformed" | "out-of-scope" | "stale-epoch" | "stale-sequence" | "capacity" | "inactive";
 
 const defaultClock: RealtimeClock = {
   now: () => Date.now(),
@@ -91,6 +94,10 @@ const defaultMaxReconnectAttempts = 5;
 const defaultMaxMessageTtlMs = 45_000;
 const defaultMaxFutureIssuedAtMs = 5_000;
 const defaultMaxSerializedPayloadBytes = 2_048;
+const defaultMaxTrackedMessageIds = 4_096;
+const maximumMaxTrackedMessageIds = 10_000;
+const defaultMaxTrackedSenderStreams = 512;
+const maximumMaxTrackedSenderStreams = 2_048;
 
 function normalizedNonNegative(value: number | undefined, fallback: number) {
   return value === undefined || !Number.isFinite(value) ? fallback : Math.max(0, value);
@@ -102,6 +109,12 @@ function normalizedPositive(value: number | undefined, fallback: number) {
 
 function normalizedAttemptLimit(value: number | undefined, fallback: number) {
   return value === undefined || !Number.isFinite(value) ? fallback : Math.max(0, Math.floor(value));
+}
+
+function normalizedBoundedPositive(value: number | undefined, fallback: number, maximum: number) {
+  return value === undefined || !Number.isFinite(value)
+    ? fallback
+    : Math.min(maximum, Math.max(1, Math.floor(value)));
 }
 
 function boundedRandom(random: () => number) {
@@ -217,6 +230,8 @@ export class RealtimeRoomSession {
   private readonly maxMessageTtlMs: number;
   private readonly maxFutureIssuedAtMs: number;
   private readonly maxSerializedPayloadBytes: number;
+  private readonly maxTrackedMessageIds: number;
+  private readonly maxTrackedSenderStreams: number;
   private readonly isUnauthorizedError: (error: unknown) => boolean;
   private stateValue: RoomSessionState = "idle";
   private scopeValue: RealtimeRoomScope | undefined;
@@ -242,6 +257,8 @@ export class RealtimeRoomSession {
     this.maxMessageTtlMs = normalizedPositive(options.maxMessageTtlMs, defaultMaxMessageTtlMs);
     this.maxFutureIssuedAtMs = normalizedNonNegative(options.maxFutureIssuedAtMs, defaultMaxFutureIssuedAtMs);
     this.maxSerializedPayloadBytes = normalizedPositive(options.maxSerializedPayloadBytes, defaultMaxSerializedPayloadBytes);
+    this.maxTrackedMessageIds = normalizedBoundedPositive(options.maxTrackedMessageIds, defaultMaxTrackedMessageIds, maximumMaxTrackedMessageIds);
+    this.maxTrackedSenderStreams = normalizedBoundedPositive(options.maxTrackedSenderStreams, defaultMaxTrackedSenderStreams, maximumMaxTrackedSenderStreams);
     this.isUnauthorizedError = options.isUnauthorizedError ?? defaultUnauthorizedError;
   }
 
@@ -287,6 +304,7 @@ export class RealtimeRoomSession {
       await this.subscription.publish(typedMessage);
       return true;
     } catch (error) {
+      if (error instanceof RealtimePublishRateLimitError) return false;
       this.handleFailure(error, this.generation);
       return false;
     }
@@ -446,18 +464,31 @@ export class RealtimeRoomSession {
     const typedMessage = { ...message, payload };
     this.evictExpiredMessageIds(now);
     if (this.seenMessageExpiry.has(typedMessage.messageId)) return "duplicate";
+    if (this.seenMessageExpiry.size >= this.maxTrackedMessageIds) return "capacity";
     const senderKey = `${typedMessage.sender.clientId}:${typedMessage.sender.clientInstanceId}`;
     const priorEpoch = this.senderEpoch.get(senderKey);
     if (priorEpoch !== undefined && typedMessage.sender.connectionEpoch < priorEpoch) return "stale-epoch";
     const sequenceKey = `${senderKey}:${typedMessage.sender.connectionEpoch}:${typedMessage.kind}`;
     const priorSequence = this.senderSequence.get(sequenceKey);
     if (priorEpoch === typedMessage.sender.connectionEpoch && priorSequence !== undefined && typedMessage.clientSeq <= priorSequence) return "stale-sequence";
+    if (priorEpoch === undefined && this.senderEpoch.size >= this.maxTrackedSenderStreams) {
+      const oldestSenderKey = this.senderEpoch.keys().next().value as string | undefined;
+      if (oldestSenderKey !== undefined) {
+        this.senderEpoch.delete(oldestSenderKey);
+        for (const key of this.senderSequence.keys()) {
+          if (key.startsWith(`${oldestSenderKey}:`)) this.senderSequence.delete(key);
+        }
+      }
+    }
     if (priorEpoch === undefined || typedMessage.sender.connectionEpoch > priorEpoch) {
       this.senderEpoch.set(senderKey, typedMessage.sender.connectionEpoch);
       for (const key of this.senderSequence.keys()) {
         if (key.startsWith(`${senderKey}:`)) this.senderSequence.delete(key);
       }
     }
+    // Keep insertion order as least-recently-used for bounded stream eviction.
+    this.senderEpoch.delete(senderKey);
+    this.senderEpoch.set(senderKey, typedMessage.sender.connectionEpoch);
     this.senderSequence.set(sequenceKey, typedMessage.clientSeq);
     this.seenMessageExpiry.set(typedMessage.messageId, typedMessage.expiresAtMs);
     this.scheduleMessageExpiry(typedMessage);
