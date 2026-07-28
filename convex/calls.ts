@@ -23,9 +23,20 @@ const callView = v.object({
   creatorPrincipalId: v.id("principals"),
   title: v.string(),
   detail: v.string(),
+  maxParticipants: v.number(),
+  joinedCount: v.number(),
   status: callStatus,
   currentVersion: v.number(),
   createdAt: v.number(),
+  updatedAt: v.number(),
+});
+const participantView = v.object({
+  _id: v.id("callParticipants"),
+  callId: v.id("calls"),
+  principalId: v.id("principals"),
+  response: v.optional(v.string()),
+  currentVersion: v.number(),
+  joinedAt: v.number(),
   updatedAt: v.number(),
 });
 const callResult = v.object({
@@ -33,6 +44,15 @@ const callResult = v.object({
   eventId: v.id("missionEvents"),
   operationReceiptId: v.id("operationReceipts"),
   currentVersion: v.number(),
+});
+const participantResult = v.object({
+  callId: v.id("calls"),
+  participantId: v.id("callParticipants"),
+  eventId: v.id("missionEvents"),
+  operationReceiptId: v.id("operationReceipts"),
+  currentVersion: v.number(),
+  joinedCount: v.number(),
+  maxParticipants: v.number(),
 });
 
 function requiredText(value: string, field: string, maxLength: number) {
@@ -48,6 +68,12 @@ function commandIds(idempotencyKey: string, correlationId: string) {
   };
 }
 
+function normalizedMaxParticipants(value: number | undefined) {
+  const maxParticipants = value ?? 50;
+  if (!Number.isInteger(maxParticipants) || maxParticipants < 1 || maxParticipants > 50) throw new Error("Invalid Call participant limit");
+  return maxParticipants;
+}
+
 function canReadCall(
   membership: Awaited<ReturnType<typeof requireActiveMembership>>,
   call: Pick<Doc<"calls">, "roomId">,
@@ -59,11 +85,27 @@ function canReadCall(
   );
 }
 
-function requireCallWrite(
+function requireCallCreate(
   membership: Awaited<ReturnType<typeof requireActiveMembership>>,
   call: Pick<Doc<"calls">, "roomId">,
 ) {
   requireRole(membership, ["owner", "steward", "builder", "contributor"]);
+  if (!canReadCall(membership, call)) throw new Error("Not found");
+}
+
+function requireCallAdmin(
+  membership: Awaited<ReturnType<typeof requireActiveMembership>>,
+  call: Pick<Doc<"calls">, "roomId" | "creatorPrincipalId">,
+) {
+  if (!canReadCall(membership, call)) throw new Error("Not found");
+  if (!["owner", "steward"].includes(membership.role) && membership.principalId !== call.creatorPrincipalId) throw new Error("Not found");
+}
+
+function requireCallParticipation(
+  membership: Awaited<ReturnType<typeof requireActiveMembership>>,
+  call: Pick<Doc<"calls">, "roomId">,
+) {
+  requireRole(membership, ["owner", "steward", "builder", "reviewer", "contributor"]);
   if (!canReadCall(membership, call)) throw new Error("Not found");
 }
 
@@ -109,7 +151,7 @@ async function recordCallEvent(
   ctx: MutationCtx,
   call: Pick<Doc<"calls">, "missionId">,
   membership: Pick<Doc<"missionMembers">, "principalId" | "role">,
-  type: "call.created" | "call.updated" | "call.transitioned",
+  type: "call.created" | "call.updated" | "call.transitioned" | "call.participantJoined" | "call.participantWithdrawn" | "call.responseUpdated",
   idempotencyKey: string,
   correlationId: string,
   summary: string,
@@ -149,7 +191,10 @@ async function saveReceipt(
     missionId: Id<"missions">;
     callId: Id<"calls">;
     eventId: Id<"missionEvents">;
+    participantId?: Id<"callParticipants">;
     currentVersion: number;
+    resultJoinedCount?: number;
+    resultMaxParticipants?: number;
     correlationId: string;
     now: number;
   },
@@ -161,8 +206,11 @@ async function saveReceipt(
     state: "complete",
     missionId: values.missionId,
     callId: values.callId,
+    participantId: values.participantId,
     eventId: values.eventId,
     resultVersion: values.currentVersion,
+    resultJoinedCount: values.resultJoinedCount,
+    resultMaxParticipants: values.resultMaxParticipants,
     correlationId: values.correlationId,
     createdAt: values.now,
     expiresAt: values.now + receiptMs,
@@ -192,11 +240,37 @@ export const listMissionCalls = query({
         creatorPrincipalId: call.creatorPrincipalId,
         title: call.title,
         detail: call.detail,
+        maxParticipants: normalizedMaxParticipants(call.maxParticipants),
+        joinedCount: call.joinedCount ?? 0,
         status: call.status,
         currentVersion: call.currentVersion,
         createdAt: call.createdAt,
         updatedAt: call.updatedAt,
       }));
+  },
+});
+
+export const listCallParticipants = query({
+  args: { callId: v.id("calls") },
+  returns: v.array(participantView),
+  handler: async (ctx, args) => {
+    const call = await ctx.db.get(args.callId);
+    if (!call) throw new Error("Not found");
+    const membership = await requireActiveMembership(ctx, call.missionId);
+    if (!canReadCall(membership, call)) throw new Error("Not found");
+    const participants = await ctx.db
+      .query("callParticipants")
+      .withIndex("by_call_and_state", (index) => index.eq("callId", call._id).eq("state", "joined"))
+      .take(50);
+    return participants.map((participant) => ({
+      _id: participant._id,
+      callId: participant.callId,
+      principalId: participant.principalId,
+      response: participant.response,
+      currentVersion: participant.currentVersion,
+      joinedAt: participant.joinedAt,
+      updatedAt: participant.updatedAt,
+    }));
   },
 });
 
@@ -207,18 +281,20 @@ export const createCall = mutation({
     linkedMoveId: v.optional(v.id("moves")),
     title: v.string(),
     detail: v.string(),
+    maxParticipants: v.optional(v.number()),
     idempotencyKey: v.string(),
     correlationId: v.string(),
   },
   returns: callResult,
   handler: async (ctx, args) => {
     const membership = await requireActiveMembership(ctx, args.missionId);
-    requireCallWrite(membership, { roomId: args.roomId });
+    requireCallCreate(membership, { roomId: args.roomId });
     const { idempotencyKey, correlationId } = commandIds(args.idempotencyKey, args.correlationId);
     const title = requiredText(args.title, "Call title", 160);
     const detail = requiredText(args.detail, "Call detail", 2_000);
-    const scope = `mission:${args.missionId}:createCall`;
-    const commandFingerprint = JSON.stringify({ command: "createCall", roomId: args.roomId, linkedMoveId: args.linkedMoveId, title, detail });
+    const maxParticipants = normalizedMaxParticipants(args.maxParticipants);
+    const scope = `mission:${args.missionId}:principal:${membership.principalId}:createCall`;
+    const commandFingerprint = JSON.stringify({ command: "createCall", roomId: args.roomId, linkedMoveId: args.linkedMoveId, title, detail, maxParticipants });
     const prior = await operationReceipt(ctx, scope, idempotencyKey);
     if (prior) {
       if (prior.commandFingerprint !== commandFingerprint || prior.callId === undefined) throw new Error("Idempotency key reuse with a different command");
@@ -235,6 +311,8 @@ export const createCall = mutation({
       creatorPrincipalId: membership.principalId,
       title,
       detail,
+      maxParticipants,
+      joinedCount: 0,
       status: "open",
       currentVersion: 1,
       createdAt: now,
@@ -255,6 +333,7 @@ export const updateCall = mutation({
     linkedMoveId: v.union(v.id("moves"), v.null()),
     title: v.string(),
     detail: v.string(),
+    maxParticipants: v.optional(v.number()),
     idempotencyKey: v.string(),
     correlationId: v.string(),
   },
@@ -263,13 +342,14 @@ export const updateCall = mutation({
     const call = await ctx.db.get(args.callId);
     if (!call) throw new Error("Not found");
     const membership = await requireActiveMembership(ctx, call.missionId);
-    requireCallWrite(membership, call);
+    requireCallAdmin(membership, call);
     const { idempotencyKey, correlationId } = commandIds(args.idempotencyKey, args.correlationId);
     const title = requiredText(args.title, "Call title", 160);
     const detail = requiredText(args.detail, "Call detail", 2_000);
     const linkedMoveId = args.linkedMoveId ?? undefined;
-    const scope = `call:${call._id}:update`;
-    const commandFingerprint = JSON.stringify({ command: "updateCall", expectedVersion: args.expectedVersion, roomId: args.roomId, linkedMoveId: args.linkedMoveId, title, detail });
+    const maxParticipants = normalizedMaxParticipants(args.maxParticipants ?? call.maxParticipants);
+    const scope = `call:${call._id}:principal:${membership.principalId}:update`;
+    const commandFingerprint = JSON.stringify({ command: "updateCall", expectedVersion: args.expectedVersion, roomId: args.roomId, linkedMoveId: args.linkedMoveId, title, detail, maxParticipants });
     const prior = await operationReceipt(ctx, scope, idempotencyKey);
     if (prior) {
       if (prior.commandFingerprint !== commandFingerprint || prior.callId === undefined) throw new Error("Idempotency key reuse with a different command");
@@ -278,12 +358,20 @@ export const updateCall = mutation({
     if (call.status === "resolved" || call.status === "cancelled") throw new Error("Terminal Calls cannot be updated");
     await requireWritableMission(ctx, call.missionId);
     if (call.currentVersion !== args.expectedVersion) throw new Error("Call version conflict");
-    requireCallWrite(membership, { roomId: args.roomId });
+    if (maxParticipants < (call.joinedCount ?? 0)) throw new Error("Call participant limit cannot exclude joined participants");
+    if (args.roomId !== call.roomId) {
+      const participantHistory = await ctx.db
+        .query("callParticipants")
+        .withIndex("by_call_and_principal", (index) => index.eq("callId", call._id))
+        .take(1);
+      if (participantHistory.length > 0) throw new Error("Call room cannot change after participation");
+    }
+    requireCallAdmin(membership, { roomId: args.roomId, creatorPrincipalId: call.creatorPrincipalId });
     await requireCallRoom(ctx, call.missionId, args.roomId);
     await requireVisibleLinkedMove(ctx, call.missionId, membership, args.roomId, linkedMoveId);
     const nextVersion = call.currentVersion + 1;
     const event = await recordCallEvent(ctx, call, membership, "call.updated", idempotencyKey, correlationId, "Call details updated", call.currentVersion, nextVersion);
-    await ctx.db.patch(call._id, { roomId: args.roomId, linkedMoveId, title, detail, currentVersion: nextVersion, updatedAt: event.now });
+    await ctx.db.patch(call._id, { roomId: args.roomId, linkedMoveId, title, detail, maxParticipants, currentVersion: nextVersion, updatedAt: event.now });
     const operationReceiptId = await saveReceipt(ctx, { scope, idempotencyKey, commandFingerprint, missionId: call.missionId, callId: call._id, eventId: event.eventId, currentVersion: nextVersion, correlationId, now: event.now });
     return { callId: call._id, eventId: event.eventId, operationReceiptId, currentVersion: nextVersion };
   },
@@ -296,9 +384,9 @@ export const transitionCall = mutation({
     const call = await ctx.db.get(args.callId);
     if (!call) throw new Error("Not found");
     const membership = await requireActiveMembership(ctx, call.missionId);
-    requireCallWrite(membership, call);
+    requireCallAdmin(membership, call);
     const { idempotencyKey, correlationId } = commandIds(args.idempotencyKey, args.correlationId);
-    const scope = `call:${call._id}:transition`;
+    const scope = `call:${call._id}:principal:${membership.principalId}:transition`;
     const commandFingerprint = JSON.stringify({ command: "transitionCall", expectedVersion: args.expectedVersion, nextStatus: args.nextStatus });
     const prior = await operationReceipt(ctx, scope, idempotencyKey);
     if (prior) {
@@ -313,5 +401,164 @@ export const transitionCall = mutation({
     await ctx.db.patch(call._id, { status: args.nextStatus, currentVersion: nextVersion, updatedAt: event.now });
     const operationReceiptId = await saveReceipt(ctx, { scope, idempotencyKey, commandFingerprint, missionId: call.missionId, callId: call._id, eventId: event.eventId, currentVersion: nextVersion, correlationId, now: event.now });
     return { callId: call._id, eventId: event.eventId, operationReceiptId, currentVersion: nextVersion };
+  },
+});
+
+function participantReceiptScope(callId: Id<"calls">, principalId: Id<"principals">, command: "join" | "withdraw" | "respond") {
+  return `call:${callId}:participant:${principalId}:${command}`;
+}
+
+function participantResponse(
+  call: Doc<"calls">,
+  participant: Doc<"callParticipants">,
+  eventId: Id<"missionEvents">,
+  operationReceiptId: Id<"operationReceipts">,
+  replay?: { currentVersion: number; joinedCount?: number; maxParticipants?: number },
+) {
+  return {
+    callId: call._id,
+    participantId: participant._id,
+    eventId,
+    operationReceiptId,
+    currentVersion: replay?.currentVersion ?? participant.currentVersion,
+    joinedCount: replay?.joinedCount ?? call.joinedCount ?? 0,
+    maxParticipants: replay?.maxParticipants ?? normalizedMaxParticipants(call.maxParticipants),
+  };
+}
+
+export const joinCall = mutation({
+  args: { callId: v.id("calls"), idempotencyKey: v.string(), correlationId: v.string() },
+  returns: participantResult,
+  handler: async (ctx, args) => {
+    const call = await ctx.db.get(args.callId);
+    if (!call) throw new Error("Not found");
+    const membership = await requireActiveMembership(ctx, call.missionId);
+    requireCallParticipation(membership, call);
+    const { idempotencyKey, correlationId } = commandIds(args.idempotencyKey, args.correlationId);
+    const scope = participantReceiptScope(call._id, membership.principalId, "join");
+    const commandFingerprint = JSON.stringify({ command: "joinCall" });
+    const prior = await operationReceipt(ctx, scope, idempotencyKey);
+    if (prior) {
+      if (prior.commandFingerprint !== commandFingerprint || prior.participantId === undefined) throw new Error("Idempotency key reuse with a different command");
+      const participant = await ctx.db.get(prior.participantId);
+      if (!participant) throw new Error("Not found");
+      return participantResponse(call, participant, prior.eventId, prior._id, { currentVersion: prior.resultVersion, joinedCount: prior.resultJoinedCount, maxParticipants: prior.resultMaxParticipants });
+    }
+    await requireWritableMission(ctx, call.missionId);
+    if (call.status !== "open" && call.status !== "accepted") throw new Error("Call is not accepting participants");
+    const existing = await ctx.db
+      .query("callParticipants")
+      .withIndex("by_call_and_principal", (index) => index.eq("callId", call._id).eq("principalId", membership.principalId))
+      .unique();
+    if (existing?.state === "joined") {
+      const operationReceiptId = await saveReceipt(ctx, { scope, idempotencyKey, commandFingerprint, missionId: call.missionId, callId: call._id, participantId: existing._id, eventId: existing.joinEventId, currentVersion: existing.currentVersion, resultJoinedCount: call.joinedCount ?? 0, resultMaxParticipants: normalizedMaxParticipants(call.maxParticipants), correlationId, now: Date.now() });
+      return participantResponse(call, existing, existing.joinEventId, operationReceiptId);
+    }
+    const maxParticipants = normalizedMaxParticipants(call.maxParticipants);
+    const joinedCount = call.joinedCount ?? 0;
+    if (joinedCount >= maxParticipants) throw new Error("Call participant capacity reached");
+    const nextCallVersion = call.currentVersion + 1;
+    const event = await recordCallEvent(ctx, call, membership, "call.participantJoined", idempotencyKey, correlationId, "Call participant joined", call.currentVersion, nextCallVersion);
+    const participantVersion = (existing?.currentVersion ?? 0) + 1;
+    const participantId = existing?._id ?? await ctx.db.insert("callParticipants", {
+      callId: call._id,
+      missionId: call.missionId,
+      principalId: membership.principalId,
+      state: "joined",
+      currentVersion: participantVersion,
+      joinedAt: event.now,
+      updatedAt: event.now,
+      joinEventId: event.eventId,
+      schemaVersion: 1,
+    });
+    if (existing) {
+      await ctx.db.patch(existing._id, { state: "joined", response: undefined, currentVersion: participantVersion, joinedAt: event.now, updatedAt: event.now, joinEventId: event.eventId, withdrawEventId: undefined, responseEventId: undefined });
+    }
+    const nextCall = { ...call, currentVersion: nextCallVersion, joinedCount: joinedCount + 1, updatedAt: event.now };
+    await ctx.db.patch(call._id, { currentVersion: nextCallVersion, joinedCount: joinedCount + 1, updatedAt: event.now });
+    const operationReceiptId = await saveReceipt(ctx, { scope, idempotencyKey, commandFingerprint, missionId: call.missionId, callId: call._id, participantId, eventId: event.eventId, currentVersion: participantVersion, resultJoinedCount: joinedCount + 1, resultMaxParticipants: maxParticipants, correlationId, now: event.now });
+    const participant = await ctx.db.get(participantId);
+    if (!participant) throw new Error("Not found");
+    return participantResponse(nextCall, participant, event.eventId, operationReceiptId);
+  },
+});
+
+export const withdrawCall = mutation({
+  args: { callId: v.id("calls"), expectedParticipantVersion: v.number(), idempotencyKey: v.string(), correlationId: v.string() },
+  returns: participantResult,
+  handler: async (ctx, args) => {
+    const call = await ctx.db.get(args.callId);
+    if (!call) throw new Error("Not found");
+    const membership = await requireActiveMembership(ctx, call.missionId);
+    requireCallParticipation(membership, call);
+    const { idempotencyKey, correlationId } = commandIds(args.idempotencyKey, args.correlationId);
+    const scope = participantReceiptScope(call._id, membership.principalId, "withdraw");
+    const commandFingerprint = JSON.stringify({ command: "withdrawCall", expectedParticipantVersion: args.expectedParticipantVersion });
+    const prior = await operationReceipt(ctx, scope, idempotencyKey);
+    if (prior) {
+      if (prior.commandFingerprint !== commandFingerprint || prior.participantId === undefined) throw new Error("Idempotency key reuse with a different command");
+      const participant = await ctx.db.get(prior.participantId);
+      if (!participant) throw new Error("Not found");
+      return participantResponse(call, participant, prior.eventId, prior._id, { currentVersion: prior.resultVersion, joinedCount: prior.resultJoinedCount, maxParticipants: prior.resultMaxParticipants });
+    }
+    await requireWritableMission(ctx, call.missionId);
+    if (call.status === "resolved" || call.status === "cancelled") throw new Error("Terminal Calls are read-only");
+    const participant = await ctx.db
+      .query("callParticipants")
+      .withIndex("by_call_and_principal", (index) => index.eq("callId", call._id).eq("principalId", membership.principalId))
+      .unique();
+    if (!participant) throw new Error("Not found");
+    if (participant.state === "withdrawn" && participant.withdrawEventId) {
+      const operationReceiptId = await saveReceipt(ctx, { scope, idempotencyKey, commandFingerprint, missionId: call.missionId, callId: call._id, participantId: participant._id, eventId: participant.withdrawEventId, currentVersion: participant.currentVersion, resultJoinedCount: call.joinedCount ?? 0, resultMaxParticipants: normalizedMaxParticipants(call.maxParticipants), correlationId, now: Date.now() });
+      return participantResponse(call, participant, participant.withdrawEventId, operationReceiptId);
+    }
+    if (participant.currentVersion !== args.expectedParticipantVersion) throw new Error("Call participant version conflict");
+    const nextCallVersion = call.currentVersion + 1;
+    const event = await recordCallEvent(ctx, call, membership, "call.participantWithdrawn", idempotencyKey, correlationId, "Call participant withdrew", call.currentVersion, nextCallVersion);
+    const nextParticipantVersion = participant.currentVersion + 1;
+    const nextJoinedCount = Math.max(0, (call.joinedCount ?? 0) - 1);
+    const nextCall = { ...call, currentVersion: nextCallVersion, joinedCount: nextJoinedCount, updatedAt: event.now };
+    await ctx.db.patch(call._id, { currentVersion: nextCallVersion, joinedCount: nextJoinedCount, updatedAt: event.now });
+    await ctx.db.patch(participant._id, { state: "withdrawn", currentVersion: nextParticipantVersion, updatedAt: event.now, withdrawEventId: event.eventId });
+    const operationReceiptId = await saveReceipt(ctx, { scope, idempotencyKey, commandFingerprint, missionId: call.missionId, callId: call._id, participantId: participant._id, eventId: event.eventId, currentVersion: nextParticipantVersion, resultJoinedCount: nextJoinedCount, resultMaxParticipants: normalizedMaxParticipants(call.maxParticipants), correlationId, now: event.now });
+    return participantResponse(nextCall, { ...participant, state: "withdrawn", currentVersion: nextParticipantVersion, updatedAt: event.now, withdrawEventId: event.eventId }, event.eventId, operationReceiptId);
+  },
+});
+
+export const respondToCall = mutation({
+  args: { callId: v.id("calls"), expectedParticipantVersion: v.number(), response: v.string(), idempotencyKey: v.string(), correlationId: v.string() },
+  returns: participantResult,
+  handler: async (ctx, args) => {
+    const call = await ctx.db.get(args.callId);
+    if (!call) throw new Error("Not found");
+    const membership = await requireActiveMembership(ctx, call.missionId);
+    requireCallParticipation(membership, call);
+    const { idempotencyKey, correlationId } = commandIds(args.idempotencyKey, args.correlationId);
+    const response = requiredText(args.response, "Call response", 2_000);
+    const scope = participantReceiptScope(call._id, membership.principalId, "respond");
+    const commandFingerprint = JSON.stringify({ command: "respondToCall", expectedParticipantVersion: args.expectedParticipantVersion, response });
+    const prior = await operationReceipt(ctx, scope, idempotencyKey);
+    if (prior) {
+      if (prior.commandFingerprint !== commandFingerprint || prior.participantId === undefined) throw new Error("Idempotency key reuse with a different command");
+      const participant = await ctx.db.get(prior.participantId);
+      if (!participant) throw new Error("Not found");
+      return participantResponse(call, participant, prior.eventId, prior._id, { currentVersion: prior.resultVersion, joinedCount: prior.resultJoinedCount, maxParticipants: prior.resultMaxParticipants });
+    }
+    await requireWritableMission(ctx, call.missionId);
+    if (call.status === "resolved" || call.status === "cancelled") throw new Error("Terminal Calls are read-only");
+    const participant = await ctx.db
+      .query("callParticipants")
+      .withIndex("by_call_and_principal", (index) => index.eq("callId", call._id).eq("principalId", membership.principalId))
+      .unique();
+    if (!participant || participant.state !== "joined") throw new Error("Not found");
+    if (participant.currentVersion !== args.expectedParticipantVersion) throw new Error("Call participant version conflict");
+    const nextCallVersion = call.currentVersion + 1;
+    const event = await recordCallEvent(ctx, call, membership, "call.responseUpdated", idempotencyKey, correlationId, "Call response updated", call.currentVersion, nextCallVersion);
+    const nextParticipantVersion = participant.currentVersion + 1;
+    const nextCall = { ...call, currentVersion: nextCallVersion, updatedAt: event.now };
+    await ctx.db.patch(call._id, { currentVersion: nextCallVersion, updatedAt: event.now });
+    await ctx.db.patch(participant._id, { response, currentVersion: nextParticipantVersion, updatedAt: event.now, responseEventId: event.eventId });
+    const operationReceiptId = await saveReceipt(ctx, { scope, idempotencyKey, commandFingerprint, missionId: call.missionId, callId: call._id, participantId: participant._id, eventId: event.eventId, currentVersion: nextParticipantVersion, resultJoinedCount: call.joinedCount ?? 0, resultMaxParticipants: normalizedMaxParticipants(call.maxParticipants), correlationId, now: event.now });
+    return participantResponse(nextCall, { ...participant, response, currentVersion: nextParticipantVersion, updatedAt: event.now, responseEventId: event.eventId }, event.eventId, operationReceiptId);
   },
 });

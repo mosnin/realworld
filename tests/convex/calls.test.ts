@@ -123,7 +123,7 @@ describe("Call kernel", () => {
         [3, "call.created"],
       ]);
       expect(await ctx.db.query("operationReceipts")
-        .withIndex("by_scope_and_idempotency_key", (index) => index.eq("scope", `mission:${missionId}:createCall`).eq("idempotencyKey", "create-call"))
+        .withIndex("by_scope_and_idempotency_key", (index) => index.eq("scope", `mission:${missionId}:principal:${events[2]!.actorPrincipalId}:createCall`).eq("idempotencyKey", "create-call"))
         .unique()).toMatchObject({ callId: created.callId, eventId: created.eventId });
     });
   });
