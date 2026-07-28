@@ -49,20 +49,22 @@ Deliverables:
 - Authenticated reactive Mission projection and stabilized launch flow: commits `51c86cf` and `23b6172`; new accounts reach the template launcher, create a durable Mission, and render its title and membership role
 - Secure owner invitation and acceptance flow: commits `04f0483`, `c2543b4`, and `eec1dae`; raw tokens remain client-held, Convex stores token hashes, working roles and room scopes are enforced, and a second authenticated browser context retains contributor membership after reload
 - Durable customizable Mission canvas: commits `04c9e66` and `2149261`; room query, create, rename, archive, and OCC layout updates are Mission-scoped Convex state with corrected room events and atomic Mission event sequencing, while density, accent, zoom, pan, and layout lock remain per-person presentation preferences
+- Scoped reactive collaboration proof: commits `e90d1ee` and `92f1893`; room discovery is deny-by-default outside durable membership scope, and a second authenticated browser observes an authorized Workshop move without reload and retains it after reload
 - Local browser authentication evidence: synthetic account creation, sign-out, sign-in, and protected Mission World restoration passed on 2026-07-27
 - Cloud Convex deployment and cloud authentication remain unverified; password auth is a private-alpha bridge, not the final passkey decision
 - Vercel preview: `https://realworld-4r7u1kand-mosnins-projects.vercel.app` built successfully from commit `f7d4230`; GitHub repository connected
 - Test, lint, typecheck, accessibility, and browser-test infrastructure: foundation passing locally in commit `a9679c0`
 - Truthful authenticated CI gate: commit `6d66216`; GitHub Actions run `30318024140` passed install, lint, typecheck, unit tests, Convex tests, production build, seven authenticated Chromium journeys, and foundation evidence on 2026-07-27
 - Durable two-participant CI gate: commit `63101ad`; GitHub Actions run `30318560377` passed install, lint, typecheck, 13 Vitest tests, Convex validation, production build, eight authenticated Chromium journeys, and foundation evidence on 2026-07-27
+- Durable canvas and mobile CI gate: commit `a6c70c4`; GitHub Actions run `30319454840` passed install, lint, typecheck, 14 Vitest tests, Convex validation, production build, nine authenticated Chromium journeys, and foundation evidence on 2026-07-27
 - Observability, error boundaries, structured logs, and environment validation: shell error boundaries and safe environment-name validation started in commit `a9679c0`
 
 Evidence boundary:
 
 - The current Mission World and Workshop still use fixture content for occupants, activity, and artifacts. Room identity, titles, lifecycle, and coordinates are now durable Convex state; presentation preferences and layout lock intentionally remain personal and browser-local.
-- The authenticated Mission title, membership role, invitation issuance, invitation acceptance, room lifecycle, layout persistence, and reload persistence are real local Convex evidence. They do not prove cloud deployment, simultaneous cross-browser canvas observation, Ably presence, agent runtime, recovery, or production readiness.
+- The authenticated Mission title, membership role, invitation issuance, invitation acceptance, room lifecycle, layout persistence, scoped visibility, and cross-browser reactive Workshop movement are real local Convex evidence. They do not prove cloud deployment, Ably presence, reconnect conflict recovery, agent runtime, recovery, load, or production readiness.
 - Overall production capability remains below one percent until the same flows pass against the connected cloud backend and current preview.
-- Nine browser journeys pass locally against an ephemeral Convex deployment with real private-alpha account creation, including mobile room entry, durable room create/rename/move/archive/reload, and a fresh second browser context accepting scoped membership. GitHub CI is last confirmed at eight journeys in run `30318666783`; the durable-canvas/mobile slice awaits CI reproduction.
+- Nine browser journeys pass locally against an ephemeral Convex deployment with real private-alpha account creation, including mobile room entry, durable room create/rename/move/archive/reload, and live scoped two-context movement. GitHub CI run `30319454840` is green for the prior nine-journey slice; the expanded reactive assertions await CI reproduction.
 
 Exit gates:
 
@@ -73,9 +75,9 @@ Exit gates:
 
 Current gate status:
 
-- CI and production build: passed in GitHub Actions run `30318560377`
+- CI and production build: passed in GitHub Actions run `30319454840`
 - Signed-in responsive shell: passed with local ephemeral Convex Auth
-- Authorization boundaries: thirteen focused Convex tests pass
+- Authorization boundaries: fourteen focused Convex tests pass
 - Reproducible current preview and connected cloud Convex state: still open
 
 ## Phase 2 — Mission kernel
