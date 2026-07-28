@@ -5,6 +5,7 @@ import { useMutation, useQuery } from "convex/react";
 
 import { api } from "@/convex/_generated/api";
 import { SessionControl } from "@/app/auth/session-control";
+import { OwnerInvitePanel } from "@/app/invitations/owner-invite-panel";
 import { Icon, type IconName } from "@/app/ui/icons";
 
 type RoomId = string;
@@ -374,6 +375,7 @@ export function MissionWorld() {
   const [showDirectory, setShowDirectory] = useState(false);
   const [preferences, setPreferences] = useState<Preferences>(defaultPreferences);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
+  const [invitePanelOpen, setInvitePanelOpen] = useState(false);
   const [preferencesLoaded, setPreferencesLoaded] = useState(false);
   const [canvasRooms, setCanvasRooms] = useState<Room[]>(rooms);
   const [canvas, setCanvas] = useState<CanvasState>(defaultCanvasState);
@@ -504,7 +506,11 @@ export function MissionWorld() {
         <div className="momentum" aria-label="Mission Momentum: strong. One fracture. Surge opening in one minute and twenty-four seconds.">
           <span className="momentum__mark"><Icon name="spark" /></span><strong>Mission Momentum</strong><span className="momentum__bars" aria-hidden="true"><i /><i /><i /><i /><i /></span><b>Strong</b><span>Fractures <em>1</em></span><span>Surge opening <time>01:24</time></span>
         </div>
-        <button className="create-button" type="button"><Icon name="plus" /> Create / Join Mission</button>
+        {activeMission.role === "owner" ? (
+          <button className="create-button" onClick={() => setInvitePanelOpen(true)} type="button">
+            <Icon name="plus" /> Invite collaborators
+          </button>
+        ) : null}
         <button className="icon-button" aria-label="Search" type="button"><Icon name="search" /></button>
         <button className="icon-button" aria-label="Notifications" type="button"><Icon name="bell" /></button>
         <button className="icon-button" aria-expanded={preferencesOpen} aria-label="Open world preferences" onClick={() => setPreferencesOpen(true)} type="button"><Icon name="settings" /></button>
@@ -513,12 +519,20 @@ export function MissionWorld() {
       </header>
 
       {preferencesOpen ? <PreferencePanel onChange={(next) => { setPreferences(next); if (next.defaultView !== preferences.defaultView) setShowDirectory(next.defaultView === "list"); }} onClose={() => setPreferencesOpen(false)} preferences={preferences} /> : null}
+      {invitePanelOpen ? (
+        <div aria-label="Invite collaborators" aria-modal="true" className="preference-panel" role="dialog">
+          <button aria-label="Close invitations" onClick={() => setInvitePanelOpen(false)} type="button">
+            <Icon name="close" />
+          </button>
+          <OwnerInvitePanel missionId={activeMission._id} />
+        </div>
+      ) : null}
 
       <section className="mission-summary" aria-labelledby="mission-title">
         <p className="eyebrow">Mission</p>
         <h1 id="mission-title">{activeMission.title}</h1>
         <p>Give humans and autonomous agents shared Missions, live rooms, durable Artifacts, and the tools to accomplish ambitious work together.</p>
-        <div className="mission-summary__facts"><span><i /> Active</span><span>18 humans</span><span>7 agents</span><span>Updated 2m ago</span></div>
+        <div className="mission-summary__facts"><span><i /> Active</span><span>{activeMission.role}</span><span>Durable Mission</span><span>Live projection</span></div>
         <div className="summary-pulse"><strong>Pulse</strong><svg viewBox="0 0 220 34" aria-hidden="true"><path d="M1 21 C20 30 26 6 45 17 S70 26 88 11 S113 9 130 22 S155 25 169 14 S194 12 219 9" /></svg></div>
       </section>
 

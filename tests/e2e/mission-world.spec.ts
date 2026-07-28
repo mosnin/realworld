@@ -111,3 +111,41 @@ test("a participant can customize and persist a personal canvas layout", async (
   await page.getByRole("button", { name: "Archive room" }).click();
   await expect(page.getByRole("button", { name: /Launch Cabin\. 0 active people/i })).toHaveCount(0);
 });
+
+test("an owner can invite a second authenticated participant into the durable Mission", async ({ browser, page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Invite collaborators" }).click();
+
+  const invitations = page.getByRole("dialog", { name: "Invite collaborators" });
+  await expect(invitations.getByRole("heading", { name: "Invite collaborators" })).toBeVisible();
+  await invitations.getByRole("checkbox", { name: /Workshop/i }).check();
+  await invitations.getByRole("button", { name: "Create invitation" }).click();
+
+  const inviteUrl = await invitations.getByLabel("Invitation link").inputValue();
+  expect(inviteUrl).toContain("/invite/");
+
+  const participantContext = await browser.newContext();
+  try {
+    const participant = await participantContext.newPage();
+    await participant.goto(inviteUrl);
+    await participant.getByLabel("Email").fill(
+      `invited-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`,
+    );
+    await participant.getByLabel("Password").fill("Realworld-browser-test-2026");
+    await participant.getByRole("button", { name: "Need an invitation? Create an account" }).click();
+    await participant.getByRole("button", { name: "Create private-alpha account" }).click();
+
+    await expect(participant.getByRole("heading", { name: "You have a Mission invitation." })).toBeVisible({ timeout: 15_000 });
+    await participant.getByRole("button", { name: "Join Mission" }).click();
+    await expect(participant.getByText("You joined the Mission.")).toBeVisible();
+    await participant.getByRole("link", { name: "Enter the Mission World" }).click();
+
+    await expect(participant.getByRole("heading", { name: "Company sprint" })).toBeVisible();
+    await expect(participant.getByText("contributor", { exact: true })).toBeVisible();
+    await participant.reload();
+    await expect(participant.getByRole("heading", { name: "Company sprint" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Company sprint" })).toBeVisible();
+  } finally {
+    await participantContext.close();
+  }
+});
