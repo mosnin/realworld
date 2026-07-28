@@ -2875,6 +2875,119 @@ describe("RealtimeRoomSession", () => {
     }
   });
 
+  it("captures maxReconnectAttempts once, ignores mutation, and exhausts the captured retry budget", async () => {
+    const providerSecret = "retry-budget-mutation-secret";
+    const clock = new FakeClock();
+    const failure = new Error("ordinary failure");
+    const { transport, connect } = createTransport([failure, failure, "success"]);
+    let reads = 0;
+    let maxReconnectAttempts: unknown = 1;
+    const options = {
+      tokenProvider: async () => token(clock.now() + 300_000),
+      transport,
+      clock,
+      reconnectDelayMs: () => 11,
+    } as unknown as RoomSessionOptions;
+    Object.defineProperty(options, "maxReconnectAttempts", {
+      get: () => {
+        reads += 1;
+        return maxReconnectAttempts;
+      },
+    });
+    const session = new RealtimeRoomSession(options);
+    maxReconnectAttempts = providerSecret;
+
+    await session.start({ missionId: "mission-a", roomId: "room-a" });
+    expect(session.state).toBe("degraded");
+    expect(clock.delays).toContain(11);
+    clock.advance(11);
+    await vi.waitFor(() => expect(connect).toHaveBeenCalledTimes(2));
+    clock.advance(30_000);
+    await flush();
+
+    expect(reads).toBe(1);
+    expect(session.state).toBe("degraded");
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(clock.delays.filter((delay) => delay === 11)).toHaveLength(1);
+    await session.stop();
+  });
+
+  it("contains hostile, async, and nonfinite retry-budget getters while preserving exact retry exhaustion", async () => {
+    const providerSecret = "hostile-retry-budget-secret";
+    const cases: Array<{ label: string; value?: unknown; expectedRetries: number }> = [
+      { label: "default", expectedRetries: 5 },
+      { label: "nan", value: Number.NaN, expectedRetries: 5 },
+      { label: "infinite", value: Number.POSITIVE_INFINITY, expectedRetries: 5 },
+      { label: "negative", value: -1, expectedRetries: 0 },
+      { label: "zero", value: 0, expectedRetries: 0 },
+      { label: "fractional", value: 2.9, expectedRetries: 2 },
+      { label: "throwing-getter", expectedRetries: 5 },
+      { label: "rejected-promise", expectedRetries: 5 },
+      { label: "hostile-then", expectedRetries: 5 },
+    ];
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      for (const { label, value, expectedRetries } of cases) {
+        const clock = new FakeClock();
+        const failures = Array.from({ length: expectedRetries + 2 }, () => new Error("ordinary failure"));
+        const { transport, connect } = createTransport(failures);
+        const reported: unknown[] = [];
+        let reads = 0;
+        let thenReads = 0;
+        const options = {
+          tokenProvider: async () => token(clock.now() + 300_000),
+          transport,
+          clock,
+          reconnectDelayMs: () => 11,
+          onTransportFailure: (error: unknown) => reported.push(error),
+        } as unknown as RoomSessionOptions;
+        Object.defineProperty(options, "maxReconnectAttempts", {
+          get: () => {
+            reads += 1;
+            if (label === "throwing-getter") throw new Error(providerSecret);
+            if (label === "rejected-promise") return Promise.reject(new Error(providerSecret));
+            if (label === "hostile-then") {
+              const hostileThenable = {};
+              Object.defineProperty(hostileThenable, "then", {
+                get: () => {
+                  thenReads += 1;
+                  throw new Error(providerSecret);
+                },
+              });
+              return hostileThenable;
+            }
+            return value;
+          },
+        });
+        let session: RealtimeRoomSession | undefined;
+        expect(() => { session = new RealtimeRoomSession(options); }).not.toThrow();
+
+        await session!.start({ missionId: "mission-a", roomId: "room-a" });
+        for (let attempt = 1; attempt <= expectedRetries; attempt += 1) {
+          clock.advance(11);
+          await vi.waitFor(() => expect(connect).toHaveBeenCalledTimes(attempt + 1));
+        }
+        clock.advance(30_000);
+        await flush();
+
+        expect(reads).toBe(1);
+        if (label === "hostile-then") expect(thenReads).toBe(1);
+        expect(session!.state).toBe("degraded");
+        expect(connect).toHaveBeenCalledTimes(expectedRetries + 1);
+        expect(clock.delays.filter((delay) => delay === 11)).toHaveLength(expectedRetries);
+        expect(reported).toHaveLength(expectedRetries + 1);
+        expect(reported.map(String).join("\n")).not.toContain(providerSecret);
+        await session!.stop();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
   it("snapshots recovery policy getters and receivers once, ignoring later replacements", async () => {
     const providerSecret = "recovery-policy-replacement-secret";
     for (const policy of ["random", "reconnect"] as const) {

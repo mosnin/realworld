@@ -241,6 +241,17 @@ function snapshotPositive(read: () => unknown, fallback: number) {
   }
 }
 
+function snapshotAttemptLimit(read: () => unknown, fallback: number) {
+  try {
+    const value = read();
+    if (typeof value === "number") return normalizedAttemptLimit(value, fallback);
+    observeAsyncResult(value);
+    return fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 function snapshotRefreshTiming(options: RoomSessionOptions) {
   return {
     refreshSkew: snapshotNonNegative(() => options.refreshSkewMs, defaultRefreshSkewMs),
@@ -699,7 +710,7 @@ export class RealtimeRoomSession {
     this.minimumRefreshDelayMs = refreshTiming.minimumRefreshDelay;
     const random = snapshotRandom(options);
     this.reconnectDelayMs = snapshotReconnectDelay(options, random);
-    this.maxReconnectAttempts = normalizedAttemptLimit(options.maxReconnectAttempts, defaultMaxReconnectAttempts);
+    this.maxReconnectAttempts = snapshotAttemptLimit(() => options.maxReconnectAttempts, defaultMaxReconnectAttempts);
     this.maxMessageTtlMs = normalizedPositive(options.maxMessageTtlMs, defaultMaxMessageTtlMs);
     this.maxFutureIssuedAtMs = normalizedNonNegative(options.maxFutureIssuedAtMs, defaultMaxFutureIssuedAtMs);
     this.maxSerializedPayloadBytes = normalizedPositive(options.maxSerializedPayloadBytes, defaultMaxSerializedPayloadBytes);
