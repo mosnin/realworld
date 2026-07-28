@@ -53,6 +53,7 @@ Deliverables:
 - Vercel preview: `https://realworld-4r7u1kand-mosnins-projects.vercel.app` built successfully from commit `f7d4230`; GitHub repository connected
 - Test, lint, typecheck, accessibility, and browser-test infrastructure: foundation passing locally in commit `a9679c0`
 - Truthful authenticated CI gate: commit `6d66216`; GitHub Actions run `30318024140` passed install, lint, typecheck, unit tests, Convex tests, production build, seven authenticated Chromium journeys, and foundation evidence on 2026-07-27
+- Durable two-participant CI gate: commit `63101ad`; GitHub Actions run `30318560377` passed install, lint, typecheck, 13 Vitest tests, Convex validation, production build, eight authenticated Chromium journeys, and foundation evidence on 2026-07-27
 - Observability, error boundaries, structured logs, and environment validation: shell error boundaries and safe environment-name validation started in commit `a9679c0`
 
 Evidence boundary:
@@ -60,7 +61,7 @@ Evidence boundary:
 - The current Mission World and Workshop still use fixture content for rooms, occupants, activity, and artifacts. The canvas customization remains browser-local even though a Convex-authoritative room-layout contract exists.
 - The authenticated Mission title, membership role, invitation issuance, invitation acceptance, and reload persistence are real local Convex evidence. They do not prove cloud deployment, shared-canvas synchronization, Ably presence, agent runtime, recovery, or production readiness.
 - Overall production capability remains below one percent until the same flows pass against the connected cloud backend and current preview.
-- Eight browser journeys pass locally against an ephemeral Convex deployment with real private-alpha account creation. GitHub CI is last confirmed green at seven journeys on run `30318024140`; the new two-context journey awaits CI reproduction.
+- Eight browser journeys pass locally and in GitHub CI run `30318560377` against an ephemeral Convex deployment with real private-alpha account creation, including a fresh second browser context accepting scoped membership and retaining it after reload.
 
 Exit gates:
 
@@ -71,7 +72,7 @@ Exit gates:
 
 Current gate status:
 
-- CI and production build: passed in GitHub Actions run `30318024140`
+- CI and production build: passed in GitHub Actions run `30318560377`
 - Signed-in responsive shell: passed with local ephemeral Convex Auth
 - Authorization boundaries: twelve focused Convex tests pass
 - Reproducible current preview and connected cloud Convex state: still open

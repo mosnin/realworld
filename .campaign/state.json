@@ -5,11 +5,11 @@
   "currentPhase": 1,
   "phaseName": "Production foundation",
   "startedAt": "2026-07-27T00:00:00-04:00",
-  "lastUpdatedAt": "2026-07-27T20:50:21-04:00",
+  "lastUpdatedAt": "2026-07-27T20:53:10-04:00",
   "exactNextActions": [
-    "Push the current slice and reproduce the eight authenticated browser journeys in GitHub Actions",
     "Create or connect a cloud Convex development deployment and verify the current preview creates and reloads a durable Mission",
-    "Replace browser-local room layouts with Mission-scoped reactive Convex canvas queries and mutations"
+    "Replace browser-local room layouts with Mission-scoped reactive Convex canvas queries and mutations",
+    "Add a mobile authenticated Mission World journey and correct any responsive interaction failures"
   ],
   "teams": {
     "worldNetwork": {"status":"complete","model":"gpt-5.6-terra","writeScope":"docs/program/world-network-system.md","lastMeaningfulHeartbeatAt":"2026-07-27T18:52:00-04:00","evidence":"commit 0ca7a39","exactNextAction":"Review the product contract against the room interaction specification"},
@@ -21,7 +21,7 @@
     "artifactStudio": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"artifact domain and surfaces","exactNextAction":"Wait for client, realtime, and agent contracts"},
     "discoverySocial": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"discovery and contribution surfaces","exactNextAction":"Wait for Artifact Studio and reputation contracts"},
     "trustGovernance": {"status":"review","model":"gpt-5.6-terra","writeScope":"docs/program/trust-quality-release.md","lastMeaningfulHeartbeatAt":"2026-07-27T18:55:00-04:00","evidence":"commit c1f156b","exactNextAction":"Translate the trust contract into foundation tests"},
-    "qualityOperations": {"status":"active","model":"gpt-5.6-terra","writeScope":"CI and verification infrastructure","lastMeaningfulHeartbeatAt":"2026-07-27T20:50:00-04:00","evidence":"GitHub Actions run 30318024140 passed the prior seven-journey gate; current local gate passes lint, typecheck, 13 Vitest tests, production build, and eight authenticated Chromium journeys including a second browser context","exactNextAction":"Push and reproduce the current eight-journey gate in GitHub Actions"}
+    "qualityOperations": {"status":"review","model":"gpt-5.6-terra","writeScope":"CI and verification infrastructure","lastMeaningfulHeartbeatAt":"2026-07-27T20:53:00-04:00","evidence":"GitHub Actions run 30318560377 passed install, lint, typecheck, 13 Vitest tests, Convex validation, production build, eight authenticated Chromium journeys including a second browser context, and foundation evidence","exactNextAction":"Add mobile interaction evidence and extend the two-context journey when shared canvas state lands"}
   },
   "orchestration": {
     "preferredRuntime": "orca",
