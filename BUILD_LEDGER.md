@@ -63,6 +63,7 @@ Deliverables:
 - Mission lifecycle and reconnect CI gate: commit `916ca42`; GitHub Actions run `30321896429` passed install, lint, typecheck, 21 automated tests, Convex validation, production build, twelve authenticated Chromium journeys, and foundation evidence on 2026-07-27. Evidence includes owner edit/archive/restore, an explicit archived read-only world, mutation freeze, membership expiry, replay-safe idempotency, mobile interaction, and true offline-to-online convergence.
 - Multi-Mission and Constitution CI gate: commit `f8cfba2`; GitHub Actions run `30322672825` passed install, lint, typecheck, 27 automated tests, Convex validation, production build, thirteen authenticated Chromium journeys, and foundation evidence on 2026-07-27. Evidence includes durable Constitution/outcomes with OCC and replay, exact room-scope write grants, stable Mission selection, in-world second-Mission launch, reload persistence, and archive/switch isolation.
 - Constitution UI, Move kernel, and fifty-participant simulation CI gate: commit `3e20870`; GitHub Actions run `30323307089` passed install, lint, typecheck, 32 automated tests, Convex validation, production build, fourteen authenticated Chromium journeys, and foundation evidence on 2026-07-27. Evidence includes an owner Constitution lifecycle with two intentional saves and archive/restore persistence; scoped Move list/create/update/dependencies/transitions with OCC, receipts, event ordering, and archive freeze; plus 50 concurrent local Convex reads and eight isolated layout updates. The 50-participant check is deterministic local authorization/concurrency evidence, not browser, network, Ably, or production load evidence.
+- Authenticated Move-board local release candidate: commits `4ec39a6`, `d9630ec`, and `38d032d`; lint, typecheck, 36 automated tests, Convex validation, production build, and fifteen authenticated Chromium journeys pass locally. The selected Mission now exposes room-scoped Move creation, title and intent editing, dependency selection, valid lifecycle transitions, keyboard activation, reactive state, and reload persistence. Hosted CI for this candidate is pending.
 - Observability, error boundaries, structured logs, and environment validation: shell error boundaries and safe environment-name validation started in commit `a9679c0`
 
 Evidence boundary:
@@ -70,7 +71,7 @@ Evidence boundary:
 - The current Mission World and Workshop still use fixture content for occupants, activity, and artifacts. Room identity, titles, lifecycle, and coordinates are now durable Convex state; presentation preferences and layout lock intentionally remain personal and browser-local.
 - The authenticated Mission title, membership role, invitation issuance, invitation acceptance, room lifecycle, layout persistence, scoped visibility, cross-browser reactive movement, and concurrent conflict recovery are real local Convex evidence. They do not prove cloud deployment, Ably presence, exhaustive role coverage, agent runtime, disaster recovery, load, or production readiness.
 - Overall production capability remains below one percent until the same flows pass against the connected cloud backend and current preview.
-- Fourteen browser journeys pass locally and in GitHub Actions run `30323307089` against an ephemeral Convex deployment with real private-alpha account creation, including Constitution edit/re-edit/archive/restore persistence, real multi-Mission creation/selection/reload/archive, mobile room entry, durable Mission lifecycle, archived read-only controls, deny-by-default scoped discovery, live two-context movement, a concurrent owner/builder OCC race with visible recovery, and a true browser disconnect/reconnect cycle.
+- Fifteen browser journeys pass locally against an ephemeral Convex deployment with real private-alpha account creation, including the durable owner Move workflow, Constitution edit/re-edit/archive/restore persistence, real multi-Mission creation/selection/reload/archive, mobile room entry, durable Mission lifecycle, archived read-only controls, deny-by-default scoped discovery, live two-context movement, a concurrent owner/builder OCC race with visible recovery, and a true browser disconnect/reconnect cycle. GitHub Actions run `30323307089` remains the latest hosted proof and covers the prior fourteen-journey gate.
 
 Exit gates:
 
@@ -81,9 +82,9 @@ Exit gates:
 
 Current gate status:
 
-- CI and production build: passed in GitHub Actions run `30323307089`
+- CI and production build: prior gate passed in GitHub Actions run `30323307089`; current fifteen-journey Move-board candidate passes locally and awaits hosted CI
 - Signed-in responsive shell: passed with local ephemeral Convex Auth
-- Authorization boundaries: thirty-two automated tests pass across Mission, Constitution, Move, membership, invitation, room scopes, lifecycle, expiry, dependencies, OCC, and idempotency behavior
+- Authorization boundaries: thirty-six automated tests pass locally across Mission, Constitution, Move, membership, invitation, room scopes, lifecycle, expiry, dependencies, OCC, and idempotency behavior
 - Reproducible current preview and connected cloud Convex state: still open
 
 ## Phase 2 — Mission kernel
