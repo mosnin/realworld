@@ -2,7 +2,7 @@ import { v } from "convex/values";
 
 import type { Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
-import { requireActiveMembership, requireAuthenticatedTokenIdentifier, requireExistingHumanPrincipal, requireRole } from "./lib/auth";
+import { isActiveMembership, requireActiveMembership, requireAuthenticatedTokenIdentifier, requireExistingHumanPrincipal, requireRole } from "./lib/auth";
 
 const receiptRetentionMs = 30 * 24 * 60 * 60 * 1000;
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -203,7 +203,7 @@ export const getPrivateMissionBySlug = query({
         query.eq("missionId", mission._id).eq("principalId", principal._id),
       )
       .unique();
-    if (membership === null || membership.state !== "active") {
+    if (membership === null || !isActiveMembership(membership)) {
       return null;
     }
     return {
@@ -231,7 +231,7 @@ export const listMyMissions = query({
     if (principal === null) return [];
     if (principal.type !== "human" || principal.state !== "active") throw new Error("Unauthorized");
     const memberships = await ctx.db.query("missionMembers").withIndex("by_principal_and_state", q => q.eq("principalId", principal._id).eq("state", "active")).take(100);
-    const values = await Promise.all(memberships.map(async membership => { const mission = await ctx.db.get(membership.missionId); if (mission === null || (mission.lifecycle !== "active" && membership.role !== "owner")) return null; return { _id: mission._id, title: mission.title, slug: mission.slug, summary: mission.summary, templateKey: mission.templateKey, role: membership.role, lifecycle: mission.lifecycle, currentVersion: mission.currentVersion }; }));
+    const values = await Promise.all(memberships.filter((membership) => isActiveMembership(membership)).map(async membership => { const mission = await ctx.db.get(membership.missionId); if (mission === null) return null; return { _id: mission._id, title: mission.title, slug: mission.slug, summary: mission.summary, templateKey: mission.templateKey, role: membership.role, lifecycle: mission.lifecycle, currentVersion: mission.currentVersion }; }));
     return values.filter((value): value is NonNullable<typeof value> => value !== null);
   },
 });

@@ -244,6 +244,31 @@ describe("missions", () => {
     expect(restored.currentVersion).toBe(4);
     await t.run(async (ctx) => { const mission = await ctx.db.get(result.missionId); const events = await ctx.db.query("missionEvents").withIndex("by_mission_and_sequence", (query) => query.eq("missionId", result.missionId)).collect(); expect(mission).toMatchObject({ title: "Living world", lifecycle: "active", currentVersion: 4 }); expect(events.map((event) => event.type)).toEqual(["mission.created", "mission.updated", "mission.archived", "mission.restored"]); });
   });
+
+  it("denies expired memberships across Mission discovery, historical reads, and writes", async () => {
+    const { t, asOwner, result } = await createMission();
+    await t.run(async (ctx) => {
+      const mission = await ctx.db.get(result.missionId);
+      const membership = await ctx.db.query("missionMembers").withIndex("by_mission_and_principal", (query) => query.eq("missionId", result.missionId).eq("principalId", mission!.ownerPrincipalId)).unique();
+      await ctx.db.patch(membership!._id, { expiresAt: Date.now() - 1 });
+    });
+
+    expect(await asOwner.query(api.missions.listMyMissions, {})).toEqual([]);
+    expect(await asOwner.query(api.missions.getPrivateMissionBySlug, { slug: createArgs.slug })).toBeNull();
+    await expect(asOwner.mutation(api.missions.editPrivateMission, { missionId: result.missionId, title: "Expired", summary: "No longer authorized.", expectedVersion: 1, idempotencyKey: "expired-edit", correlationId: "expired" })).rejects.toThrow("Not found");
+  });
+
+  it("keeps archived Missions discoverable as read-only history for unexpired collaborators", async () => {
+    const { t, asOwner, result } = await createMission();
+    await t.run(async (ctx) => {
+      const now = Date.now();
+      const principalId = await ctx.db.insert("principals", { type: "human", state: "active", tokenIdentifier: contributorIdentity.tokenIdentifier, createdAt: now, updatedAt: now, schemaVersion: 1 });
+      await ctx.db.insert("missionMembers", { missionId: result.missionId, principalId, role: "observer", state: "active", scope: ["mission:read"], grantVersion: 1, createdAt: now, updatedAt: now, schemaVersion: 1 });
+    });
+    await asOwner.mutation(api.missions.archivePrivateMission, { missionId: result.missionId, expectedVersion: 1, idempotencyKey: "history-archive", correlationId: "history" });
+
+    expect(await t.withIdentity(contributorIdentity).query(api.missions.listMyMissions, {})).toEqual([expect.objectContaining({ _id: result.missionId, lifecycle: "archived", role: "observer" })]);
+  });
 });
 
 describe("invites and durable canvas", () => {
@@ -302,6 +327,19 @@ describe("invites and durable canvas", () => {
     await asOwner.mutation(api.missions.archivePrivateMission, { missionId: result.missionId, expectedVersion: 1, idempotencyKey: "freeze-archive", correlationId: "freeze" });
     await expect(asOwner.mutation(api.canvas.updateRoomLayout, { roomId, expectedLayoutVersion: 1, layout: { x: 20, y: 20, width: 220, height: 140 }, idempotencyKey: "freeze-layout" })).rejects.toThrow("Mission is not active");
     await expect(asOwner.mutation(api.invites.createInvite, { missionId: result.missionId, role: "observer", roomIds: [roomId], expiresAt: Date.now() + 60_000, maxUses: 1, inviteToken: "q".repeat(40), idempotencyKey: "freeze-invite", correlationId: "freeze" })).rejects.toThrow("Mission is not active");
+  });
+
+  it("replays completed room and invitation commands after archive without unfreezing writes", async () => {
+    const { asOwner, result } = await createMission();
+    const roomArgs = { missionId: result.missionId, title: "Replay room", kind: "branchLab" as const, layout: { x: 100, y: 200, width: 220, height: 140 }, idempotencyKey: "replay-room" };
+    const createdRoom = await asOwner.mutation(api.canvas.createRoom, roomArgs);
+    const inviteArgs = { missionId: result.missionId, role: "observer" as const, roomIds: [createdRoom.roomId], expiresAt: Date.now() + 60_000, maxUses: 1, inviteToken: "r".repeat(40), idempotencyKey: "replay-invite", correlationId: "replay" };
+    const createdInvite = await asOwner.mutation(api.invites.createInvite, inviteArgs);
+    await asOwner.mutation(api.missions.archivePrivateMission, { missionId: result.missionId, expectedVersion: 1, idempotencyKey: "replay-archive", correlationId: "replay" });
+
+    await expect(asOwner.mutation(api.canvas.createRoom, roomArgs)).resolves.toEqual(createdRoom);
+    await expect(asOwner.mutation(api.invites.createInvite, inviteArgs)).resolves.toEqual(createdInvite);
+    await expect(asOwner.mutation(api.canvas.createRoom, { ...roomArgs, idempotencyKey: "fresh-archived-room" })).rejects.toThrow("Mission is not active");
   });
 
   it("does not let an authenticated agent principal redeem a human invitation", async () => {

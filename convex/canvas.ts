@@ -51,7 +51,6 @@ export const createRoom = mutation({
   returns: v.object({ roomId: v.id("rooms"), currentVersion: v.number(), layoutVersion: v.number() }),
   handler: async (ctx, args) => {
     const member = await requireActiveMembership(ctx, args.missionId);
-    await requireWritableMission(ctx, args.missionId);
     requireRole(member, ["owner", "steward", "builder"]);
     const scope = `mission:${args.missionId}:createRoom`;
     const commandFingerprint = JSON.stringify({ command: "createRoom", title: args.title.trim(), kind: args.kind, layout: args.layout });
@@ -62,6 +61,7 @@ export const createRoom = mutation({
       if (!room) throw new Error("Room receipt is inconsistent");
       return { roomId: room._id, currentVersion: room.currentVersion, layoutVersion: room.layoutVersion };
     }
+    await requireWritableMission(ctx, args.missionId);
     const now = Date.now();
     const roomId = await ctx.db.insert("rooms", { missionId: args.missionId, title: title(args.title), kind: args.kind, accessPolicy: "mission", mapType: "field", layout: validLayout(args.layout), layoutVersion: 1, state: "active", currentVersion: 1, createdAt: now, updatedAt: now, schemaVersion: 1 });
     const event = await recordRoomEvent(ctx, { missionId: args.missionId }, member, "room.created", args.idempotencyKey, "Room created", 1);
@@ -74,10 +74,11 @@ export const updateRoomLayout = mutation({
   args: { roomId: v.id("rooms"), expectedLayoutVersion: v.number(), layout, idempotencyKey: v.string() },
   returns: v.object({ roomId: v.id("rooms"), layoutVersion: v.number() }),
   handler: async (ctx, args) => {
-    const room = await ctx.db.get(args.roomId); if (!room || room.state !== "active") throw new Error("Not found");
-    const member = await requireActiveMembership(ctx, room.missionId); await requireWritableMission(ctx, room.missionId); requireRole(member, ["owner", "steward", "builder"]); validLayout(args.layout);
+    const room = await ctx.db.get(args.roomId); if (!room) throw new Error("Not found");
+    const member = await requireActiveMembership(ctx, room.missionId); requireRole(member, ["owner", "steward", "builder"]); validLayout(args.layout);
     const scope = `room:${room._id}:layout`; const commandFingerprint = JSON.stringify({ command: "updateRoomLayout", layout: args.layout, expectedLayoutVersion: args.expectedLayoutVersion }); const prior = await receipt(ctx, scope, args.idempotencyKey);
     if (prior) { if (prior.commandFingerprint !== commandFingerprint) throw new Error("Idempotency key reuse with a different command"); return { roomId: room._id, layoutVersion: prior.resultVersion }; }
+    if (room.state !== "active") throw new Error("Not found"); await requireWritableMission(ctx, room.missionId);
     if (room.layoutVersion !== args.expectedLayoutVersion) throw new Error("Room layout version conflict");
     const nextLayoutVersion = room.layoutVersion + 1; const nextRoomVersion = room.currentVersion + 1; const event = await recordRoomEvent(ctx, room, member, "room.layoutUpdated", args.idempotencyKey, "Room layout updated", nextRoomVersion);
     await ctx.db.patch(room._id, { layout: args.layout, layoutVersion: nextLayoutVersion, currentVersion: nextRoomVersion, updatedAt: event.now });
@@ -90,9 +91,10 @@ export const renameRoom = mutation({
   args: { roomId: v.id("rooms"), expectedVersion: v.number(), title: v.string(), idempotencyKey: v.string() },
   returns: v.object({ roomId: v.id("rooms"), currentVersion: v.number() }),
   handler: async (ctx, args) => {
-    const room = await ctx.db.get(args.roomId); if (!room || room.state !== "active") throw new Error("Not found"); const member = await requireActiveMembership(ctx, room.missionId); await requireWritableMission(ctx, room.missionId); requireRole(member, ["owner", "steward", "builder"]);
+    const room = await ctx.db.get(args.roomId); if (!room) throw new Error("Not found"); const member = await requireActiveMembership(ctx, room.missionId); requireRole(member, ["owner", "steward", "builder"]);
     const scope = `room:${room._id}:rename`; const nextTitle = title(args.title); const commandFingerprint = JSON.stringify({ command: "renameRoom", expectedVersion: args.expectedVersion, title: nextTitle }); const prior = await receipt(ctx, scope, args.idempotencyKey);
     if (prior) { if (prior.commandFingerprint !== commandFingerprint) throw new Error("Idempotency key reuse with a different command"); return { roomId: room._id, currentVersion: prior.resultVersion }; }
+    if (room.state !== "active") throw new Error("Not found"); await requireWritableMission(ctx, room.missionId);
     if (room.currentVersion !== args.expectedVersion) throw new Error("Room version conflict"); const nextVersion = room.currentVersion + 1; const event = await recordRoomEvent(ctx, room, member, "room.renamed", args.idempotencyKey, "Room renamed", nextVersion);
     await ctx.db.patch(room._id, { title: nextTitle, currentVersion: nextVersion, updatedAt: event.now }); await ctx.db.insert("operationReceipts", { scope, idempotencyKey: args.idempotencyKey, commandFingerprint, state: "complete", missionId: room.missionId, eventId: event.eventId, resultVersion: nextVersion, correlationId: `room:${args.idempotencyKey}`, createdAt: event.now, expiresAt: event.now + receiptMs, schemaVersion: 1 }); return { roomId: room._id, currentVersion: nextVersion };
   },
@@ -102,9 +104,10 @@ export const archiveRoom = mutation({
   args: { roomId: v.id("rooms"), expectedVersion: v.number(), idempotencyKey: v.string() },
   returns: v.object({ roomId: v.id("rooms"), currentVersion: v.number() }),
   handler: async (ctx, args) => {
-    const room = await ctx.db.get(args.roomId); if (!room || room.state !== "active") throw new Error("Not found"); const member = await requireActiveMembership(ctx, room.missionId); await requireWritableMission(ctx, room.missionId); requireRole(member, ["owner", "steward", "builder"]);
+    const room = await ctx.db.get(args.roomId); if (!room) throw new Error("Not found"); const member = await requireActiveMembership(ctx, room.missionId); requireRole(member, ["owner", "steward", "builder"]);
     const scope = `room:${room._id}:archive`; const commandFingerprint = JSON.stringify({ command: "archiveRoom", expectedVersion: args.expectedVersion }); const prior = await receipt(ctx, scope, args.idempotencyKey);
     if (prior) { if (prior.commandFingerprint !== commandFingerprint) throw new Error("Idempotency key reuse with a different command"); return { roomId: room._id, currentVersion: prior.resultVersion }; }
+    if (room.state !== "active") throw new Error("Not found"); await requireWritableMission(ctx, room.missionId);
     if (room.currentVersion !== args.expectedVersion) throw new Error("Room version conflict"); const nextVersion = room.currentVersion + 1; const event = await recordRoomEvent(ctx, room, member, "room.archived", args.idempotencyKey, "Room archived", nextVersion);
     await ctx.db.patch(room._id, { state: "archived", currentVersion: nextVersion, updatedAt: event.now }); await ctx.db.insert("operationReceipts", { scope, idempotencyKey: args.idempotencyKey, commandFingerprint, state: "complete", missionId: room.missionId, eventId: event.eventId, resultVersion: nextVersion, correlationId: `room:${args.idempotencyKey}`, createdAt: event.now, expiresAt: event.now + receiptMs, schemaVersion: 1 }); return { roomId: room._id, currentVersion: nextVersion };
   },

@@ -11,7 +11,13 @@ export type ActiveMembership = {
   state: "active" | "revoked" | "expired";
   scope: string[];
   grantVersion: number;
+  expiresAt?: number;
 };
+
+/** A membership is usable only while its durable state and optional lease are active. */
+export function isActiveMembership(membership: Pick<ActiveMembership, "state" | "expiresAt">, now = Date.now()) {
+  return membership.state === "active" && (membership.expiresAt === undefined || membership.expiresAt > now);
+}
 
 export async function requireAuthenticatedTokenIdentifier(ctx: AuthContext): Promise<string> {
   const identity = await ctx.auth.getUserIdentity();
@@ -46,7 +52,7 @@ export async function requireActiveMembership(
     )
     .unique();
 
-  if (membership === null || membership.state !== "active") {
+  if (membership === null || !isActiveMembership(membership)) {
     throw new Error("Not found");
   }
 
