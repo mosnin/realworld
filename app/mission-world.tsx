@@ -594,6 +594,7 @@ export function MissionWorld() {
       </section>
 
       <main className="world-stage" id="main-content" tabIndex={-1}>
+        {missionWritable ? null : <p aria-label="Archived Mission read-only" role="status">Archived Mission — read-only. Restore it from Manage Mission to resume work.</p>}
         {roomError === null ? null : <p aria-live="polite">{roomError}</p>}
         <div className="stage-toolbar" aria-label="Mission World view controls">
           <button className={!showDirectory ? "is-active" : ""} onClick={() => setShowDirectory(false)} type="button">Map</button>
@@ -601,12 +602,12 @@ export function MissionWorld() {
           <button aria-label="Zoom out" onClick={() => setCanvas((current) => ({ ...current, zoom: clamp(current.zoom - 0.1, 0.7, 1.35) }))} type="button">−</button>
           <button aria-label="Zoom in" onClick={() => setCanvas((current) => ({ ...current, zoom: clamp(current.zoom + 0.1, 0.7, 1.35) }))} type="button">+</button>
           <button onClick={() => setCanvas(defaultCanvasState)} type="button">Fit world</button>
-          <button aria-pressed={canvas.locked} onClick={() => setCanvas((current) => ({ ...current, locked: !current.locked }))} type="button">{canvas.locked ? "Layout locked" : "Layout unlocked"}</button>
+          <button aria-pressed={canvas.locked} disabled={!missionWritable} onClick={() => setCanvas((current) => ({ ...current, locked: !current.locked }))} type="button">{canvas.locked ? "Layout locked" : "Layout unlocked"}</button>
           <span>Alt + arrows moves a focused Room</span>
         </div>
-        <form className="room-create" onSubmit={(event) => { event.preventDefault(); void createRoom(); }}>
+        {missionWritable ? <form className="room-create" onSubmit={(event) => { event.preventDefault(); void createRoom(); }}>
           <label htmlFor="new-room-name">New room</label><input id="new-room-name" onChange={(event) => setNewRoomName(event.target.value)} placeholder="e.g. Sound check" value={newRoomName} /><button type="submit">Create room</button>
-        </form>
+        </form> : null}
         <div className="contours" aria-hidden="true" />
         {showDirectory ? (
           <section className="room-directory" aria-labelledby="directory-heading">
@@ -615,7 +616,7 @@ export function MissionWorld() {
               {visibleRooms.map((room) => (
                 <li key={room.id} className={selectedRoom.id === room.id ? "is-selected" : ""}>
                   <button onClick={() => setSelectedRoomId(room.id)} type="button"><span className={`directory-icon directory-icon--${room.accent}`}><Icon name={room.icon} /></span><span><strong>{room.name}</strong><small>{room.description}</small><em>{room.active} active · {room.agents} agents</em></span></button>
-                  <button className="directory-enter" onClick={() => enterRoom(room.id)} type="button">{room.action}</button>
+                  <button className="directory-enter" disabled={!missionWritable} onClick={() => enterRoom(room.id)} type="button">{room.action}</button>
                 </li>
               ))}
             </ul>
@@ -627,7 +628,7 @@ export function MissionWorld() {
                 {visibleRooms.filter((room) => room.id !== "core").map((room) => <path d={`M ${visibleRooms.find((candidate) => candidate.id === "core")?.x ?? 50} ${visibleRooms.find((candidate) => candidate.id === "core")?.y ?? 46} L ${room.x} ${room.y}`} key={room.id} />)}
                 <path className="world-routes__active" d={`M ${visibleRooms.find((room) => room.id === "core")?.x ?? 50} ${visibleRooms.find((room) => room.id === "core")?.y ?? 46} L ${visibleRooms.find((room) => room.id === "workshop")?.x ?? 74} ${visibleRooms.find((room) => room.id === "workshop")?.y ?? 19}`} />
               </svg>
-              {visibleRooms.map((room) => <RoomLandmark key={room.id} locked={canvas.locked} navigationRooms={visibleRooms} onReposition={repositionRoom} room={room} selected={selectedRoom.id === room.id} onSelect={setSelectedRoomId} onEnter={enterRoom} />)}
+              {visibleRooms.map((room) => <RoomLandmark key={room.id} locked={canvas.locked || !missionWritable} navigationRooms={visibleRooms} onReposition={repositionRoom} room={room} selected={selectedRoom.id === room.id} onSelect={setSelectedRoomId} onEnter={missionWritable ? enterRoom : () => undefined} />)}
               <div className="map-event map-event--call"><span><Icon name="spark" /></span><strong>Open Call</strong><small>UI/UX critique</small><button type="button">Join Call</button></div>
               <div className="map-event map-event--fracture"><span><Icon name="branch" /></span><strong>Fracture</strong><small>Auth session restoration stalls</small><button type="button">Review</button></div>
               <div className="map-event map-event--proof"><span>✓</span><strong>Proof complete</strong><small>Mission authorization contract verified</small></div>
@@ -642,12 +643,12 @@ export function MissionWorld() {
           <div className="inspector-status"><span><i /> {selectedRoom.active} active</span><span><Icon name="agent" /> {selectedRoom.agents} agent{selectedRoom.agents === 1 ? "" : "s"}</span></div>
           <section><h3>In this room</h3><ul className="inspector-people"><li><PersonToken name="Priya" index={0} /> Priya <small>shaping flow</small></li><li><PersonToken name="SonicAgent" index={1} /> SonicAgent <small>running evals</small></li><li><PersonToken name="Marco" index={2} /> Marco <small>reviewing Proof</small></li></ul></section>
           <section><h3>Recent artifacts</h3><ul className="artifact-list"><li>mission-world.tsx <small>UI component</small></li><li>realtime-room-protocol.md <small>systems contract</small></li><li>mission-kernel-contract.md <small>architecture</small></li></ul></section>
-          {activeMission.role === "owner" || activeMission.role === "steward" || activeMission.role === "builder" ? <section className="custom-room-tools"><h3>Room controls</h3><label htmlFor="rename-room">Room name</label><input defaultValue={selectedRoom.name} id="rename-room" key={`${selectedRoom.id}-${selectedRoom.currentVersion}`} onBlur={(event) => void renameSelectedRoom(event.target.value)} /><button className="archive-room" onClick={() => {
+          {missionWritable && (activeMission.role === "owner" || activeMission.role === "steward" || activeMission.role === "builder") ? <section className="custom-room-tools"><h3>Room controls</h3><label htmlFor="rename-room">Room name</label><input defaultValue={selectedRoom.name} id="rename-room" key={`${selectedRoom.id}-${selectedRoom.currentVersion}`} onBlur={(event) => void renameSelectedRoom(event.target.value)} /><button className="archive-room" onClick={() => {
             if (selectedRoom.currentVersion === undefined) return;
             setRoomError(null);
             void archiveRoomMutation({ roomId: selectedRoom.id as Id<"rooms">, expectedVersion: selectedRoom.currentVersion, idempotencyKey: crypto.randomUUID() }).then(() => setSelectedRoomId("")).catch(() => setRoomError("That room changed elsewhere. The live map has been refreshed."));
           }} type="button">Archive room</button></section> : null}
-          <button className="primary-button" onClick={() => enterRoom(selectedRoom.id)} type="button">{selectedRoom.action}</button>
+          <button className="primary-button" disabled={!missionWritable} onClick={() => enterRoom(selectedRoom.id)} type="button">{selectedRoom.action}</button>
           <button className="secondary-button" type="button">Follow Priya</button>
         </aside>
       </main>
