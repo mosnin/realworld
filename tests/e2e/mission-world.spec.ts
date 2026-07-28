@@ -32,3 +32,58 @@ test("keyboard users can move between spatial landmarks without pointer input", 
   await expect(page.getByRole("complementary", { name: "Branch Lab" })).toBeVisible();
   await expect(page.getByRole("button", { name: /Branch Lab\. 5 active people/i })).toBeFocused();
 });
+
+test("view preferences persist density, accent, reduced decoration, and default room list", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Open world preferences" }).click();
+  const dialog = page.getByRole("dialog", { name: "World preferences" });
+  await dialog.getByRole("button", { name: "compact" }).click();
+  await dialog.getByRole("button", { name: "teal accent" }).click();
+  await dialog.getByRole("button", { name: "Room directory" }).click();
+  await dialog.getByRole("checkbox", { name: /Reduced decoration/i }).check();
+  await page.getByRole("button", { name: "Close preferences" }).click();
+
+  await expect(page.getByRole("heading", { name: "Mission rooms" })).toBeVisible();
+  await expect(page.locator(".mission-world")).toHaveAttribute("data-density", "compact");
+  await expect(page.locator(".mission-world")).toHaveAttribute("data-accent", "teal");
+  await expect(page.locator(".mission-world")).toHaveAttribute("data-decoration", "reduced");
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Mission rooms" })).toBeVisible();
+  await expect(page.locator(".mission-world")).toHaveAttribute("data-accent", "teal");
+});
+
+test("reduced-motion presentation retains a usable Mission World", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+
+  await expect(page.getByRole("button", { name: /Workshop\. 4 active people/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Room directory" })).toBeVisible();
+});
+
+test("a participant can customize and persist a personal canvas layout", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByLabel("New room").fill("Release Cabin");
+  await page.getByRole("button", { name: "Create room" }).click();
+  await expect(page.getByRole("complementary", { name: "Release Cabin" })).toBeVisible();
+
+  const nameInput = page.getByLabel("Room name");
+  await nameInput.fill("Launch Cabin");
+  await nameInput.press("Tab");
+  await expect(page.getByRole("heading", { name: "Launch Cabin" })).toBeVisible();
+
+  const customRoom = page.getByRole("button", { name: /Launch Cabin\. 0 active people/i });
+  await customRoom.focus();
+  await page.keyboard.press("Alt+ArrowRight");
+  await page.getByRole("button", { name: "Zoom in" }).click();
+  await page.getByRole("button", { name: "Layout unlocked" }).click();
+  await page.reload();
+
+  await expect(page.getByRole("button", { name: /Launch Cabin\. 0 active people/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Layout locked" })).toBeVisible();
+  await page.getByRole("button", { name: /Launch Cabin\. 0 active people/i }).click();
+  await page.getByRole("button", { name: "Archive room" }).click();
+  await expect(page.getByRole("button", { name: /Launch Cabin\. 0 active people/i })).toHaveCount(0);
+});
