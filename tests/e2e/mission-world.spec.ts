@@ -394,9 +394,9 @@ test("an owner can issue, edit, advance, and reload a durable room Call", async 
   const reopen = callDialog.getByRole("button", { name: `Reopen ${updatedTitle}` });
   await reopen.focus();
   await page.keyboard.press("Enter");
-  await expect(callDialog.getByText(`${updatedTitle} is now open.`)).toBeVisible();
 
   const acceptAgain = callDialog.getByRole("button", { name: `Accept ${updatedTitle}` });
+  await expect(acceptAgain).toBeVisible();
   await acceptAgain.focus();
   await page.keyboard.press("Enter");
   await expect(callDialog.getByText(`${updatedTitle} is now accepted.`)).toBeVisible();

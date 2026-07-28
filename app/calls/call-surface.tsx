@@ -62,6 +62,7 @@ export function CallSurface({
   const firstFieldRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const openerRef = useRef<HTMLButtonElement | null>(null);
+  const pendingIntentRef = useRef<string | null>(null);
   const [open, setOpen] = useState(false);
   const [selectedCallId, setSelectedCallId] = useState<Id<"calls"> | null>(null);
   const [title, setTitle] = useState("");
@@ -97,13 +98,17 @@ export function CallSurface({
   }, []);
 
   useEffect(() => {
+    pendingIntentRef.current = pendingIntent;
+  }, [pendingIntent]);
+
+  useEffect(() => {
     if (!open) return;
     const frame = window.requestAnimationFrame(() => {
       const firstInteractive = panelRef.current?.querySelector<HTMLElement>("button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled])");
       (firstFieldRef.current ?? firstInteractive)?.focus();
     });
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && pendingIntent === null) closeSurface();
+      if (event.key === "Escape" && pendingIntentRef.current === null) closeSurface();
       if (event.key !== "Tab" || !panelRef.current) return;
       const focusable = Array.from(panelRef.current.querySelectorAll<HTMLElement>("button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled])"));
       if (focusable.length === 0) return;
@@ -122,7 +127,7 @@ export function CallSurface({
       window.cancelAnimationFrame(frame);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [closeSurface, open, pendingIntent]);
+  }, [closeSurface, open]);
 
   function resetComposer(clearStatus = true) {
     setSelectedCallId(null);
