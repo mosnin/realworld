@@ -233,6 +233,17 @@ describe("missions", () => {
       expect(archiveReceipt).toMatchObject({ eventId: archived.eventId, resultVersion: 2 });
     });
   });
+
+  it("edits, archives, and restores a private Mission with OCC and replayable events", async () => {
+    const { t, asOwner, result } = await createMission();
+    const edited = await asOwner.mutation(api.missions.editPrivateMission, { missionId: result.missionId, title: "Living world", summary: "An edited private Mission.", expectedVersion: 1, idempotencyKey: "edit-1", correlationId: "edit-c" });
+    expect(edited.currentVersion).toBe(2);
+    expect(await asOwner.mutation(api.missions.editPrivateMission, { missionId: result.missionId, title: "Living world", summary: "An edited private Mission.", expectedVersion: 1, idempotencyKey: "edit-1", correlationId: "edit-c" })).toEqual(edited);
+    const archived = await asOwner.mutation(api.missions.archivePrivateMission, { missionId: result.missionId, expectedVersion: 2, idempotencyKey: "archive-after-edit", correlationId: "archive-c" });
+    const restored = await asOwner.mutation(api.missions.restorePrivateMission, { missionId: result.missionId, expectedVersion: archived.currentVersion, idempotencyKey: "restore-1", correlationId: "restore-c" });
+    expect(restored.currentVersion).toBe(4);
+    await t.run(async (ctx) => { const mission = await ctx.db.get(result.missionId); const events = await ctx.db.query("missionEvents").withIndex("by_mission_and_sequence", (query) => query.eq("missionId", result.missionId)).collect(); expect(mission).toMatchObject({ title: "Living world", lifecycle: "active", currentVersion: 4 }); expect(events.map((event) => event.type)).toEqual(["mission.created", "mission.updated", "mission.archived", "mission.restored"]); });
+  });
 });
 
 describe("invites and durable canvas", () => {

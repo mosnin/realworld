@@ -7,6 +7,7 @@ import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { SessionControl } from "@/app/auth/session-control";
 import { OwnerInvitePanel } from "@/app/invitations/owner-invite-panel";
+import { MissionControls } from "@/app/missions/mission-controls";
 import { Icon, type IconName } from "@/app/ui/icons";
 
 type RoomId = string;
@@ -565,6 +566,7 @@ export function MissionWorld() {
             <Icon name="plus" /> Invite collaborators
           </button>
         ) : null}
+        <MissionControls mission={activeMission} />
         <button className="icon-button" aria-label="Search" type="button"><Icon name="search" /></button>
         <button className="icon-button" aria-label="Notifications" type="button"><Icon name="bell" /></button>
         <button className="icon-button" aria-expanded={preferencesOpen} aria-label="Open world preferences" onClick={() => setPreferencesOpen(true)} type="button"><Icon name="settings" /></button>

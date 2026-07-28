@@ -6,6 +6,7 @@ import { requireActiveMembership, requireAuthenticatedTokenIdentifier, requireEx
 
 const receiptRetentionMs = 30 * 24 * 60 * 60 * 1000;
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const missionLifecycle = v.union(v.literal("active"), v.literal("archived"), v.literal("pendingDeletion"), v.literal("deletedTombstone"));
 
 const missionResult = v.object({
   missionId: v.id("missions"),
@@ -220,7 +221,7 @@ export const getPrivateMissionBySlug = query({
 
 export const listMyMissions = query({
   args: {},
-  returns: v.array(v.object({ _id: v.id("missions"), title: v.string(), slug: v.string(), summary: v.string(), templateKey: v.optional(v.string()), role: v.string() })),
+  returns: v.array(v.object({ _id: v.id("missions"), title: v.string(), slug: v.string(), summary: v.string(), templateKey: v.optional(v.string()), role: v.string(), lifecycle: missionLifecycle, currentVersion: v.number() })),
   handler: async (ctx) => {
     const tokenIdentifier = await requireAuthenticatedTokenIdentifier(ctx);
     const principal = await ctx.db
@@ -230,8 +231,38 @@ export const listMyMissions = query({
     if (principal === null) return [];
     if (principal.type !== "human" || principal.state !== "active") throw new Error("Unauthorized");
     const memberships = await ctx.db.query("missionMembers").withIndex("by_principal_and_state", q => q.eq("principalId", principal._id).eq("state", "active")).take(100);
-    const values = await Promise.all(memberships.map(async membership => { const mission = await ctx.db.get(membership.missionId); return mission === null ? null : { _id: mission._id, title: mission.title, slug: mission.slug, summary: mission.summary, templateKey: mission.templateKey, role: membership.role }; }));
+    const values = await Promise.all(memberships.map(async membership => { const mission = await ctx.db.get(membership.missionId); if (mission === null || (mission.lifecycle !== "active" && membership.role !== "owner")) return null; return { _id: mission._id, title: mission.title, slug: mission.slug, summary: mission.summary, templateKey: mission.templateKey, role: membership.role, lifecycle: mission.lifecycle, currentVersion: mission.currentVersion }; }));
     return values.filter((value): value is NonNullable<typeof value> => value !== null);
+  },
+});
+
+export const editPrivateMission = mutation({
+  args: { missionId: v.id("missions"), title: v.string(), summary: v.string(), expectedVersion: v.number(), idempotencyKey: v.string(), correlationId: v.string() },
+  returns: missionResult,
+  handler: async (ctx, args) => {
+    const membership = await requireActiveMembership(ctx, args.missionId); requireRole(membership, ["owner"]);
+    const title = requireNonBlank(args.title, "title", 160); const summary = requireNonBlank(args.summary, "summary", 1_000);
+    const scope = `mission:${args.missionId}:edit`; const commandFingerprint = JSON.stringify({ command: "editPrivateMission", title, summary, expectedVersion: args.expectedVersion });
+    const prior = await ctx.db.query("operationReceipts").withIndex("by_scope_and_idempotency_key", (index) => index.eq("scope", scope).eq("idempotencyKey", args.idempotencyKey)).unique();
+    if (prior) { if (prior.commandFingerprint !== commandFingerprint) throw new Error("Idempotency key reuse with a different command"); return { missionId: prior.missionId, eventId: prior.eventId, operationReceiptId: prior._id, currentVersion: prior.resultVersion }; }
+    const mission = await ctx.db.get(args.missionId); if (!mission || mission.visibility !== "private" || mission.lifecycle !== "active") throw new Error("Not found"); if (mission.currentVersion !== args.expectedVersion) throw new Error("Mission version conflict");
+    const now = Date.now(); const nextVersion = mission.currentVersion + 1; const sequence = mission.eventSequence + 1; await ctx.db.patch(mission._id, { title, summary, currentVersion: nextVersion, eventSequence: sequence, updatedAt: now });
+    const eventId = await ctx.db.insert("missionEvents", { missionId: mission._id, missionSequence: sequence, type: "mission.updated", aggregateType: "mission", aggregateId: mission._id, actorPrincipalId: membership.principalId, effectiveRole: membership.role, correlationId: args.correlationId, idempotencyKey: args.idempotencyKey, publicSummary: "Mission details updated", beforeVersion: mission.currentVersion, afterVersion: nextVersion, createdAt: now, schemaVersion: 1 });
+    const operationReceiptId = await ctx.db.insert("operationReceipts", { scope, idempotencyKey: args.idempotencyKey, commandFingerprint, state: "complete", missionId: mission._id, eventId, resultVersion: nextVersion, correlationId: args.correlationId, createdAt: now, expiresAt: now + receiptRetentionMs, schemaVersion: 1 }); return { missionId: mission._id, eventId, operationReceiptId, currentVersion: nextVersion };
+  },
+});
+
+export const restorePrivateMission = mutation({
+  args: { missionId: v.id("missions"), expectedVersion: v.number(), idempotencyKey: v.string(), correlationId: v.string() },
+  returns: missionResult,
+  handler: async (ctx, args) => {
+    const membership = await requireActiveMembership(ctx, args.missionId); requireRole(membership, ["owner"]);
+    const scope = `mission:${args.missionId}:restore`; const commandFingerprint = JSON.stringify({ command: "restorePrivateMission", expectedVersion: args.expectedVersion }); const prior = await ctx.db.query("operationReceipts").withIndex("by_scope_and_idempotency_key", (index) => index.eq("scope", scope).eq("idempotencyKey", args.idempotencyKey)).unique();
+    if (prior) { if (prior.commandFingerprint !== commandFingerprint) throw new Error("Idempotency key reuse with a different command"); return { missionId: prior.missionId, eventId: prior.eventId, operationReceiptId: prior._id, currentVersion: prior.resultVersion }; }
+    const mission = await ctx.db.get(args.missionId); if (!mission || mission.visibility !== "private" || mission.lifecycle !== "archived") throw new Error("Not found"); if (mission.currentVersion !== args.expectedVersion) throw new Error("Mission version conflict");
+    const now = Date.now(); const nextVersion = mission.currentVersion + 1; const sequence = mission.eventSequence + 1; await ctx.db.patch(mission._id, { lifecycle: "active", currentVersion: nextVersion, eventSequence: sequence, updatedAt: now });
+    const eventId = await ctx.db.insert("missionEvents", { missionId: mission._id, missionSequence: sequence, type: "mission.restored", aggregateType: "mission", aggregateId: mission._id, actorPrincipalId: membership.principalId, effectiveRole: membership.role, correlationId: args.correlationId, idempotencyKey: args.idempotencyKey, publicSummary: "Mission restored", beforeVersion: mission.currentVersion, afterVersion: nextVersion, createdAt: now, schemaVersion: 1 });
+    const operationReceiptId = await ctx.db.insert("operationReceipts", { scope, idempotencyKey: args.idempotencyKey, commandFingerprint, state: "complete", missionId: mission._id, eventId, resultVersion: nextVersion, correlationId: args.correlationId, createdAt: now, expiresAt: now + receiptRetentionMs, schemaVersion: 1 }); return { missionId: mission._id, eventId, operationReceiptId, currentVersion: nextVersion };
   },
 });
 
