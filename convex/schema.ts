@@ -103,6 +103,7 @@ export default defineSchema({
     roomId: v.optional(v.id("rooms")),
     title: v.string(),
     intent: v.string(),
+    dependencyMoveIds: v.optional(v.array(v.id("moves"))),
     state: v.union(
       v.literal("proposed"),
       v.literal("ready"),
@@ -127,7 +128,7 @@ export default defineSchema({
   missionEvents: defineTable({
     missionId: v.id("missions"),
     missionSequence: v.number(),
-    type: v.union(v.literal("mission.created"), v.literal("mission.updated"), v.literal("mission.constitutionUpdated"), v.literal("mission.archived"), v.literal("mission.restored"), v.literal("membership.invited"), v.literal("membership.joined"), v.literal("invite.revoked"), v.literal("room.created"), v.literal("room.renamed"), v.literal("room.archived"), v.literal("room.layoutUpdated")),
+    type: v.union(v.literal("mission.created"), v.literal("mission.updated"), v.literal("mission.constitutionUpdated"), v.literal("mission.archived"), v.literal("mission.restored"), v.literal("membership.invited"), v.literal("membership.joined"), v.literal("invite.revoked"), v.literal("room.created"), v.literal("room.renamed"), v.literal("room.archived"), v.literal("room.layoutUpdated"), v.literal("move.created"), v.literal("move.updated"), v.literal("move.transitioned")),
     aggregateType: v.literal("mission"),
     aggregateId: v.id("missions"),
     actorPrincipalId: v.id("principals"),
@@ -153,6 +154,7 @@ export default defineSchema({
     missionId: v.id("missions"),
     eventId: v.id("missionEvents"),
     roomId: v.optional(v.id("rooms")),
+    moveId: v.optional(v.id("moves")),
     resultVersion: v.number(),
     correlationId: v.string(),
     createdAt: v.number(),

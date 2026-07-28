@@ -16,6 +16,7 @@ import type * as launch from "../launch.js";
 import type * as lib_auth from "../lib/auth.js";
 import type * as lib_mission_templates from "../lib/mission_templates.js";
 import type * as missions from "../missions.js";
+import type * as moves from "../moves.js";
 
 import type {
   ApiFromModules,
@@ -32,6 +33,7 @@ declare const fullApi: ApiFromModules<{
   "lib/auth": typeof lib_auth;
   "lib/mission_templates": typeof lib_mission_templates;
   missions: typeof missions;
+  moves: typeof moves;
 }>;
 
 /**
