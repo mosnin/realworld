@@ -201,6 +201,25 @@ function bindProviderMethod<Arguments extends unknown[], Result>(
   return (...args) => Reflect.apply(method, receiver, args) as Result;
 }
 
+type ProviderOperation = "connection" | "subscription" | "publish" | "cleanup";
+
+function providerOperationError(operation: ProviderOperation): Error {
+  switch (operation) {
+    case "connection": return new Error("Realtime connection is unavailable");
+    case "subscription": return new Error("Realtime subscription is unavailable");
+    case "publish": return new Error("Realtime publish is unavailable");
+    case "cleanup": return new Error("Realtime cleanup failed");
+  }
+}
+
+async function awaitProvider<Return>(operation: ProviderOperation, callback: () => Return | Promise<Return>): Promise<Return> {
+  try {
+    return await callback();
+  } catch {
+    throw providerOperationError(operation);
+  }
+}
+
 /**
  * The provider client is supplied by application code. Check its complete
  * surface, including every granted channel, before it can register a listener
@@ -394,9 +413,49 @@ export class DevelopmentAblyRoomTransport implements RealtimeTransportAdapter {
         input.onFailure(errorFromConnectionState(state));
       }
     };
+    const awaitStartupConnectionOperation = async (
+      operation: () => void | Promise<void>,
+      undoLateOperation: () => void | Promise<void>,
+    ) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let settled = false;
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const finish = (error?: unknown) => {
+            if (settled) return;
+            settled = true;
+            if (error === undefined) resolve();
+            else reject(error);
+          };
+          timer = this.timer.setTimeout(
+            () => finish(providerOperationError("connection")),
+            this.connectionReadyTimeoutMs,
+          );
+          void (async () => {
+            try {
+              await awaitProvider("connection", operation);
+              if (settled) {
+                try {
+                  await awaitProvider("connection", undoLateOperation);
+                } catch {
+                  // Startup already failed; contain late provider teardown errors.
+                }
+                return;
+              }
+              finish();
+            } catch (error) {
+              finish(error);
+            }
+          })();
+        });
+      } finally {
+        if (timer !== undefined) this.timer.clearTimeout(timer);
+      }
+    };
     const waitForConnectionReady = async () => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       let finish: ((error?: unknown) => void) | undefined;
+      let primaryFailure: unknown;
       const connected = () => finish?.();
       const failed = (state: AblyConnectionState) => finish?.(errorFromConnectionState(state));
       try {
@@ -408,19 +467,51 @@ export class DevelopmentAblyRoomTransport implements RealtimeTransportAdapter {
             if (error === undefined) resolve();
             else reject(error);
           };
-          client.connection.on("connected", connected);
-          client.connection.on(connectionFailureEvents, failed);
           timer = this.timer.setTimeout(() => finish?.(new Error("Realtime connection readiness timed out")), this.connectionReadyTimeoutMs);
-          try {
-            client.connect();
-          } catch (error) {
-            finish(error);
-          }
+          void (async () => {
+            const removeLateListener = async (events: string | string[], listener: (state: AblyConnectionState) => void) => {
+              try {
+                await awaitProvider("connection", () => client.connection.off(events, listener));
+              } catch {
+                // Startup is already settled; never surface a late teardown failure.
+              }
+            };
+            try {
+              if (settled) return;
+              await awaitProvider("connection", () => client.connection.on("connected", connected));
+              if (settled) {
+                await removeLateListener("connected", connected);
+                return;
+              }
+              await awaitProvider("connection", () => client.connection.on(connectionFailureEvents, failed));
+              if (settled) {
+                await removeLateListener(connectionFailureEvents, failed);
+                return;
+              }
+              await awaitProvider("connection", () => client.connect());
+              if (settled) return;
+            } catch (error) {
+              finish(error);
+            }
+          })();
         });
+      } catch (error) {
+        primaryFailure = error;
+        throw error;
       } finally {
         if (timer !== undefined) this.timer.clearTimeout(timer);
-        client.connection.off("connected", connected);
-        client.connection.off(connectionFailureEvents, failed);
+        let removalFailed = false;
+        try {
+          await awaitProvider("connection", () => client.connection.off("connected", connected));
+        } catch {
+          removalFailed = true;
+        }
+        try {
+          await awaitProvider("connection", () => client.connection.off(connectionFailureEvents, failed));
+        } catch {
+          removalFailed = true;
+        }
+        if (primaryFailure === undefined && removalFailed) throw providerOperationError("connection");
       }
     };
 
@@ -430,9 +521,9 @@ export class DevelopmentAblyRoomTransport implements RealtimeTransportAdapter {
       const errors: unknown[] = [];
       const capture = async (operation: () => void | Promise<void>) => {
         try {
-          await operation();
-        } catch (error) {
-          errors.push(error);
+          await awaitProvider("cleanup", operation);
+        } catch {
+          errors.push(providerOperationError("cleanup"));
         }
       };
       await capture(() => client.connection.off(connectionFailureEvents, connectionFailure));
@@ -447,7 +538,10 @@ export class DevelopmentAblyRoomTransport implements RealtimeTransportAdapter {
     };
 
     try {
-      client.connection.on(connectionFailureEvents, connectionFailure);
+      await awaitStartupConnectionOperation(
+        () => client.connection.on(connectionFailureEvents, connectionFailure),
+        () => client.connection.off(connectionFailureEvents, connectionFailure),
+      );
       for (const grant of granted) {
         const channel = getChannel(grant);
         if (!grant.operations.has("subscribe")) continue;
@@ -462,10 +556,10 @@ export class DevelopmentAblyRoomTransport implements RealtimeTransportAdapter {
           }
         };
         if (grant.kind === "presence") {
-          await channel.presence.subscribe(listener);
+          await awaitProvider("subscription", () => channel.presence.subscribe(listener));
           listeners.push({ channel, listener, presence: true });
         } else {
-          await channel.subscribe(listener);
+          await awaitProvider("subscription", () => channel.subscribe(listener));
           listeners.push({ channel, listener, presence: false });
         }
       }
@@ -528,20 +622,20 @@ export class DevelopmentAblyRoomTransport implements RealtimeTransportAdapter {
         if (target === "presence") {
           if (message.kind === "presence.leave") {
             if (enteredPresence.delete(channel)) {
-              await channel.presence.leave(message);
+              await awaitProvider("publish", () => channel.presence.leave(message));
               this.emitTelemetry({ event: "signal_published", kind: message.kind, family: target });
             }
             return;
           }
-          if (enteredPresence.has(channel)) await channel.presence.update(message);
+          if (enteredPresence.has(channel)) await awaitProvider("publish", () => channel.presence.update(message));
           else {
-            await channel.presence.enter(message);
+            await awaitProvider("publish", () => channel.presence.enter(message));
             enteredPresence.add(channel);
           }
           this.emitTelemetry({ event: "signal_published", kind: message.kind, family: target });
           return;
         }
-        await channel.publish(message.kind, message);
+        await awaitProvider("publish", () => channel.publish(message.kind, message));
         this.emitTelemetry({ event: "signal_published", kind: message.kind, family: target });
       },
     };

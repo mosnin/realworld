@@ -105,6 +105,12 @@ function fakeClient(autoConnect = true) {
   return { client, channels, listeners, presenceListeners, connectionListeners, get, on, off, emit };
 }
 
+async function expectGenericProviderFailure(action: () => Promise<unknown>, providerSecret: string) {
+  const failure = await action().catch((error: unknown) => error);
+  expect(failure).toEqual(expect.objectContaining({ message: expect.stringMatching(/^Realtime /) }));
+  expect(String(failure)).not.toContain(providerSecret);
+}
+
 describe("development Ably room transport", () => {
   it("requires an explicitly injected client factory and never falls back to an SDK or network path", async () => {
     const hostileFactoryOptions = Object.defineProperty({ environment: "preview" }, "clientFactory", {
@@ -350,6 +356,307 @@ describe("development Ably room transport", () => {
     }));
     expect(JSON.stringify([...reads])).not.toContain(providerSecret);
     expect(fake.client.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("contains provider secrets from startup on, subscribe, presence subscribe, and connect failures", async () => {
+    const cases: Array<{
+      name: string;
+      capability: Record<string, string[]>;
+      configure: (fake: ReturnType<typeof fakeClient>, providerSecret: string) => AblyRealtimeClient;
+    }> = [
+      {
+        name: "connection on",
+        capability: { [names().world]: ["subscribe"] },
+        configure: (fake, providerSecret) => ({
+          ...fake.client,
+          connection: { ...fake.client.connection, on: vi.fn(() => { throw new Error(providerSecret); }) },
+        }),
+      },
+      {
+        name: "channel subscribe",
+        capability: { [names().world]: ["subscribe"] },
+        configure: (fake, providerSecret) => {
+          const world = fake.get(names().world) as unknown as { subscribe: (listener: unknown) => Promise<unknown> };
+          world.subscribe = vi.fn(async () => { throw new Error(providerSecret); });
+          return fake.client;
+        },
+      },
+      {
+        name: "presence subscribe",
+        capability: { [names().presence]: ["subscribe"] },
+        configure: (fake, providerSecret) => {
+          const presence = fake.get(names().presence).presence as unknown as { subscribe: (listener: unknown) => Promise<void> };
+          presence.subscribe = vi.fn(async () => { throw new Error(providerSecret); });
+          return fake.client;
+        },
+      },
+      {
+        name: "connect",
+        capability: { [names().world]: ["subscribe"] },
+        configure: (fake, providerSecret) => ({ ...fake.client, connect: vi.fn(() => { throw new Error(providerSecret); }) }),
+      },
+    ];
+
+    for (const { name, capability, configure } of cases) {
+      const fake = fakeClient();
+      const providerSecret = `provider-secret-startup-${name}`;
+      const adapter = createDevelopmentAblyRoomTransport({
+        environment: "preview",
+        clientFactory: async () => configure(fake, providerSecret),
+        now: () => 1_000_000,
+      });
+      await expectGenericProviderFailure(() => adapter.connect({
+        scope,
+        token: tokenRequest(capability),
+        connectionEpoch: 1,
+        onMessage: vi.fn(),
+        onFailure: vi.fn(),
+      }), providerSecret);
+    }
+  });
+
+  it("contains rejected thenables from void on, connect, and off methods without hangs or unhandled provider rejections", async () => {
+    const run = async (
+      name: string,
+      configure: (fake: ReturnType<typeof fakeClient>, providerSecret: string, cleanupSecret: string) => AblyRealtimeClient,
+      expectedMessage = "Realtime connection is unavailable",
+    ) => {
+      const fake = fakeClient();
+      const providerSecret = `provider-secret-thenable-${name}`;
+      const cleanupSecret = `provider-secret-cleanup-thenable-${name}`;
+      const unhandled: unknown[] = [];
+      const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+      process.on("unhandledRejection", observeUnhandled);
+      try {
+        const adapter = createDevelopmentAblyRoomTransport({
+          environment: "preview",
+          clientFactory: async () => configure(fake, providerSecret, cleanupSecret),
+          connectionReadyTimeoutMs: 5,
+          now: () => 1_000_000,
+        });
+        const failure = await adapter.connect({
+          scope,
+          token: tokenRequest({ [names().world]: ["subscribe"] }),
+          connectionEpoch: 1,
+          onMessage: vi.fn(),
+          onFailure: vi.fn(),
+        }).catch((error: unknown) => error);
+        expect(failure).toEqual(expect.objectContaining({ message: expectedMessage }));
+        expect(String(failure)).not.toContain(providerSecret);
+        expect(String(failure)).not.toContain(cleanupSecret);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(unhandled).toEqual([]);
+      } finally {
+        process.off("unhandledRejection", observeUnhandled);
+      }
+    };
+
+    await run("on-with-cleanup", (fake, providerSecret, cleanupSecret) => ({
+      ...fake.client,
+      connection: {
+        ...fake.client.connection,
+        on: vi.fn((events, listener) => {
+          fake.on(events, listener);
+          return Promise.reject(new Error(providerSecret));
+        }),
+        off: vi.fn(() => Promise.reject(new Error(cleanupSecret))),
+      },
+    }));
+    await run("connect-with-cleanup", (fake, providerSecret, cleanupSecret) => ({
+      ...fake.client,
+      connect: vi.fn(() => Promise.reject(new Error(providerSecret))),
+      connection: { ...fake.client.connection, off: vi.fn(() => Promise.reject(new Error(cleanupSecret))) },
+    }));
+    await run("off", (fake, _providerSecret, cleanupSecret) => ({
+      ...fake.client,
+      connection: { ...fake.client.connection, off: vi.fn(() => Promise.reject(new Error(cleanupSecret))) },
+    }));
+  });
+
+  it("keeps a late connection-on thenable inert after the readiness deadline", async () => {
+    const fake = fakeClient();
+    const providerSecret = "provider-secret-late-connection-on";
+    let resolveFirstOn: (() => void) | undefined;
+    const firstOn = new Promise<void>((resolve) => { resolveFirstOn = resolve; });
+    const on = vi.fn(() => {
+      if (on.mock.calls.length === 1) return firstOn;
+      throw new Error(providerSecret);
+    });
+    let deadline: (() => void) | undefined;
+    const timer = {
+      setTimeout: vi.fn((callback: () => void, delayMs: number) => {
+        expect(delayMs).toBe(5);
+        deadline = callback;
+        return 0 as unknown as ReturnType<typeof setTimeout>;
+      }),
+      clearTimeout: vi.fn(),
+    };
+    const adapter = createDevelopmentAblyRoomTransport({
+      environment: "preview",
+      clientFactory: async () => ({ ...fake.client, connection: { ...fake.client.connection, on } }),
+      connectionReadyTimeoutMs: 5,
+      timer,
+      now: () => 1_000_000,
+    });
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      const pending = adapter.connect({
+        scope,
+        token: tokenRequest({ [names().world]: ["subscribe"] }),
+        connectionEpoch: 1,
+        onMessage: vi.fn(),
+        onFailure: vi.fn(),
+      });
+      await vi.waitFor(() => expect(on).toHaveBeenCalledTimes(1));
+      deadline?.();
+      const failure = await pending.catch((error: unknown) => error);
+      expect(failure).toEqual(expect.objectContaining({ message: "Realtime connection is unavailable" }));
+      expect(String(failure)).not.toContain(providerSecret);
+
+      resolveFirstOn?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(on).toHaveBeenCalledTimes(1);
+      expect(fake.client.connect).not.toHaveBeenCalled();
+      expect(fake.connectionListeners).toEqual([]);
+      expect(fake.listeners).toEqual(new Map());
+      expect(fake.presenceListeners).toEqual(new Map());
+      expect(fake.client.close).toHaveBeenCalledTimes(1);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
+  it("contains provider secrets from publish and every presence mutation", async () => {
+    const run = async (
+      name: string,
+      action: (subscription: Awaited<ReturnType<ReturnType<typeof createDevelopmentAblyRoomTransport>["connect"]>>) => Promise<unknown>,
+      configure: (fake: ReturnType<typeof fakeClient>, providerSecret: string) => void,
+    ) => {
+      const fake = fakeClient();
+      const providerSecret = `provider-secret-publish-${name}`;
+      configure(fake, providerSecret);
+      const adapter = createDevelopmentAblyRoomTransport({ environment: "preview", clientFactory: async () => fake.client, now: () => 1_000_000 });
+      const subscription = await adapter.connect({
+        scope,
+        token: tokenRequest({ [names().world]: ["publish"], [names().presence]: ["presence"] }),
+        connectionEpoch: 1,
+        onMessage: vi.fn(),
+        onFailure: vi.fn(),
+      });
+      await expectGenericProviderFailure(() => action(subscription), providerSecret);
+    };
+
+    await run("publish", async (subscription) => { await subscription.publish!(envelope("world.transition", "provider-publish")); }, (fake, providerSecret) => {
+      const world = fake.get(names().world) as unknown as { publish: (name: string, data: unknown) => Promise<unknown> };
+      world.publish = vi.fn(async () => { throw new Error(providerSecret); });
+    });
+    await run("presence-enter", async (subscription) => { await subscription.publish!(envelope("presence.heartbeat", "provider-enter")); }, (fake, providerSecret) => {
+      const presence = fake.get(names().presence).presence as unknown as { enter: (data?: unknown) => Promise<void> };
+      presence.enter = vi.fn(async () => { throw new Error(providerSecret); });
+    });
+    await run("presence-update", async (subscription) => {
+      await subscription.publish!(envelope("presence.heartbeat", "provider-update-1"));
+      await subscription.publish!(envelope("presence.heartbeat", "provider-update-2"));
+    }, (fake, providerSecret) => {
+      const presence = fake.get(names().presence).presence as unknown as { update: (data?: unknown) => Promise<void> };
+      presence.update = vi.fn(async () => { throw new Error(providerSecret); });
+    });
+    await run("presence-leave", async (subscription) => {
+      await subscription.publish!(envelope("presence.heartbeat", "provider-leave-1"));
+      await subscription.publish!(envelope("presence.leave", "provider-leave-2"));
+    }, (fake, providerSecret) => {
+      const presence = fake.get(names().presence).presence as unknown as { leave: (data?: unknown) => Promise<void> };
+      presence.leave = vi.fn(async () => { throw new Error(providerSecret); });
+    });
+  });
+
+  it("uses the generic startup failure over cleanup failures and performs best-effort idempotent cleanup", async () => {
+    const fake = fakeClient();
+    const startupSecret = "provider-secret-startup-precedence";
+    const cleanupSecret = "provider-secret-cleanup-precedence";
+    const world = fake.get(names().world) as unknown as {
+      subscribe: (listener: unknown) => Promise<unknown>;
+      detach: () => Promise<void>;
+    };
+    world.subscribe = vi.fn(async () => { throw new Error(startupSecret); });
+    world.detach = vi.fn(async () => { throw new Error(cleanupSecret); });
+    const close = vi.fn(() => { throw new Error(cleanupSecret); });
+    const startupAdapter = createDevelopmentAblyRoomTransport({
+      environment: "preview",
+      clientFactory: async () => ({ ...fake.client, close }),
+      now: () => 1_000_000,
+    });
+    await expectGenericProviderFailure(() => startupAdapter.connect({
+      scope,
+      token: tokenRequest({ [names().world]: ["subscribe"] }),
+      connectionEpoch: 1,
+      onMessage: vi.fn(),
+      onFailure: vi.fn(),
+    }), startupSecret);
+    expect(world.detach).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledTimes(1);
+
+    const cleanupFake = fakeClient();
+    const cleanupWorld = cleanupFake.get(names().world) as unknown as {
+      unsubscribe: (listener: unknown) => void;
+      detach: () => Promise<void>;
+    };
+    const cleanupPresence = cleanupFake.get(names().presence).presence as unknown as {
+      unsubscribe: (listener: unknown) => void;
+      leave: (data?: unknown) => Promise<void>;
+    };
+    cleanupWorld.unsubscribe = vi.fn(() => { throw new Error(cleanupSecret); });
+    cleanupWorld.detach = vi.fn(async () => { throw new Error(cleanupSecret); });
+    cleanupPresence.unsubscribe = vi.fn(() => { throw new Error(cleanupSecret); });
+    cleanupPresence.leave = vi.fn(async () => { throw new Error(cleanupSecret); });
+    let offCalls = 0;
+    cleanupFake.off.mockImplementation(() => {
+      offCalls += 1;
+      if (offCalls > 2) throw new Error(cleanupSecret);
+    });
+    const cleanupClose = vi.fn(() => { throw new Error(cleanupSecret); });
+    const cleanupAdapter = createDevelopmentAblyRoomTransport({
+      environment: "preview",
+      clientFactory: async () => ({ ...cleanupFake.client, close: cleanupClose }),
+      now: () => 1_000_000,
+    });
+    const subscription = await cleanupAdapter.connect({
+      scope,
+      token: tokenRequest({ [names().world]: ["subscribe"], [names().presence]: ["presence", "subscribe"] }),
+      connectionEpoch: 1,
+      onMessage: vi.fn(),
+      onFailure: vi.fn(),
+    });
+    await subscription.publish?.(envelope("presence.heartbeat", "cleanup-presence"));
+    await expectGenericProviderFailure(async () => { await subscription.unsubscribe(); }, cleanupSecret);
+    await expect(subscription.unsubscribe()).resolves.toBeUndefined();
+    expect(cleanupWorld.unsubscribe).toHaveBeenCalledTimes(1);
+    expect(cleanupPresence.unsubscribe).toHaveBeenCalledTimes(1);
+    expect(cleanupPresence.leave).toHaveBeenCalledTimes(1);
+    expect(cleanupWorld.detach).toHaveBeenCalledTimes(1);
+    expect(cleanupClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps local capability and envelope validation failures distinct from a provider publish failure", async () => {
+    const fake = fakeClient();
+    const providerSecret = "provider-secret-should-not-run";
+    const world = fake.get(names().world) as unknown as { publish: (name: string, data: unknown) => Promise<unknown> };
+    world.publish = vi.fn(async () => { throw new Error(providerSecret); });
+    const adapter = createDevelopmentAblyRoomTransport({ environment: "preview", clientFactory: async () => fake.client, now: () => 1_000_000 });
+    const subscription = await adapter.connect({
+      scope,
+      token: tokenRequest({ [names().world]: ["subscribe"] }),
+      connectionEpoch: 1,
+      onMessage: vi.fn(),
+      onFailure: vi.fn(),
+    });
+
+    await expect(subscription.publish?.(envelope("world.transition", "local-capability"))).rejects.toThrow("not granted");
+    await expect(subscription.publish?.({ ...envelope("world.transition", "local-envelope"), roomId: "other_room" })).rejects.toThrow("outside");
+    expect(world.publish).not.toHaveBeenCalled();
   });
 
   it("rejects a failed connection before readiness and cleans up its fake client", async () => {
