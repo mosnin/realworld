@@ -125,10 +125,33 @@ export default defineSchema({
     .index("by_room_and_state", ["roomId", "state"])
     .index("by_assignee_and_state", ["assigneePrincipalId", "state"]),
 
+  calls: defineTable({
+    missionId: v.id("missions"),
+    roomId: v.optional(v.id("rooms")),
+    linkedMoveId: v.optional(v.id("moves")),
+    creatorPrincipalId: v.id("principals"),
+    title: v.string(),
+    detail: v.string(),
+    status: v.union(
+      v.literal("open"),
+      v.literal("accepted"),
+      v.literal("resolved"),
+      v.literal("cancelled"),
+    ),
+    currentVersion: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    schemaVersion: v.number(),
+  })
+    .index("by_mission", ["missionId"])
+    .index("by_mission_and_status", ["missionId", "status"])
+    .index("by_room_and_status", ["roomId", "status"])
+    .index("by_creator_and_status", ["creatorPrincipalId", "status"]),
+
   missionEvents: defineTable({
     missionId: v.id("missions"),
     missionSequence: v.number(),
-    type: v.union(v.literal("mission.created"), v.literal("mission.updated"), v.literal("mission.constitutionUpdated"), v.literal("mission.archived"), v.literal("mission.restored"), v.literal("membership.invited"), v.literal("membership.joined"), v.literal("invite.revoked"), v.literal("room.created"), v.literal("room.renamed"), v.literal("room.archived"), v.literal("room.layoutUpdated"), v.literal("move.created"), v.literal("move.updated"), v.literal("move.transitioned")),
+    type: v.union(v.literal("mission.created"), v.literal("mission.updated"), v.literal("mission.constitutionUpdated"), v.literal("mission.archived"), v.literal("mission.restored"), v.literal("membership.invited"), v.literal("membership.joined"), v.literal("invite.revoked"), v.literal("room.created"), v.literal("room.renamed"), v.literal("room.archived"), v.literal("room.layoutUpdated"), v.literal("move.created"), v.literal("move.updated"), v.literal("move.transitioned"), v.literal("call.created"), v.literal("call.updated"), v.literal("call.transitioned")),
     aggregateType: v.literal("mission"),
     aggregateId: v.id("missions"),
     actorPrincipalId: v.id("principals"),
@@ -155,6 +178,7 @@ export default defineSchema({
     eventId: v.id("missionEvents"),
     roomId: v.optional(v.id("rooms")),
     moveId: v.optional(v.id("moves")),
+    callId: v.optional(v.id("calls")),
     resultVersion: v.number(),
     correlationId: v.string(),
     createdAt: v.number(),

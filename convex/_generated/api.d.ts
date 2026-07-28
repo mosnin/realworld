@@ -9,6 +9,7 @@
  */
 
 import type * as auth from "../auth.js";
+import type * as calls from "../calls.js";
 import type * as canvas from "../canvas.js";
 import type * as http from "../http.js";
 import type * as invites from "../invites.js";
@@ -26,6 +27,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
+  calls: typeof calls;
   canvas: typeof canvas;
   http: typeof http;
   invites: typeof invites;
