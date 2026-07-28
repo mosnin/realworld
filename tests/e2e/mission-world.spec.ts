@@ -349,6 +349,84 @@ test("an owner can create, link, advance, and reload durable Moves", async ({ pa
   await expect(board.getByRole("article", { name: `Move ${updatedTitle}` }).getByText(`Depends on ${prerequisite}`)).toBeVisible();
 });
 
+test("an owner can issue, edit, advance, and reload a durable room Call", async ({ page }) => {
+  const initialTitle = "Review the room signal";
+  const updatedTitle = "Review the live room signal";
+  const initialDetail = "Bring one concrete interaction concern from the Workshop.";
+  const updatedDetail = "Bring one concrete interaction concern and a suggested repair from the Workshop.";
+  const linkedMove = "Set the sprint outcome";
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /Issue Call/ }).click();
+  const callDialog = page.getByRole("dialog", { name: "Ask for a hand, in context" });
+  await expect(callDialog).toBeVisible();
+
+  await callDialog.getByLabel("Call title").fill(initialTitle);
+  await callDialog.getByLabel("Detail").fill(initialDetail);
+  await callDialog.getByLabel("Room").selectOption({ label: "Workshop" });
+  await callDialog.getByLabel("Linked Move (optional)").selectOption({ label: linkedMove });
+  await callDialog.getByRole("button", { name: "Issue Call", exact: true }).click();
+  await expect(callDialog.getByText("Call issued.")).toBeVisible();
+
+  await callDialog.getByRole("button", { name: "Close Calls" }).click();
+  const beacon = page.getByRole("button", { name: `Open Call: ${initialTitle}, open` });
+  await expect(beacon).toBeVisible();
+  await beacon.click();
+  await expect(callDialog.getByLabel(`Call actions for ${initialTitle}`)).toBeVisible();
+
+  await callDialog.getByLabel("Call title").fill(updatedTitle);
+  await callDialog.getByLabel("Detail").fill(updatedDetail);
+  await callDialog.getByRole("button", { name: "Save Call" }).click();
+  await expect(callDialog.getByText("Call details saved.")).toBeVisible();
+  await callDialog.getByRole("button", { name: "Close Calls" }).click();
+  const updatedBeacon = page.getByRole("button", { name: `Open Call: ${updatedTitle}, open` });
+  await expect(updatedBeacon).toBeVisible();
+  await updatedBeacon.click();
+  await expect(callDialog.getByLabel(`Call actions for ${updatedTitle}`)).toBeVisible();
+  await expect(callDialog.getByLabel("Linked Move (optional)").locator("option:checked")).toHaveText(linkedMove);
+
+  const accept = callDialog.getByRole("button", { name: `Accept ${updatedTitle}` });
+  await accept.focus();
+  await expect(accept).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(callDialog.getByText(`${updatedTitle} is now accepted.`)).toBeVisible();
+
+  const reopen = callDialog.getByRole("button", { name: `Reopen ${updatedTitle}` });
+  await reopen.focus();
+  await page.keyboard.press("Enter");
+  await expect(callDialog.getByText(`${updatedTitle} is now open.`)).toBeVisible();
+
+  const acceptAgain = callDialog.getByRole("button", { name: `Accept ${updatedTitle}` });
+  await acceptAgain.focus();
+  await page.keyboard.press("Enter");
+  await expect(callDialog.getByText(`${updatedTitle} is now accepted.`)).toBeVisible();
+
+  const resolve = callDialog.getByRole("button", { name: `Resolve ${updatedTitle}` });
+  await resolve.focus();
+  await page.keyboard.press("Enter");
+  await expect(callDialog.getByText(`${updatedTitle} is now resolved.`)).toBeVisible();
+
+  await callDialog.getByRole("button", { name: "Close Calls" }).click();
+  await page.reload();
+  const resolvedBeacon = page.getByRole("button", { name: `Open Call: ${updatedTitle}, resolved` });
+  await expect(resolvedBeacon).toBeVisible();
+  await resolvedBeacon.focus();
+  await page.keyboard.press("Enter");
+  await expect(callDialog.getByLabel(`Call actions for ${updatedTitle}`)).toBeVisible();
+  await expect(callDialog.getByText("resolved", { exact: true })).toBeVisible();
+
+  await callDialog.getByRole("button", { name: "Close Calls" }).click();
+  await page.getByRole("button", { name: "Manage Mission" }).click();
+  await page.getByRole("button", { name: "Archive Mission" }).click();
+  await expect(page.getByRole("status", { name: "Archived Mission read-only" })).toBeVisible();
+
+  await resolvedBeacon.focus();
+  await page.keyboard.press("Enter");
+  await expect(callDialog.getByLabel("Mission Calls read-only")).toBeVisible();
+  await expect(callDialog.getByLabel("Call title")).toHaveCount(0);
+  await expect(callDialog.getByRole("button", { name: `Resolve ${updatedTitle}` })).toHaveCount(0);
+});
+
 test.describe("a reactive scoped Mission canvas", () => {
   test("an owner can invite a participant and their Workshop map reacts without a reload", async ({ browser, page }) => {
   await page.goto("/");
