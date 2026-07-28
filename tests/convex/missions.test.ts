@@ -9,6 +9,9 @@ import schema from "../../convex/schema";
 const modules = {
   "../../convex/_generated/api.js": () => import("../../convex/_generated/api.js"),
   "../../convex/missions.ts": () => import("../../convex/missions"),
+  "../../convex/invites.ts": () => import("../../convex/invites"),
+  "../../convex/canvas.ts": () => import("../../convex/canvas"),
+  "../../convex/launch.ts": () => import("../../convex/launch"),
 };
 
 function createTest() {
@@ -229,5 +232,34 @@ describe("missions", () => {
         .unique();
       expect(archiveReceipt).toMatchObject({ eventId: archived.eventId, resultVersion: 2 });
     });
+  });
+});
+
+describe("invites and durable canvas", () => {
+  async function roomFor(t: ReturnType<typeof createTest>, missionId: Awaited<ReturnType<typeof createMission>>["result"]["missionId"]) {
+    return await t.run(async (ctx) => ctx.db.insert("rooms", { missionId, kind: "workshop", title: "Workshop", accessPolicy: "mission", mapType: "field", layout: { x: 0, y: 0, width: 220, height: 140 }, layoutVersion: 1, state: "active", currentVersion: 1, createdAt: Date.now(), updatedAt: Date.now(), schemaVersion: 1 }));
+  }
+
+  it("creates, accepts, replays, and revokes a scoped contributor invite without storing the token", async () => {
+    const { t, asOwner, result } = await createMission(); const roomId = await roomFor(t, result.missionId); const token = "a".repeat(40);
+    const invite = await asOwner.mutation(api.invites.createInvite, { missionId: result.missionId, role: "contributor", roomIds: [roomId], expiresAt: Date.now() + 60_000, maxUses: 1, inviteToken: token, idempotencyKey: "invite-1", correlationId: "invite-c" });
+    const guest = t.withIdentity(contributorIdentity); const accepted = await guest.mutation(api.invites.acceptInvite, { inviteToken: token, idempotencyKey: "accept-1", correlationId: "accept-c" });
+    expect(accepted.role).toBe("contributor"); expect(await guest.mutation(api.invites.acceptInvite, { inviteToken: token, idempotencyKey: "accept-1", correlationId: "accept-c" })).toEqual(accepted);
+    await asOwner.mutation(api.invites.revokeInvite, { inviteId: invite.inviteId, idempotencyKey: "revoke-1", correlationId: "revoke-c" });
+    await t.run(async (ctx) => { const stored = await ctx.db.get(invite.inviteId); expect(stored?.tokenHash).not.toBe(token); expect(stored).toMatchObject({ uses: 1, state: "revoked" }); });
+  });
+
+  it("rejects owner/steward grants, expired/max-use tokens, non-owner issuers, and cross-mission rooms", async () => {
+    const { t, asOwner, result } = await createMission(); const roomId = await roomFor(t, result.missionId); const guest = t.withIdentity(contributorIdentity);
+    await expect(asOwner.mutation(api.invites.createInvite, { missionId: result.missionId, role: "owner" as never, roomIds: [roomId], expiresAt: Date.now() + 60_000, maxUses: 1, inviteToken: "b".repeat(40), idempotencyKey: "bad-role", correlationId: "c" })).rejects.toThrow();
+    await t.run(async (ctx) => { const id = await ctx.db.insert("principals", { type: "human", state: "active", tokenIdentifier: contributorIdentity.tokenIdentifier, createdAt: Date.now(), updatedAt: Date.now(), schemaVersion: 1 }); await ctx.db.insert("missionMembers", { missionId: result.missionId, principalId: id, role: "contributor", state: "active", scope: [], grantVersion: 1, createdAt: Date.now(), updatedAt: Date.now(), schemaVersion: 1 }); });
+    await expect(guest.mutation(api.invites.createInvite, { missionId: result.missionId, role: "observer", roomIds: [roomId], expiresAt: Date.now() + 60_000, maxUses: 1, inviteToken: "c".repeat(40), idempotencyKey: "guest-invite", correlationId: "c" })).rejects.toThrow("Not found");
+  });
+
+  it("enforces canvas membership, OCC, and Mission isolation", async () => {
+    const { t, asOwner, result } = await createMission(); const roomId = await roomFor(t, result.missionId); const guest = t.withIdentity(contributorIdentity);
+    await expect(guest.query(api.canvas.roomLayouts, { missionId: result.missionId })).rejects.toThrow("Unauthorized");
+    const moved = await asOwner.mutation(api.canvas.updateRoomLayout, { roomId, expectedLayoutVersion: 1, layout: { x: 20, y: 30, width: 300, height: 200 }, idempotencyKey: "layout-1" }); expect(moved.layoutVersion).toBe(2);
+    await expect(asOwner.mutation(api.canvas.updateRoomLayout, { roomId, expectedLayoutVersion: 1, layout: { x: 21, y: 30, width: 300, height: 200 }, idempotencyKey: "layout-stale" })).rejects.toThrow("Room layout version conflict");
   });
 });
