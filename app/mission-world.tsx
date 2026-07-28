@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { SessionControl } from "@/app/auth/session-control";
+import { createDevelopmentAblyTransportFactory } from "@/app/realtime/development-ably-transport-factory";
 import { AuthenticatedMissionRealtimeLifecycle } from "@/app/realtime/authenticated-mission-lifecycle";
 import { OwnerInvitePanel } from "@/app/invitations/owner-invite-panel";
 import { MissionControls } from "@/app/missions/mission-controls";
@@ -16,6 +17,7 @@ import { FractureSurface } from "@/app/fractures/fracture-surface";
 import { ProofSurface } from "@/app/proofs/proof-surface";
 import { PulseSurface } from "@/app/pulse/pulse-surface";
 import { Icon, type IconName } from "@/app/ui/icons";
+import type { AblyClientFactory } from "@/lib/realtime/ably-room-transport";
 
 type RoomId = string;
 
@@ -384,7 +386,11 @@ function PreferencePanel({
   );
 }
 
-export function MissionWorld() {
+export type MissionWorldProps = Readonly<{
+  developmentAblyClientFactory?: AblyClientFactory;
+}>;
+
+export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps = {}) {
   const templateOptions = [{ key: "companySprint", label: "Company sprint" }, { key: "classroomProject", label: "Classroom project" }, { key: "contentProduction", label: "Content production" }, { key: "openChallenge", label: "Open challenge" }];
   const missions = useQuery(api.missions.listMyMissions, {});
   const [selectedMissionId, setSelectedMissionId] = useState<Id<"missions"> | null>(null);
@@ -398,6 +404,14 @@ export function MissionWorld() {
   const updateRoomLayout = useMutation(api.canvas.updateRoomLayout);
   const renameRoomMutation = useMutation(api.canvas.renameRoom);
   const archiveRoomMutation = useMutation(api.canvas.archiveRoom);
+  const developmentRealtimeTransportFactory = useMemo(
+    () => createDevelopmentAblyTransportFactory(
+      developmentAblyClientFactory === undefined
+        ? undefined
+        : { environment: "development", clientFactory: developmentAblyClientFactory },
+    ),
+    [developmentAblyClientFactory],
+  );
   const issueRealtimeTokenRequest = useAction(api.realtime.issueTokenRequest);
   const requestAuthenticatedRealtimeToken = useCallback(async ({ missionId, roomId }: { missionId: string; roomId: string }) => {
     const response = await issueRealtimeTokenRequest({
@@ -614,12 +628,12 @@ export function MissionWorld() {
   const missionWritable = activeMission.lifecycle === "active";
 
   if (view === "workshop") {
-    return <><AuthenticatedMissionRealtimeLifecycle authenticatedTokenRequester={requestAuthenticatedRealtimeToken} expectedMissionId={activeMission._id} expectedRoomId={selectedRoom.id} membershipGrantVersion={activeMission.grantVersion} readiness={realtimeRoomReadiness} /><Workshop mission={activeMission} onExit={() => setView("world")} /></>;
+    return <><AuthenticatedMissionRealtimeLifecycle authenticatedTokenRequester={requestAuthenticatedRealtimeToken} expectedMissionId={activeMission._id} expectedRoomId={selectedRoom.id} membershipGrantVersion={activeMission.grantVersion} readiness={realtimeRoomReadiness} transportFactory={developmentRealtimeTransportFactory} /><Workshop mission={activeMission} onExit={() => setView("world")} /></>;
   }
 
   return (
     <div className="mission-world" aria-label="Realworld Mission World" data-accent={preferences.accent} data-density={preferences.density} data-decoration={preferences.reducedDecoration ? "reduced" : "standard"}>
-      <AuthenticatedMissionRealtimeLifecycle authenticatedTokenRequester={requestAuthenticatedRealtimeToken} expectedMissionId={activeMission._id} expectedRoomId={selectedRoom.id} membershipGrantVersion={activeMission.grantVersion} readiness={realtimeRoomReadiness} />
+      <AuthenticatedMissionRealtimeLifecycle authenticatedTokenRequester={requestAuthenticatedRealtimeToken} expectedMissionId={activeMission._id} expectedRoomId={selectedRoom.id} membershipGrantVersion={activeMission.grantVersion} readiness={realtimeRoomReadiness} transportFactory={developmentRealtimeTransportFactory} />
       <header className="world-topbar">
         <a className="brand" href="#core" aria-label="Realworld Mission World"><Icon name="spark" /> <span>Realworld</span></a>
         <nav aria-label="Primary navigation">
