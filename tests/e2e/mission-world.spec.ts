@@ -134,6 +134,65 @@ test("a participant can customize and persist a personal canvas layout", async (
   await expect(page.getByRole("button", { name: /Launch Cabin\. 0 active people/i })).toHaveCount(0);
 });
 
+test("an owner can archive a Mission into a read-only world, restore it, and keep it active", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Manage Mission" }).click();
+  await expect(page.getByRole("button", { name: "Archive Mission" })).toBeVisible();
+  await page.getByRole("button", { name: "Archive Mission" }).click();
+
+  await expect(page.getByRole("status", { name: "Archived Mission read-only" })).toBeVisible();
+  await expect(page.getByText("Archived", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Invite collaborators" })).toHaveCount(0);
+  await expect(page.getByLabel("New room")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Create room" })).toHaveCount(0);
+  await expect(page.getByLabel("Room name")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Archive room" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Layout unlocked" })).toBeDisabled();
+
+  const archivedWorkshop = page.getByRole("button", { name: /Workshop\. 4 active people/i });
+  const archivedPosition = await archivedWorkshop.evaluate((element) => ({
+    left: (element as HTMLElement).style.left,
+    top: (element as HTMLElement).style.top,
+  }));
+  await archivedWorkshop.focus();
+  await page.keyboard.press("Alt+ArrowRight");
+  await page.waitForTimeout(250);
+  expect(await archivedWorkshop.evaluate((element) => ({
+    left: (element as HTMLElement).style.left,
+    top: (element as HTMLElement).style.top,
+  }))).toEqual(archivedPosition);
+
+  await page.getByRole("button", { name: "Room directory" }).click();
+  await expect(page.locator(".room-directory").getByRole("button", { name: "Enter Workshop" })).toBeDisabled();
+
+  await page.getByRole("button", { name: "Restore Mission" }).click();
+  await expect(page.getByRole("status", { name: "Archived Mission read-only" })).toHaveCount(0);
+  await expect(page.getByText("Active", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Invite collaborators" })).toBeVisible();
+  await expect(page.getByLabel("New room")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create room" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Layout unlocked" })).toBeEnabled();
+
+  await page.getByRole("button", { name: "Map" }).click();
+  const restoredWorkshop = page.getByRole("button", { name: /Workshop\. 4 active people/i });
+  const restoredPosition = await restoredWorkshop.evaluate((element) => ({
+    left: (element as HTMLElement).style.left,
+    top: (element as HTMLElement).style.top,
+  }));
+  await restoredWorkshop.focus();
+  await page.keyboard.press("Alt+ArrowRight");
+  await expect.poll(async () => restoredWorkshop.evaluate((element) => ({
+    left: (element as HTMLElement).style.left,
+    top: (element as HTMLElement).style.top,
+  }))).not.toEqual(restoredPosition);
+
+  await page.reload();
+  await expect(page.getByText("Active", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Invite collaborators" })).toBeVisible();
+  await expect(page.getByLabel("New room")).toBeVisible();
+});
+
 // The following invitation journey handles a bearer URL. Do not retain it in Playwright traces.
 test.use({ trace: "off" });
 
