@@ -292,18 +292,28 @@ async function awaitBoundedProvider<Return>(
   }
 }
 
-async function closeLateFactoryClient(
-  candidate: unknown,
+type CapturedProviderClose = () => unknown;
+
+function captureProviderClose(candidate: unknown): CapturedProviderClose | undefined {
+  try {
+    if (!isRecord(candidate)) return undefined;
+    const close = candidate.close;
+    return typeof close === "function" ? () => Reflect.apply(close, candidate, []) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function closeCapturedProviderClient(
+  close: CapturedProviderClose | undefined,
   timer: AblyConnectionTimer,
   timeoutMs: number,
 ) {
   try {
-    if (!isRecord(candidate)) return;
-    const close = candidate.close;
-    if (typeof close !== "function") return;
-    await awaitBoundedProvider("cleanup", () => Reflect.apply(close, candidate, []), { timer, timeoutMs });
+    if (!close) return;
+    await awaitBoundedProvider("cleanup", close, { timer, timeoutMs });
   } catch {
-    // A late client is never used, and its provider details stay contained.
+    // The discarded client is never used, and provider details stay contained.
   }
 }
 
@@ -315,6 +325,7 @@ async function closeLateFactoryClient(
 function validateProviderClientContract(
   candidate: unknown,
   granted: readonly GrantedChannel[],
+  close: CapturedProviderClose | undefined,
 ): ValidatedProviderClient | undefined {
   try {
     if (!isRecord(candidate)) return undefined;
@@ -322,10 +333,9 @@ function validateProviderClientContract(
     const channels = candidate.channels;
     const connection = candidate.connection;
     const connect = candidate.connect;
-    const close = candidate.close;
     if (!isRecord(channels) || !isRecord(connection)
       || typeof connect !== "function"
-      || typeof close !== "function") {
+      || !close) {
       return undefined;
     }
 
@@ -398,7 +408,7 @@ function validateProviderClientContract(
           off: bindProviderMethod(connection, off as AblyRealtimeClient["connection"]["off"]),
         },
         connect: bindProviderMethod(candidate, connect as AblyRealtimeClient["connect"]),
-        close: bindProviderMethod(candidate, close as AblyRealtimeClient["close"]),
+        close: close as AblyRealtimeClient["close"],
       },
       channels: validatedChannels,
     };
@@ -486,16 +496,22 @@ export class DevelopmentAblyRoomTransport implements RealtimeTransportAdapter {
         {
           timer: this.timer,
           timeoutMs: this.providerOperationTimeoutMs,
-          undoLateSuccess: (candidate) => closeLateFactoryClient(candidate, this.timer, this.providerOperationTimeoutMs),
+          undoLateSuccess: (candidate) => closeCapturedProviderClient(
+            captureProviderClose(candidate),
+            this.timer,
+            this.providerOperationTimeoutMs,
+          ),
         },
       );
     } catch {
       this.emitTelemetry({ event: "connect_failed", reason: "connection_unavailable", state: "degraded" });
       throw new Error("Realtime client contract is invalid");
     }
-    const validatedProvider = validateProviderClientContract(unvalidatedClient, granted);
+    const capturedRawClose = captureProviderClose(unvalidatedClient);
+    const validatedProvider = validateProviderClientContract(unvalidatedClient, granted, capturedRawClose);
     if (!validatedProvider) {
       this.emitTelemetry({ event: "connect_failed", reason: "connection_unavailable", state: "degraded" });
+      await closeCapturedProviderClient(capturedRawClose, this.timer, this.providerOperationTimeoutMs);
       throw new Error("Realtime client contract is invalid");
     }
     const client = validatedProvider.client;

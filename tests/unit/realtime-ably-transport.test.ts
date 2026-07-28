@@ -685,6 +685,121 @@ describe("development Ably room transport", () => {
     }
   });
 
+  it("closes a timely contract-invalid client exactly once before generic rejection, even when close is hostile", async () => {
+    const providerSecret = "provider-secret-contract-close";
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    const connectInput = {
+      scope,
+      token: tokenRequest({ [names().world]: ["subscribe"] }),
+      connectionEpoch: 1,
+      onMessage: vi.fn(),
+      onFailure: vi.fn(),
+    };
+    const runInvalidClient = async (
+      close: () => void | Promise<void>,
+      settleClose?: (control: { assertPending: () => Promise<void>; fireCleanupTimeout: () => void }) => void | Promise<void>,
+    ) => {
+      const scheduler = controlledTimer();
+      const calls = { channels: 0, connection: 0, connect: 0, close: 0 };
+      const on = vi.fn();
+      const off = vi.fn();
+      const connect = vi.fn();
+      const candidate = Object.defineProperties({}, {
+        channels: { get: () => { calls.channels += 1; return {}; } },
+        connection: { get: () => { calls.connection += 1; return { on, off }; } },
+        connect: { get: () => { calls.connect += 1; return connect; } },
+        close: { get: () => { calls.close += 1; return close; } },
+      });
+      const adapter = createDevelopmentAblyRoomTransport({
+        environment: "preview",
+        clientFactory: async () => candidate as AblyRealtimeClient,
+        timer: scheduler.timer,
+        connectionReadyTimeoutMs: 50,
+        providerOperationTimeoutMs: 7,
+        now: () => 1_000_000,
+      });
+      const pending = adapter.connect(connectInput);
+      let settled = false;
+      const handled = pending.catch((error: unknown) => {
+        settled = true;
+        return error;
+      });
+      await vi.waitFor(() => expect(calls.close).toBe(1));
+      if (settleClose) {
+        await settleClose({
+          assertPending: async () => {
+            await Promise.resolve();
+            expect(settled).toBe(false);
+          },
+          fireCleanupTimeout: () => scheduler.fire(7),
+        });
+      }
+      const failure = await handled;
+      expect(failure).toEqual(expect.objectContaining({ message: "Realtime client contract is invalid" }));
+      expect(String(failure)).not.toContain(providerSecret);
+      expect(calls).toEqual({ channels: 1, connection: 1, connect: 1, close: 1 });
+      expect(on).not.toHaveBeenCalled();
+      expect(off).not.toHaveBeenCalled();
+      expect(connect).not.toHaveBeenCalled();
+    };
+    try {
+      const throwingClose = vi.fn(() => { throw new Error(providerSecret); });
+      await runInvalidClient(throwingClose);
+      expect(throwingClose).toHaveBeenCalledTimes(1);
+
+      const rejectedClose = vi.fn(() => Promise.reject(new Error(providerSecret)));
+      await runInvalidClient(rejectedClose);
+      expect(rejectedClose).toHaveBeenCalledTimes(1);
+
+      const resolvingClose = deferred<void>();
+      const delayedClose = vi.fn(() => resolvingClose.promise);
+      await runInvalidClient(delayedClose, async ({ assertPending }) => {
+        await assertPending();
+        resolvingClose.resolve();
+      });
+      expect(delayedClose).toHaveBeenCalledTimes(1);
+
+      const hangingClose = deferred<void>();
+      const neverSettlingClose = vi.fn(() => hangingClose.promise);
+      await runInvalidClient(neverSettlingClose, async ({ assertPending, fireCleanupTimeout }) => {
+        await assertPending();
+        fireCleanupTimeout();
+      });
+      expect(neverSettlingClose).toHaveBeenCalledTimes(1);
+      hangingClose.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const malformedClose = Object.defineProperties({}, {
+        channels: { get: () => ({}) },
+        connection: { get: () => ({ on: vi.fn(), off: vi.fn() }) },
+        connect: { get: () => vi.fn() },
+        close: { get: () => "not-a-function" },
+      });
+      const hostileClose = Object.defineProperties({}, {
+        channels: { get: () => ({}) },
+        connection: { get: () => ({ on: vi.fn(), off: vi.fn() }) },
+        connect: { get: () => vi.fn() },
+        close: { get: () => { throw new Error(providerSecret); } },
+      });
+      for (const candidate of [malformedClose, hostileClose]) {
+        const adapter = createDevelopmentAblyRoomTransport({
+          environment: "preview",
+          clientFactory: async () => candidate as AblyRealtimeClient,
+          providerOperationTimeoutMs: 7,
+          now: () => 1_000_000,
+        });
+        const failure = await adapter.connect(connectInput).catch((error: unknown) => error);
+        expect(failure).toEqual(expect.objectContaining({ message: "Realtime client contract is invalid" }));
+        expect(String(failure)).not.toContain(providerSecret);
+      }
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
   it("bounds never-settling publish and presence operations without mutating late local state", async () => {
     const scheduler = controlledTimer();
     const providerSecret = "provider-secret-timeout-publish";
