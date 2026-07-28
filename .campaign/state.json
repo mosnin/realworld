@@ -2,33 +2,34 @@
   "campaign": "realworld-production-build",
   "version": 2,
   "status": "active",
-  "currentPhase": 0,
-  "phaseName": "Constitution and visual language",
+  "currentPhase": 1,
+  "phaseName": "Production foundation",
   "startedAt": "2026-07-27T00:00:00-04:00",
-  "lastUpdatedAt": "2026-07-27T18:45:00-04:00",
+  "lastUpdatedAt": "2026-07-27T20:25:25-04:00",
   "exactNextActions": [
-    "Create or connect a cloud Convex development deployment",
+    "Provision a legitimate authenticated browser-test bootstrap without a public bypass",
     "Replace the signed-in fixture Mission with authenticated reactive Convex data",
-    "Verify two browser sessions observe the same durable Mission"
+    "Create or connect a cloud Convex development deployment and verify two browser sessions observe the same durable Mission"
   ],
   "teams": {
     "worldNetwork": {"status":"complete","model":"gpt-5.6-terra","writeScope":"docs/program/world-network-system.md","lastMeaningfulHeartbeatAt":"2026-07-27T18:52:00-04:00","evidence":"commit 0ca7a39","exactNextAction":"Review the product contract against the room interaction specification"},
-    "experienceInteraction": {"status":"review","model":"gpt-5.6-terra","writeScope":"design/ and docs/design/","lastMeaningfulHeartbeatAt":"2026-07-27T19:08:00-04:00","evidence":"commit 46a318a","exactNextAction":"Apply recommended defaults and perform concept-to-browser review"},
-    "clientPlatform": {"status":"active","model":"gpt-5.6-terra","writeScope":"app client and design system","lastMeaningfulHeartbeatAt":"2026-07-27T18:44:00-04:00","evidence":"commit 26cdea4; local browser account creation, sign-out, sign-in, and protected-shell restoration passed","exactNextAction":"Replace the signed-in fixture Mission with authenticated Convex queries and mutations"},
-    "missionKernel": {"status":"active","model":"gpt-5.6-terra","writeScope":"convex durable domain","lastMeaningfulHeartbeatAt":"2026-07-27T18:44:00-04:00","evidence":"local Convex push passed; 7 authorization/idempotency/version tests pass; local auth round trip passed","exactNextAction":"Push the same schema/auth/functions to a cloud development deployment and create a durable Mission","blocker":"Cloud Convex device login has not been completed"},
+    "experienceInteraction": {"status":"active","model":"gpt-5.6-terra","writeScope":"design/ and docs/design/","lastMeaningfulHeartbeatAt":"2026-07-27T20:24:00-04:00","evidence":"commit ddfacd3; customizable canvas, saved preferences, keyboard controls, deliberate icon system; lint, typecheck, and build pass","exactNextAction":"Complete authenticated desktop, mobile, keyboard, and reduced-motion browser interaction evidence","blocker":"Fresh browser-test pages remain at auth-session restoration"},
+    "clientPlatform": {"status":"active","model":"gpt-5.6-terra","writeScope":"app client and design system","lastMeaningfulHeartbeatAt":"2026-07-27T20:24:00-04:00","evidence":"commits 26cdea4 and ddfacd3; local auth round trip passed; customizable canvas compiles and builds","exactNextAction":"Replace the signed-in fixture Mission with authenticated Convex queries and mutations"},
+    "missionKernel": {"status":"active","model":"gpt-5.6-terra","writeScope":"convex durable domain","lastMeaningfulHeartbeatAt":"2026-07-27T20:21:00-04:00","evidence":"commits 8c7d594 and dcdc19c; local Convex push and typecheck passed; 9 invitation/canvas authorization, idempotency, and OCC tests pass","exactNextAction":"Push the schema/auth/functions to a cloud development deployment and create a durable Mission","blocker":"Cloud Convex device login has not been completed"},
     "realtimeSystems": {"status":"review","model":"gpt-5.6-terra","writeScope":"Ably and presence layer","lastMeaningfulHeartbeatAt":"2026-07-27T18:20:00-04:00","evidence":"protocol commit 143c73e; no Ably application or runtime connection yet","exactNextAction":"Wait for authenticated Mission identity, then implement scoped Ably token issuance"},
     "agentRuntime": {"status":"review","model":"gpt-5.6-terra","writeScope":"docs/program/platform-architecture.md","lastMeaningfulHeartbeatAt":"2026-07-27T18:58:00-04:00","evidence":"commit 01153f4","exactNextAction":"Qualify concrete provider APIs before implementing the adapter"},
     "artifactStudio": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"artifact domain and surfaces","exactNextAction":"Wait for client, realtime, and agent contracts"},
     "discoverySocial": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"discovery and contribution surfaces","exactNextAction":"Wait for Artifact Studio and reputation contracts"},
     "trustGovernance": {"status":"review","model":"gpt-5.6-terra","writeScope":"docs/program/trust-quality-release.md","lastMeaningfulHeartbeatAt":"2026-07-27T18:55:00-04:00","evidence":"commit c1f156b","exactNextAction":"Translate the trust contract into foundation tests"},
-    "qualityOperations": {"status":"active","model":"gpt-5.6-terra","writeScope":"CI and verification infrastructure","lastMeaningfulHeartbeatAt":"2026-07-27T18:39:00-04:00","evidence":"commit 7ceb53a; CI evidence gates and four Chromium foundation journeys added; Phase 1 gate still fails honestly on cloud auth, role, and persistent-state proof","exactNextAction":"Add authenticated persistent-state browser evidence after cloud deployment"}
+    "qualityOperations": {"status":"active","model":"gpt-5.6-terra","writeScope":"CI and verification infrastructure","lastMeaningfulHeartbeatAt":"2026-07-27T20:23:00-04:00","evidence":"Orca task task_3710ba836940 dispatched to a live GPT-5.6 Terra Codex session; CI run 30317164879 passed setup, lint, typecheck, unit, Convex, and build steps before browser execution","exactNextAction":"Repair authenticated browser-test bootstrap and make CI a truthful release gate"}
   },
   "orchestration": {
     "preferredRuntime": "orca",
-    "preferredRuntimeStatus": "blocked",
+    "preferredRuntimeStatus": "degraded",
     "fallbackRunner": "codex-collaboration",
     "fallbackConcurrency": 3,
-    "blockedReason": "Orca worker terminals start at the macOS login prompt before the configured Claude or Codex launch command is injected. Existing provider OAuth was not changed.",
+    "blockedReason": "Native Realworld Orca worker terminals still start at a macOS login prompt. A live GPT-5.6 Terra Codex worker is running through Orca's healthy test-orca PTY against the Realworld checkout; existing provider OAuth was not changed.",
+    "activeTask": "task_3710ba836940",
     "heartbeatIntervalMinutes": 15,
     "heartbeatAutomationId": "realworld-a-to-z-coordinator",
     "stopCondition": "All Phase 8 exit gates pass and the coordinator marks the campaign complete"

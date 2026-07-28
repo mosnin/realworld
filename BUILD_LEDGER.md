@@ -4,7 +4,7 @@ This ledger is the durable project-management source of truth. A phase is comple
 
 ## Phase 0 — Constitution and visual language
 
-Status: in progress
+Status: complete
 
 Deliverables:
 
@@ -15,13 +15,19 @@ Deliverables:
 - Three complete visual directions for the primary Mission Field
 - Selected direction translated into design tokens and interaction rules
 
+Completion evidence:
+
+- Founder direction confirmed in-product as a Living Atlas hybrid made of navigable, customizable rooms rather than a fixed dashboard.
+- Solo-to-fifty, network, game-system, realtime ownership, agent-autonomy, trust, and release contracts are recorded in `docs/program/`.
+- Customizable-canvas implementation commit `ddfacd3` translates the direction into direct manipulation, keyboard movement, zoom/fit, layout locking, room lifecycle controls, saved preferences, an accessible list alternative, and a deliberate icon system.
+
 Design gate:
 
 - Selected base: Living Atlas
 - Proposed production revision: `design/concepts/living-atlas-realtime-hybrid.png`
 - Proposed world-map extension: `design/concepts/mission-world-map.png`
 - Revision intent: Google Docs-level live presence and co-editing clarity combined with cooperative-game immediacy, shared momentum, Surge focus, tactile manipulation, and meaningful environmental feedback
-- Approval: awaiting explicit confirmation
+- Approval: confirmed through the founder's Living Atlas hybrid, room-map, and customizable-canvas direction
 
 Exit gates:
 
@@ -37,8 +43,9 @@ Status: in progress
 Deliverables:
 
 - Next.js application foundation: commit `a9679c0`
-- Production-quality design system: in progress
+- Production-quality customizable-canvas design system: commit `ddfacd3`; lint, typecheck, and production build passed locally
 - Convex schema, indexes, guarded Mission functions, and private-alpha password authentication: local deployment push passed on 2026-07-27
+- Durable Mission launch templates, scoped hashed invitations, and Convex-authoritative versioned room layouts: commits `8c7d594` and `dcdc19c`; local Convex push, Convex typecheck, and nine focused authorization/idempotency/concurrency tests passed
 - Local browser authentication evidence: synthetic account creation, sign-out, sign-in, and protected Mission World restoration passed on 2026-07-27
 - Cloud Convex deployment and cloud authentication remain unverified; password auth is a private-alpha bridge, not the final passkey decision
 - Vercel preview: `https://realworld-4r7u1kand-mosnins-projects.vercel.app` built successfully from commit `f7d4230`; GitHub repository connected
@@ -47,9 +54,10 @@ Deliverables:
 
 Evidence boundary:
 
-- The current Mission World and Workshop use fixture data and are a render/interaction checkpoint only.
+- The current Mission World and Workshop still use fixture content for much of the visible experience, although room layout persistence now has an authoritative Convex domain contract.
 - They do not count as authenticated, multiplayer, persistent-state, agent-runtime, or production-readiness evidence.
 - Overall production capability remains below one percent until a signed-in user creates and reloads a durable Mission from the connected cloud backend.
+- Six new customizable-canvas browser journeys are implemented but not counted as passing: fresh test pages currently remain at auth-session restoration because CI/test auth bootstrap is not yet provisioned.
 
 Exit gates:
 
