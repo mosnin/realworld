@@ -10,6 +10,7 @@ import { OwnerInvitePanel } from "@/app/invitations/owner-invite-panel";
 import { MissionControls } from "@/app/missions/mission-controls";
 import { ConstitutionControls } from "@/app/missions/constitution-controls";
 import { MoveBoard } from "@/app/moves/move-board";
+import { CallSurface } from "@/app/calls/call-surface";
 import { Icon, type IconName } from "@/app/ui/icons";
 
 type RoomId = string;
@@ -399,6 +400,7 @@ export function MissionWorld() {
   const [selectionReady, setSelectionReady] = useState(false);
   const activeMission = selectedMissionId === null ? undefined : missions?.find((mission) => mission._id === selectedMissionId);
   const roomRecords = useQuery(api.canvas.roomLayouts, activeMission === undefined ? "skip" : { missionId: activeMission._id });
+  const missionMoves = useQuery(api.moves.listMissionMoves, activeMission === undefined ? "skip" : { missionId: activeMission._id });
   const launch = useMutation(api.launch.createMissionFromTemplate);
   const createRoomMutation = useMutation(api.canvas.createRoom);
   const updateRoomLayout = useMutation(api.canvas.updateRoomLayout);
@@ -707,7 +709,12 @@ export function MissionWorld() {
                 <path className="world-routes__active" d={`M ${visibleRooms.find((room) => room.id === "core")?.x ?? 50} ${visibleRooms.find((room) => room.id === "core")?.y ?? 46} L ${visibleRooms.find((room) => room.id === "workshop")?.x ?? 74} ${visibleRooms.find((room) => room.id === "workshop")?.y ?? 19}`} />
               </svg>
               {visibleRooms.map((room) => <RoomLandmark key={room.id} locked={canvas.locked || !missionWritable} navigationRooms={visibleRooms} onReposition={repositionRoom} room={room} selected={selectedRoom.id === room.id} onSelect={setSelectedRoomId} onEnter={missionWritable ? enterRoom : () => undefined} />)}
-              <div className="map-event map-event--call"><span><Icon name="spark" /></span><strong>Open Call</strong><small>UI/UX critique</small><button type="button">Join Call</button></div>
+              <CallSurface
+                key={activeMission._id}
+                mission={activeMission}
+                moves={(missionMoves ?? []).map((move) => ({ _id: move._id, title: move.title, roomId: move.roomId }))}
+                rooms={canvasRooms.map((room) => ({ _id: room.id as Id<"rooms">, title: room.name, x: room.x, y: room.y }))}
+              />
               <div className="map-event map-event--fracture"><span><Icon name="branch" /></span><strong>Fracture</strong><small>Auth session restoration stalls</small><button type="button">Review</button></div>
               <div className="map-event map-event--proof"><span>✓</span><strong>Proof complete</strong><small>Mission authorization contract verified</small></div>
             </div>
