@@ -61,6 +61,7 @@ button,a { font:inherit; } button { cursor:pointer; } a { color:inherit; text-de
 .mission-world[data-decoration="reduced"] .world-routes .world-routes__active { animation:none; stroke-dasharray:none; }
 .mission-world[data-decoration="reduced"] .landmark,.mission-world[data-decoration="reduced"] .world-inspector,.mission-world[data-decoration="reduced"] .stage-toolbar { box-shadow:none; }
 .constitution-controls { max-width:290px; margin-top:14px; overflow-wrap:anywhere; }.constitution-controls textarea,.constitution-controls input { box-sizing:border-box; width:100%; }.constitution-controls fieldset { min-width:0; }.constitution-controls button { margin:4px 4px 0 0; }
+.move-board { max-width:290px; margin-top:14px; }.move-board ul { padding:0; list-style:none; }.move-board li { margin:7px 0; padding:8px; border:1px solid var(--rw-line); border-radius:8px; }.move-board input { box-sizing:border-box; width:100%; }
 
 @media (max-width: 767px) {
   /* The fixed inspector otherwise overlays directory actions at narrow widths. */

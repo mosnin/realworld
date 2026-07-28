@@ -9,6 +9,7 @@ import { SessionControl } from "@/app/auth/session-control";
 import { OwnerInvitePanel } from "@/app/invitations/owner-invite-panel";
 import { MissionControls } from "@/app/missions/mission-controls";
 import { ConstitutionControls } from "@/app/missions/constitution-controls";
+import { MoveBoard } from "@/app/moves/move-board";
 import { Icon, type IconName } from "@/app/ui/icons";
 
 type RoomId = string;
@@ -663,6 +664,7 @@ export function MissionWorld() {
         <div className="mission-summary__facts"><span><i /> {missionWritable ? "Active" : "Archived"}</span><span>{activeMission.role}</span><span>Durable Mission</span><span>{missionWritable ? "Live projection" : "Read-only projection"}</span></div>
         <div className="summary-pulse"><strong>Pulse</strong><svg viewBox="0 0 220 34" aria-hidden="true"><path d="M1 21 C20 30 26 6 45 17 S70 26 88 11 S113 9 130 22 S155 25 169 14 S194 12 219 9" /></svg></div>
         <ConstitutionControls mission={activeMission} />
+        <MoveBoard mission={activeMission} />
       </section>
 
       <main className="world-stage" id="main-content" tabIndex={-1}>
