@@ -362,7 +362,7 @@ test("an owner can issue, edit, advance, and reload a durable room Call", async 
   await expect(callDialog).toBeVisible();
 
   await callDialog.getByLabel("Call title").fill(initialTitle);
-  await callDialog.getByLabel("Detail").fill(initialDetail);
+  await callDialog.getByRole("textbox", { name: "Detail" }).fill(initialDetail);
   await callDialog.getByLabel("Room").selectOption({ label: "Workshop" });
   await callDialog.getByLabel("Linked Move (optional)").selectOption({ label: linkedMove });
   await callDialog.getByRole("button", { name: "Issue Call", exact: true }).click();
@@ -375,7 +375,7 @@ test("an owner can issue, edit, advance, and reload a durable room Call", async 
   await expect(callDialog.getByLabel(`Call actions for ${initialTitle}`)).toBeVisible();
 
   await callDialog.getByLabel("Call title").fill(updatedTitle);
-  await callDialog.getByLabel("Detail").fill(updatedDetail);
+  await callDialog.getByRole("textbox", { name: "Detail" }).fill(updatedDetail);
   await callDialog.getByRole("button", { name: "Save Call" }).click();
   await expect(callDialog.getByText("Call details saved.")).toBeVisible();
   await callDialog.getByRole("button", { name: "Close Calls" }).click();
@@ -405,6 +405,12 @@ test("an owner can issue, edit, advance, and reload a durable room Call", async 
   await resolve.focus();
   await page.keyboard.press("Enter");
   await expect(callDialog.getByText(`${updatedTitle} is now resolved.`)).toBeVisible();
+  const callList = callDialog.getByRole("list", { name: "Mission Calls" });
+  await expect(callList.getByText(updatedTitle, { exact: true })).toBeVisible();
+  await expect(callList.getByText(updatedDetail, { exact: true })).toBeVisible();
+  await expect(callList.getByText(`Workshop · Move: ${linkedMove}`, { exact: true })).toBeVisible();
+  await expect(callDialog.getByLabel("Call title")).toHaveCount(0);
+  await expect(callDialog.getByLabel(`Call actions for ${updatedTitle}`)).toHaveCount(0);
 
   await callDialog.getByRole("button", { name: "Close Calls" }).click();
   await page.reload();
@@ -412,8 +418,10 @@ test("an owner can issue, edit, advance, and reload a durable room Call", async 
   await expect(resolvedBeacon).toBeVisible();
   await resolvedBeacon.focus();
   await page.keyboard.press("Enter");
-  await expect(callDialog.getByLabel(`Call actions for ${updatedTitle}`)).toBeVisible();
-  await expect(callDialog.getByText("resolved", { exact: true })).toBeVisible();
+  await expect(callDialog.getByRole("list", { name: "Mission Calls" }).getByText(updatedDetail, { exact: true })).toBeVisible();
+  await expect(callDialog.getByLabel(`Call details for ${updatedTitle}`).getByText("resolved", { exact: true })).toBeVisible();
+  await expect(callDialog.getByLabel("Call title")).toHaveCount(0);
+  await expect(callDialog.getByLabel(`Call actions for ${updatedTitle}`)).toHaveCount(0);
 
   await callDialog.getByRole("button", { name: "Close Calls" }).click();
   await page.getByRole("button", { name: "Manage Mission" }).click();
@@ -423,8 +431,10 @@ test("an owner can issue, edit, advance, and reload a durable room Call", async 
   await resolvedBeacon.focus();
   await page.keyboard.press("Enter");
   await expect(callDialog.getByLabel("Mission Calls read-only")).toBeVisible();
+  await expect(callDialog.getByRole("list", { name: "Mission Calls" }).getByText(updatedDetail, { exact: true })).toBeVisible();
+  await expect(callDialog.getByRole("list", { name: "Mission Calls" }).getByText(`Workshop · Move: ${linkedMove}`, { exact: true })).toBeVisible();
   await expect(callDialog.getByLabel("Call title")).toHaveCount(0);
-  await expect(callDialog.getByRole("button", { name: `Resolve ${updatedTitle}` })).toHaveCount(0);
+  await expect(callDialog.getByLabel(`Call actions for ${updatedTitle}`)).toHaveCount(0);
 });
 
 test.describe("a reactive scoped Mission canvas", () => {
