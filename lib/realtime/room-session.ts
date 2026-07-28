@@ -69,6 +69,7 @@ export type RoomSessionOptions = Readonly<{
   clock?: RealtimeClock;
   tokenAcquisitionTimeoutMs?: number;
   transportConnectionTimeoutMs?: number;
+  transportPublishTimeoutMs?: number;
   refreshSkewMs?: number;
   minimumRefreshDelayMs?: number;
   reconnectDelayMs?: (attempt: number) => number;
@@ -95,6 +96,8 @@ const defaultTokenAcquisitionTimeoutMs = 10_000;
 const maximumTokenAcquisitionTimeoutMs = 30_000;
 const defaultTransportConnectionTimeoutMs = 10_000;
 const maximumTransportConnectionTimeoutMs = 30_000;
+const defaultTransportPublishTimeoutMs = 10_000;
+const maximumTransportPublishTimeoutMs = 30_000;
 const maximumReconnectDelayMs = 30_000;
 const defaultMaxReconnectAttempts = 5;
 const defaultMaxMessageTtlMs = 45_000;
@@ -301,6 +304,7 @@ export class RealtimeRoomSession {
   private readonly clock: RealtimeClock;
   private readonly tokenAcquisitionTimeoutMs: number;
   private readonly transportConnectionTimeoutMs: number;
+  private readonly transportPublishTimeoutMs: number;
   private readonly refreshSkewMs: number;
   private readonly minimumRefreshDelayMs: number;
   private readonly reconnectDelayMs: (attempt: number) => number;
@@ -322,6 +326,7 @@ export class RealtimeRoomSession {
   private connectInFlight: Promise<void> | undefined;
   private cancelTokenAcquisition: (() => void) | undefined;
   private cancelTransportConnection: (() => void) | undefined;
+  private readonly cancelPublications = new Set<() => void>();
   private readonly seenMessageExpiry = new Map<string, number>();
   private readonly messageExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly senderEpoch = new Map<string, number>();
@@ -338,6 +343,11 @@ export class RealtimeRoomSession {
       options.transportConnectionTimeoutMs,
       defaultTransportConnectionTimeoutMs,
       maximumTransportConnectionTimeoutMs,
+    );
+    this.transportPublishTimeoutMs = normalizedBoundedPositive(
+      options.transportPublishTimeoutMs,
+      defaultTransportPublishTimeoutMs,
+      maximumTransportPublishTimeoutMs,
     );
     this.refreshSkewMs = normalizedNonNegative(options.refreshSkewMs, defaultRefreshSkewMs);
     this.minimumRefreshDelayMs = normalizedPositive(options.minimumRefreshDelayMs, defaultMinimumRefreshDelayMs);
@@ -380,22 +390,28 @@ export class RealtimeRoomSession {
 
   /** Returns false rather than throwing when the transient channel is unavailable. */
   async publish(message: RealtimeEnvelope): Promise<boolean> {
-    if (!this.subscription?.publish || this.stateValue !== "live" || !this.token || this.token.expiresAt <= this.clock.now()) return false;
+    const subscription = this.subscription;
+    const scope = this.scopeValue;
+    const generation = this.generation;
+    if (!subscription?.publish || this.stateValue !== "live" || !this.token || this.token.expiresAt <= this.clock.now()) return false;
     const validated = parseEnvelope(message, this.clock.now(), {
       maxMessageTtlMs: this.maxMessageTtlMs,
       maxFutureIssuedAtMs: this.maxFutureIssuedAtMs,
       maxSerializedPayloadBytes: this.maxSerializedPayloadBytes,
     });
-    if (!validated || validated.missionId !== this.scopeValue?.missionId || validated.roomId !== this.scopeValue.roomId) return false;
+    if (!validated || validated.missionId !== scope?.missionId || validated.roomId !== scope.roomId) return false;
     const payload = parseRealtimePayload(validated.kind, validated.payload);
     if (!payload) return false;
     const typedMessage = { ...validated, payload };
     try {
-      await this.subscription.publish(typedMessage);
-      return true;
+      await this.publishWithDeadline(() => subscription.publish!(typedMessage));
+      return generation === this.generation && scope === this.scopeValue && subscription === this.subscription && this.stateValue === "live";
     } catch (error) {
       if (error instanceof RealtimePublishRateLimitError) return false;
-      this.handleFailure(error, this.generation);
+      if (generation === this.generation && scope === this.scopeValue && subscription === this.subscription) {
+        this.cancelPendingPublications();
+        this.handleFailure(error, generation);
+      }
       return false;
     }
   }
@@ -411,6 +427,10 @@ export class RealtimeRoomSession {
     if (this.reconnectTimer) this.clock.clearTimeout(this.reconnectTimer);
     this.refreshTimer = undefined;
     this.reconnectTimer = undefined;
+  }
+
+  private cancelPendingPublications() {
+    for (const cancel of [...this.cancelPublications]) cancel();
   }
 
   private clearTransient(reason: "authorization-changed" | "reconnect" | "scope-changed" | "stopped") {
@@ -438,6 +458,7 @@ export class RealtimeRoomSession {
   private async stopInternal(reason: "scope-changed" | "stopped", nextState: RoomSessionState) {
     this.cancelTokenAcquisition?.();
     this.cancelTransportConnection?.();
+    this.cancelPendingPublications();
     this.generation += 1;
     // A prior token/connect promise may still settle, but its generation is
     // invalid. Do not let it monopolize the next room's connection slot.
@@ -460,6 +481,42 @@ export class RealtimeRoomSession {
       if (this.connectInFlight === attempt) this.connectInFlight = undefined;
     });
     return attempt;
+  }
+
+  private publishWithDeadline(operation: () => void | Promise<void>): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let settled = false;
+    return new Promise<void>((resolve, reject) => {
+      const finish = (error?: Error) => {
+        if (settled) return;
+        settled = true;
+        if (timer !== undefined) this.clock.clearTimeout(timer);
+        this.cancelPublications.delete(cancel);
+        if (error) reject(error);
+        else resolve();
+      };
+      const cancel = () => finish(new Error("Realtime transport publish cancelled"));
+      this.cancelPublications.add(cancel);
+      timer = this.clock.setTimeout(
+        () => finish(new Error("Realtime transport publish timed out")),
+        this.transportPublishTimeoutMs,
+      );
+      let publication: Promise<void>;
+      try {
+        publication = Promise.resolve(operation());
+      } catch (error) {
+        finish(error instanceof RealtimePublishRateLimitError
+          ? error
+          : new Error("Realtime transport publish failed"));
+        return;
+      }
+      void publication.then(
+        () => finish(),
+        (error: unknown) => finish(error instanceof RealtimePublishRateLimitError
+          ? error
+          : new Error("Realtime transport publish failed")),
+      );
+    });
   }
 
   private acquireToken(scope: RealtimeRoomScope): Promise<RealtimeToken> {
@@ -552,6 +609,7 @@ export class RealtimeRoomSession {
     const generation = ++this.generation;
     const previous = this.subscription;
     if (previous) {
+      this.cancelPendingPublications();
       this.clearTransient("reconnect");
       this.detachSubscription(previous);
     }
@@ -597,6 +655,7 @@ export class RealtimeRoomSession {
 
   private handleFailure(error: unknown, generation: number) {
     if (generation !== this.generation || this.stateValue === "stopped") return;
+    this.cancelPendingPublications();
     this.options.onTransportFailure?.(error);
     const failureGeneration = ++this.generation;
     this.detachSubscription();
