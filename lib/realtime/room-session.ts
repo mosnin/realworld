@@ -613,21 +613,35 @@ function disposeTransportSubscription(
   });
 }
 
-function hasSerializedPayloadWithinLimit(value: unknown, maxBytes: number) {
+function freezeJsonPayload(value: unknown): unknown {
+  if (!isRecord(value)) return value;
+  for (const nested of Object.values(value)) freezeJsonPayload(nested);
+  return Object.freeze(value);
+}
+
+function snapshotSerializedPayload(value: unknown, maxBytes: number): { payload: unknown } | undefined {
   try {
     const serialized = JSON.stringify(value);
-    return typeof serialized === "string" && new TextEncoder().encode(serialized).byteLength <= maxBytes;
+    if (typeof serialized !== "string" || new TextEncoder().encode(serialized).byteLength > maxBytes) return undefined;
+    return { payload: freezeJsonPayload(JSON.parse(serialized)) };
   } catch {
-    return false;
+    return undefined;
   }
 }
 
-function appearsExpired(value: unknown, now: number) {
+type CapturedProperty = Readonly<{ value: unknown; read: boolean }>;
+type ParsedEnvelope = Readonly<{ envelope: RealtimeEnvelope | undefined; expired: boolean }>;
+
+function captureProperty(value: Record<string, unknown>, key: string): CapturedProperty {
   try {
-    return isRecord(value) && typeof value.expiresAtMs === "number" && value.expiresAtMs <= now;
+    return { value: value[key], read: true };
   } catch {
-    return false;
+    return { value: undefined, read: false };
   }
+}
+
+function invalidEnvelope(expiresAtMs: unknown, now: number): ParsedEnvelope {
+  return { envelope: undefined, expired: typeof expiresAtMs === "number" && expiresAtMs <= now };
 }
 
 function parseEnvelope(
@@ -635,11 +649,7 @@ function parseEnvelope(
   now: number,
   limits: Readonly<{ maxMessageTtlMs: number; maxFutureIssuedAtMs: number; maxSerializedPayloadBytes: number }>,
 ): RealtimeEnvelope | undefined {
-  try {
-    return parseEnvelopeUnchecked(value, now, limits);
-  } catch {
-    return undefined;
-  }
+  return parseEnvelopeResult(value, now, limits).envelope;
 }
 
 /**
@@ -654,33 +664,91 @@ export function validateRealtimeEnvelope(value: unknown, now: number = Date.now(
   });
 }
 
-function parseEnvelopeUnchecked(
+function parseEnvelopeResult(
   value: unknown,
   now: number,
   limits: Readonly<{ maxMessageTtlMs: number; maxFutureIssuedAtMs: number; maxSerializedPayloadBytes: number }>,
-): RealtimeEnvelope | undefined {
-  if (!isRecord(value) || !isRecord(value.sender)) return undefined;
-  const sender = value.sender;
-  const issuedAtMs = value.issuedAtMs;
-  const expiresAtMs = value.expiresAtMs;
-  const clientSeq = value.clientSeq;
-  const connectionEpoch = sender.connectionEpoch;
-  if (value.v !== 1
-    || !isNonEmptyString(value.kind)
-    || !isNonEmptyString(value.messageId)
-    || !isNonEmptyString(value.missionId)
-    || (value.roomId !== undefined && typeof value.roomId !== "string")
-    || !isNonEmptyString(sender.clientId)
-    || !isNonEmptyString(sender.clientInstanceId)
-    || !isFiniteNumber(connectionEpoch) || !Number.isSafeInteger(connectionEpoch) || connectionEpoch < 0
-    || !isFiniteNumber(clientSeq) || !Number.isSafeInteger(clientSeq) || clientSeq < 0
-    || !isFiniteNumber(issuedAtMs) || !isFiniteNumber(expiresAtMs)
-    || issuedAtMs > now + limits.maxFutureIssuedAtMs
-    || expiresAtMs < issuedAtMs
-    || expiresAtMs - issuedAtMs > limits.maxMessageTtlMs
-    || expiresAtMs <= now
-    || !hasSerializedPayloadWithinLimit(value.payload, limits.maxSerializedPayloadBytes)) return undefined;
-  return value as RealtimeEnvelope;
+): ParsedEnvelope {
+  try {
+    if (!isRecord(value)) {
+      observeAsyncResult(value);
+      return invalidEnvelope(undefined, now);
+    }
+    const top = {
+      v: captureProperty(value, "v"),
+      kind: captureProperty(value, "kind"),
+      messageId: captureProperty(value, "messageId"),
+      sender: captureProperty(value, "sender"),
+      missionId: captureProperty(value, "missionId"),
+      roomId: captureProperty(value, "roomId"),
+      issuedAtMs: captureProperty(value, "issuedAtMs"),
+      expiresAtMs: captureProperty(value, "expiresAtMs"),
+      clientSeq: captureProperty(value, "clientSeq"),
+      payload: captureProperty(value, "payload"),
+    };
+    observeAsyncResult(value);
+    for (const property of Object.values(top)) observeAsyncResult(property.value);
+    const expiresAtMs = top.expiresAtMs.value;
+    if (Object.values(top).some((property) => !property.read) || !isRecord(top.sender.value)) return invalidEnvelope(expiresAtMs, now);
+    const senderValue = top.sender.value;
+    const sender = {
+      clientId: captureProperty(senderValue, "clientId"),
+      clientInstanceId: captureProperty(senderValue, "clientInstanceId"),
+      connectionEpoch: captureProperty(senderValue, "connectionEpoch"),
+    };
+    observeAsyncResult(senderValue);
+    for (const property of Object.values(sender)) observeAsyncResult(property.value);
+    if (Object.values(sender).some((property) => !property.read)) return invalidEnvelope(expiresAtMs, now);
+
+    const v = top.v.value;
+    const kind = top.kind.value;
+    const messageId = top.messageId.value;
+    const missionId = top.missionId.value;
+    const roomId = top.roomId.value;
+    const issuedAtMs = top.issuedAtMs.value;
+    const clientSeq = top.clientSeq.value;
+    const clientId = sender.clientId.value;
+    const clientInstanceId = sender.clientInstanceId.value;
+    const connectionEpoch = sender.connectionEpoch.value;
+    if (v !== 1
+      || !isNonEmptyString(kind)
+      || !isNonEmptyString(messageId)
+      || !isNonEmptyString(missionId)
+      || (roomId !== undefined && typeof roomId !== "string")
+      || !isNonEmptyString(clientId)
+      || !isNonEmptyString(clientInstanceId)
+      || !isFiniteNumber(connectionEpoch) || !Number.isSafeInteger(connectionEpoch) || connectionEpoch < 0
+      || !isFiniteNumber(clientSeq) || !Number.isSafeInteger(clientSeq) || clientSeq < 0
+      || !isFiniteNumber(issuedAtMs) || !isFiniteNumber(expiresAtMs)
+      || issuedAtMs > now + limits.maxFutureIssuedAtMs
+      || expiresAtMs < issuedAtMs
+      || expiresAtMs - issuedAtMs > limits.maxMessageTtlMs
+      || expiresAtMs <= now) return invalidEnvelope(expiresAtMs, now);
+    const payload = snapshotSerializedPayload(top.payload.value, limits.maxSerializedPayloadBytes);
+    if (!payload) return invalidEnvelope(expiresAtMs, now);
+    return {
+      envelope: Object.freeze({
+        v: 1,
+        kind,
+        messageId,
+        sender: Object.freeze({ clientId, clientInstanceId, connectionEpoch }),
+        missionId,
+        roomId,
+        issuedAtMs,
+        expiresAtMs,
+        clientSeq,
+        payload: payload.payload,
+      }),
+      expired: false,
+    };
+  } catch {
+    observeAsyncResult(value);
+    return invalidEnvelope(undefined, now);
+  }
+}
+
+function withCanonicalPayload(envelope: RealtimeEnvelope, payload: unknown): RealtimeEnvelope {
+  return Object.freeze({ ...envelope, payload: freezeJsonPayload(payload) });
 }
 
 /**
@@ -803,7 +871,7 @@ export class RealtimeRoomSession {
     if (!validated || validated.missionId !== scope?.missionId || validated.roomId !== scope.roomId) return false;
     const payload = parseRealtimePayload(validated.kind, validated.payload);
     if (!payload) return false;
-    const typedMessage = { ...validated, payload };
+    const typedMessage = withCanonicalPayload(validated, payload);
     try {
       await this.publishWithDeadline(() => subscription.publish!(typedMessage));
       return generation === this.generation && scope === this.scopeValue && subscription === this.subscription && this.stateValue === "live";
@@ -1114,16 +1182,17 @@ export class RealtimeRoomSession {
   private acceptMessage(value: unknown): RealtimeEnvelope | Exclude<RealtimeMessageDecision, "accepted"> {
     const now = this.clock.now();
     if (this.stateValue !== "live" || !this.scopeValue) return "inactive";
-    const message = parseEnvelope(value, now, {
+    const parsed = parseEnvelopeResult(value, now, {
       maxMessageTtlMs: this.maxMessageTtlMs,
       maxFutureIssuedAtMs: this.maxFutureIssuedAtMs,
       maxSerializedPayloadBytes: this.maxSerializedPayloadBytes,
     });
-    if (!message) return appearsExpired(value, now) ? "expired" : "malformed";
+    const message = parsed.envelope;
+    if (!message) return parsed.expired ? "expired" : "malformed";
     if (message.missionId !== this.scopeValue.missionId || message.roomId !== this.scopeValue.roomId) return "out-of-scope";
     const payload = parseRealtimePayload(message.kind, message.payload);
     if (!payload) return "malformed";
-    const typedMessage = { ...message, payload };
+    const typedMessage = withCanonicalPayload(message, payload);
     this.evictExpiredMessageIds(now);
     if (this.seenMessageExpiry.has(typedMessage.messageId)) return "duplicate";
     if (this.seenMessageExpiry.size >= this.maxTrackedMessageIds) return "capacity";

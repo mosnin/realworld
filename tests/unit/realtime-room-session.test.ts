@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { RealtimePublishRateLimitError } from "../../lib/realtime/signal-governor";
 import {
   RealtimeRoomSession,
+  validateRealtimeEnvelope,
   type RealtimeEnvelope,
   type RoomSessionOptions,
   type RealtimeToken,
@@ -3582,6 +3583,103 @@ describe("RealtimeRoomSession", () => {
     expect(session.scope).toEqual({ missionId: "mission-a", roomId: "room-b" });
     expect(connections[1]!.input.scope).toEqual({ missionId: "mission-a", roomId: "room-b" });
     await session.stop();
+  });
+
+  it("canonicalizes hostile envelope getters once into immutable validation and session snapshots", async () => {
+    const clock = new FakeClock();
+    const { transport, connections } = createTransport();
+    const received: RealtimeEnvelope[] = [];
+    const session = new RealtimeRoomSession({
+      tokenProvider: async () => token(clock.now() + 300_000),
+      transport,
+      clock,
+      onMessage: (value) => received.push(value),
+    });
+    const base = message(clock, { messageId: "canonical-message", clientSeq: 1 });
+    const reads: Record<string, number> = {};
+    const count = (key: string, value: unknown) => {
+      Object.defineProperty(raw, key, { get: () => { reads[key] = (reads[key] ?? 0) + 1; return value; } });
+    };
+    const raw: Record<string, unknown> = {};
+    const sender: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(base.sender)) {
+      Object.defineProperty(sender, key, { get: () => { const name = `sender.${key}`; reads[name] = (reads[name] ?? 0) + 1; return value; } });
+    }
+    const payload: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(base.payload as Record<string, unknown>)) {
+      Object.defineProperty(payload, key, { enumerable: true, get: () => { const name = `payload.${key}`; reads[name] = (reads[name] ?? 0) + 1; return value; } });
+    }
+    for (const key of ["v", "kind", "messageId", "missionId", "roomId", "issuedAtMs", "expiresAtMs", "clientSeq"] as const) count(key, base[key]);
+    count("sender", sender);
+    count("payload", payload);
+
+    const validated = validateRealtimeEnvelope(raw, clock.now());
+    expect(validated).toEqual(base);
+    expect(Object.isFrozen(validated)).toBe(true);
+    expect(Object.isFrozen(validated!.sender)).toBe(true);
+    expect(Object.isFrozen(validated!.payload)).toBe(true);
+    expect(Object.values(reads).every((value) => value === 1)).toBe(true);
+    const mutable = message(clock, { messageId: "mutable-message", clientSeq: 2 });
+    const detached = validateRealtimeEnvelope(mutable, clock.now())!;
+    const mutableRecord = mutable as unknown as {
+      messageId: string;
+      missionId: string;
+      sender: { clientId: string };
+      payload: { x: number };
+    };
+    mutableRecord.messageId = "redirected-message";
+    mutableRecord.missionId = "redirected-mission";
+    mutableRecord.sender.clientId = "redirected-client";
+    mutableRecord.payload.x = 0.99;
+    expect(detached).toMatchObject({
+      messageId: "mutable-message",
+      missionId: "mission-a",
+      sender: { clientId: "remote-client" },
+      payload: { x: 0.5 },
+    });
+    await session.start({ missionId: "mission-a", roomId: "room-a" });
+    connections[0]!.input.onMessage(raw);
+    await expect(session.publish(raw as RealtimeEnvelope)).resolves.toBe(true);
+    expect(received).toHaveLength(1);
+    expect(connections[0]!.publish).toHaveBeenCalledWith(expect.objectContaining({ messageId: base.messageId, missionId: "mission-a" }));
+    await session.stop();
+  });
+
+  it("fails closed for throwing and asynchronous hostile envelope getters without leaking provider detail", async () => {
+    const providerSecret = "hostile-envelope-secret";
+    const modes = ["throw", "rejected", "hostile-then"] as const;
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      for (const mode of modes) {
+        const clock = new FakeClock();
+        const { transport, connections } = createTransport();
+        const received: RealtimeEnvelope[] = [];
+        const session = new RealtimeRoomSession({ tokenProvider: async () => token(clock.now() + 300_000), transport, clock, onMessage: (value) => received.push(value) });
+        const raw = { ...message(clock, { messageId: `hostile-${mode}` }) } as Record<string, unknown>;
+        Object.defineProperty(raw, "messageId", {
+          get: () => {
+            if (mode === "throw") throw new Error(providerSecret);
+            if (mode === "rejected") return Promise.reject(new Error(providerSecret));
+            const thenable = {};
+            Object.defineProperty(thenable, "then", { get: () => { throw new Error(providerSecret); } });
+            return thenable;
+          },
+        });
+        expect(validateRealtimeEnvelope(raw, clock.now())).toBeUndefined();
+        await session.start({ missionId: "mission-a", roomId: "room-a" });
+        connections[0]!.input.onMessage(raw);
+        await expect(session.publish(raw as RealtimeEnvelope)).resolves.toBe(false);
+        expect(received).toEqual([]);
+        expect(connections[0]!.publish).not.toHaveBeenCalled();
+        await session.stop();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
   });
 
   it("snapshots recovery policy getters and receivers once, ignoring later replacements", async () => {
