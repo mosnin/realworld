@@ -5,7 +5,7 @@
   "currentPhase": 1,
   "phaseName": "Production foundation",
   "startedAt": "2026-07-27T00:00:00-04:00",
-  "lastUpdatedAt": "2026-07-27T22:29:39-04:00",
+  "lastUpdatedAt": "2026-07-27T22:32:49-04:00",
   "exactNextActions": [
     "Create or connect a cloud Convex development deployment and verify the current preview creates and reloads a durable Mission",
     "Add an authenticated Move board to the selected Mission with create, dependency, and lifecycle controls",
@@ -21,7 +21,7 @@
     "artifactStudio": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"artifact domain and surfaces","exactNextAction":"Wait for client, realtime, and agent contracts"},
     "discoverySocial": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"discovery and contribution surfaces","exactNextAction":"Wait for Artifact Studio and reputation contracts"},
     "trustGovernance": {"status":"review","model":"gpt-5.6-terra","writeScope":"docs/program/trust-quality-release.md","lastMeaningfulHeartbeatAt":"2026-07-27T22:29:00-04:00","evidence":"commits c1f156b, e90d1ee, 44d944b, 5f49c17, d21d37a, 90f4d11, 6792212, 2c1d1f8, and 8b395eb; deny-by-default room and Move scope, all exposed room-write variants, owner-only Constitution, Move writer roles, dependency visibility, membership expiry, archived mutation freeze, and replay authorization have automated coverage","exactNextAction":"Complete per-role Move transition variants and adversarial dependency tests"},
-    "qualityOperations": {"status":"review","model":"gpt-5.6-terra","writeScope":"CI and verification infrastructure","lastMeaningfulHeartbeatAt":"2026-07-27T22:29:00-04:00","evidence":"Local gate passes lint, typecheck, 32 automated tests, Convex validation, production build, fourteen authenticated Chromium journeys, and a deterministic local 50-participant Convex isolation/concurrency simulation. The simulation is not browser, network, Ably, or production load evidence; hosted CI confirmation is pending","exactNextAction":"Confirm the Constitution, Move, and local 50-participant slice in hosted CI, then add real network and failure-recovery evidence"}
+    "qualityOperations": {"status":"review","model":"gpt-5.6-terra","writeScope":"CI and verification infrastructure","lastMeaningfulHeartbeatAt":"2026-07-27T22:32:00-04:00","evidence":"GitHub Actions run 30323307089 passes install, lint, typecheck, 32 automated tests, Convex validation, production build, fourteen authenticated Chromium journeys, the deterministic local 50-participant Convex isolation/concurrency simulation, and foundation evidence. The simulation is not browser, network, Ably, or production load evidence","exactNextAction":"Add real network, browser, Ably, and failure-recovery evidence"}
   },
   "orchestration": {
     "preferredRuntime": "orca",
