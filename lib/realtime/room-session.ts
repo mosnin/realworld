@@ -91,6 +91,85 @@ const defaultClock: RealtimeClock = {
   setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
   clearTimeout: (timer) => clearTimeout(timer),
 };
+
+function snapshotClock(options: RoomSessionOptions): RealtimeClock {
+  try {
+    const clock = options.clock;
+    if (clock === undefined) return defaultClock;
+    if ((typeof clock !== "object" && typeof clock !== "function") || clock === null) return defaultClock;
+    const now = clock.now;
+    const setTimeout = clock.setTimeout;
+    const clearTimeout = clock.clearTimeout;
+    if (typeof now !== "function" || typeof setTimeout !== "function" || typeof clearTimeout !== "function") return defaultClock;
+    type TimerGuard = { active: boolean; handle: unknown; usesDefaultClock: boolean };
+    const guardsByHandle = new Map<unknown, Set<TimerGuard>>();
+    const unregister = (guard: TimerGuard) => {
+      const guards = guardsByHandle.get(guard.handle);
+      if (!guards) return;
+      guards.delete(guard);
+      if (guards.size === 0) guardsByHandle.delete(guard.handle);
+    };
+    const deactivate = (guard: TimerGuard) => {
+      if (!guard.active) return;
+      guard.active = false;
+      unregister(guard);
+    };
+    const schedule = (callback: () => void, delayMs: number, usesDefaultClock: boolean): ReturnType<typeof setTimeout> => {
+      const guard: TimerGuard = { active: true, handle: undefined, usesDefaultClock };
+      const wrapped = () => {
+        if (!guard.active) return;
+        deactivate(guard);
+        callback();
+      };
+      let handle: ReturnType<typeof setTimeout>;
+      try {
+        handle = usesDefaultClock
+          ? defaultClock.setTimeout(wrapped, delayMs)
+          : Reflect.apply(setTimeout, clock, [wrapped, delayMs]) as ReturnType<typeof setTimeout>;
+      } catch (error) {
+        deactivate(guard);
+        throw error;
+      }
+      guard.handle = handle;
+      if (guard.active) {
+        const guards = guardsByHandle.get(handle) ?? new Set<TimerGuard>();
+        guards.add(guard);
+        guardsByHandle.set(handle, guards);
+      }
+      return handle;
+    };
+    return {
+      now: () => {
+        try {
+          const value = Reflect.apply(now, clock, []);
+          return typeof value === "number" && Number.isFinite(value) ? value : defaultClock.now();
+        } catch {
+          return defaultClock.now();
+        }
+      },
+      setTimeout: (callback, delayMs) => {
+        try {
+          return schedule(callback, delayMs, false);
+        } catch {
+          return schedule(callback, delayMs, true);
+        }
+      },
+      clearTimeout: (timer) => {
+        const guards = guardsByHandle.get(timer);
+        const usesDefaultClock = guards !== undefined && [...guards].some((guard) => guard.usesDefaultClock);
+        if (guards) for (const guard of [...guards]) deactivate(guard);
+        try {
+          if (usesDefaultClock) defaultClock.clearTimeout(timer);
+          else Reflect.apply(clearTimeout, clock, [timer]);
+        } catch {
+          defaultClock.clearTimeout(timer);
+        }
+      },
+    };
+  } catch {
+    return defaultClock;
+  }
+}
 const defaultRefreshSkewMs = 30_000;
 const defaultMinimumRefreshDelayMs = 1_000;
 const defaultTokenAcquisitionTimeoutMs = 10_000;
@@ -476,7 +555,7 @@ export class RealtimeRoomSession {
     this.onTransientMessageExpired = snapshotObserver(options, () => options.onTransientMessageExpired);
     this.onTransientStateCleared = snapshotObserver(options, () => options.onTransientStateCleared);
     this.onTransportFailure = snapshotObserver(options, () => options.onTransportFailure);
-    this.clock = options.clock ?? defaultClock;
+    this.clock = snapshotClock(options);
     this.tokenAcquisitionTimeoutMs = normalizedBoundedPositive(
       options.tokenAcquisitionTimeoutMs,
       defaultTokenAcquisitionTimeoutMs,

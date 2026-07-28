@@ -2408,6 +2408,293 @@ describe("RealtimeRoomSession", () => {
     expect(replacementConnect).not.toHaveBeenCalled();
   });
 
+  it("captures one receiver-bound clock across start, refresh, recovery, expiry, and cleanup despite later mutation", async () => {
+    const backingClock = new FakeClock();
+    const nowReceivers: unknown[] = [];
+    const setReceivers: unknown[] = [];
+    const clearReceivers: unknown[] = [];
+    const originalNow = function (this: unknown) {
+      nowReceivers.push(this);
+      return backingClock.now();
+    };
+    const originalSetTimeout = function (this: unknown, callback: () => void, delayMs: number) {
+      setReceivers.push(this);
+      return backingClock.setTimeout(callback, delayMs);
+    };
+    const originalClearTimeout = function (this: unknown, timer: ReturnType<typeof setTimeout>) {
+      clearReceivers.push(this);
+      return backingClock.clearTimeout(timer);
+    };
+    const capturedClock = {};
+    let nowMethod: unknown = originalNow;
+    let setTimeoutMethod: unknown = originalSetTimeout;
+    let clearTimeoutMethod: unknown = originalClearTimeout;
+    let nowReads = 0;
+    let setTimeoutReads = 0;
+    let clearTimeoutReads = 0;
+    Object.defineProperty(capturedClock, "now", {
+      get: () => {
+        nowReads += 1;
+        return nowMethod;
+      },
+    });
+    Object.defineProperty(capturedClock, "setTimeout", {
+      get: () => {
+        setTimeoutReads += 1;
+        return setTimeoutMethod;
+      },
+    });
+    Object.defineProperty(capturedClock, "clearTimeout", {
+      get: () => {
+        clearTimeoutReads += 1;
+        return clearTimeoutMethod;
+      },
+    });
+    let clock: unknown = capturedClock;
+    let clockReads = 0;
+    const options = {
+      reconnectDelayMs: () => 11,
+      tokenProvider: async () => token(backingClock.now() + 300_000),
+    } as unknown as RoomSessionOptions;
+    Object.defineProperty(options, "clock", {
+      get: () => {
+        clockReads += 1;
+        return clock;
+      },
+    });
+    const { transport, connect, connections } = createTransport();
+    Object.defineProperty(options, "transport", { value: transport });
+    const expired: RealtimeEnvelope[] = [];
+    Object.defineProperty(options, "onTransientMessageExpired", { value: (value: RealtimeEnvelope) => expired.push(value) });
+
+    const session = new RealtimeRoomSession(options);
+    const replacementClock = {
+      now: vi.fn(() => { throw new Error("replacement clock must stay unused"); }),
+      setTimeout: vi.fn(() => { throw new Error("replacement clock must stay unused"); }),
+      clearTimeout: vi.fn(() => { throw new Error("replacement clock must stay unused"); }),
+    };
+    clock = replacementClock;
+    nowMethod = replacementClock.now;
+    setTimeoutMethod = replacementClock.setTimeout;
+    clearTimeoutMethod = replacementClock.clearTimeout;
+
+    await session.start({ missionId: "mission-a", roomId: "room-a" });
+    await session.refresh();
+    connections[1]!.input.onFailure(new Error("ordinary failure"));
+    expect(session.state).toBe("degraded");
+    backingClock.advance(11);
+    await vi.waitFor(() => expect(session.state).toBe("live"));
+    const expiring = message(backingClock, { messageId: "captured-clock-expiry", expiresAtMs: backingClock.now() + 6 });
+    connections[2]!.input.onMessage(expiring);
+    backingClock.advance(6);
+    await flush();
+    await session.stop();
+
+    expect(clockReads).toBe(1);
+    expect(nowReads).toBe(1);
+    expect(setTimeoutReads).toBe(1);
+    expect(clearTimeoutReads).toBe(1);
+    expect(nowReceivers.every((receiver) => receiver === capturedClock)).toBe(true);
+    expect(setReceivers.every((receiver) => receiver === capturedClock)).toBe(true);
+    expect(clearReceivers.every((receiver) => receiver === capturedClock)).toBe(true);
+    expect(nowReceivers.length).toBeGreaterThan(0);
+    expect(setReceivers.length).toBeGreaterThan(0);
+    expect(clearReceivers.length).toBeGreaterThan(0);
+    expect(replacementClock.now).not.toHaveBeenCalled();
+    expect(replacementClock.setTimeout).not.toHaveBeenCalled();
+    expect(replacementClock.clearTimeout).not.toHaveBeenCalled();
+    expect(connect).toHaveBeenCalledTimes(3);
+    expect(expired).toEqual([expiring]);
+  });
+
+  it("falls back safely from absent, malformed, and hostile clock surfaces without leaking or retaining session work", async () => {
+    const providerSecret = "hostile-clock-secret";
+    const modes = [
+      "absent",
+      "nonrecord",
+      "throwing-clock-getter",
+      "missing-methods",
+      "throwing-now-getter",
+      "throwing-set-timeout-getter",
+      "throwing-clear-timeout-getter",
+    ] as const;
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      for (const mode of modes) {
+        const { transport, connect } = createTransport();
+        const failures: unknown[] = [];
+        const options = {
+          tokenProvider: async () => token(Date.now() + 300_000),
+          transport,
+          onTransportFailure: (error: unknown) => failures.push(error),
+        } as RoomSessionOptions;
+        if (mode !== "absent") {
+          Object.defineProperty(options, "clock", {
+            get: () => {
+              if (mode === "nonrecord") return providerSecret;
+              if (mode === "throwing-clock-getter") throw new Error(providerSecret);
+              if (mode === "missing-methods") return {};
+              const hostileClock = {};
+              Object.defineProperty(hostileClock, "now", mode === "throwing-now-getter"
+                ? { get: () => { throw new Error(providerSecret); } }
+                : { value: () => Date.now() });
+              Object.defineProperty(hostileClock, "setTimeout", mode === "throwing-set-timeout-getter"
+                ? { get: () => { throw new Error(providerSecret); } }
+                : { value: setTimeout });
+              Object.defineProperty(hostileClock, "clearTimeout", mode === "throwing-clear-timeout-getter"
+                ? { get: () => { throw new Error(providerSecret); } }
+                : { value: clearTimeout });
+              return hostileClock;
+            },
+          });
+        }
+
+        let session: RealtimeRoomSession | undefined;
+        expect(() => { session = new RealtimeRoomSession(options); }).not.toThrow();
+        await session!.start({ missionId: "mission-a", roomId: "room-a" });
+        expect(session!.state).toBe("live");
+        await session!.stop();
+        expect(session!.state).toBe("stopped");
+        expect(connect).toHaveBeenCalledTimes(1);
+        expect(failures).toEqual([]);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
+  it("falls back when a captured now method returns invalid values or throws", async () => {
+    const providerSecret = "clock-now-provider-secret";
+    const modes: Array<() => unknown> = [
+      () => Number.NaN,
+      () => "not-a-number",
+      () => { throw new Error(providerSecret); },
+    ];
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      for (const now of modes) {
+        const retained: Array<() => void> = [];
+        const { transport, connect } = createTransport();
+        const session = new RealtimeRoomSession({
+          tokenProvider: async () => token(Date.now() + 300_000),
+          transport,
+          clock: {
+            now: now as () => number,
+            setTimeout: (callback) => {
+              retained.push(callback);
+              return retained.length as unknown as ReturnType<typeof setTimeout>;
+            },
+            clearTimeout: () => undefined,
+          },
+        });
+        await session.start({ missionId: "mission-a", roomId: "room-a" });
+        expect(session.state).toBe("live");
+        await session.stop();
+        for (const callback of retained) callback();
+        await flush();
+        expect(session.state).toBe("stopped");
+        expect(connect).toHaveBeenCalledTimes(1);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
+  it("deactivates callbacks retained by a throwing setTimeout before using its fallback schedule", async () => {
+    const providerSecret = "clock-set-timeout-provider-secret";
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+    const retained: Array<() => void> = [];
+    const { transport, connect, connections } = createTransport();
+    const failures: unknown[] = [];
+    const session = new RealtimeRoomSession({
+      tokenProvider: async () => token(Date.now() + 300_000),
+      transport,
+      reconnectDelayMs: () => 30_000,
+      onTransportFailure: (error) => failures.push(error),
+      clock: {
+        now: () => Date.now(),
+        setTimeout: (callback) => {
+          retained.push(callback);
+          throw new Error(providerSecret);
+        },
+        clearTimeout: (timer) => clearTimeout(timer),
+      },
+    });
+    await session.start({ missionId: "mission-a", roomId: "room-a" });
+    connections[0]!.input.onFailure(new Error("ordinary failure"));
+    expect(session.state).toBe("degraded");
+    expect(failures).toHaveLength(1);
+    const callbacksBeforeStop = [...retained];
+
+    for (const callback of callbacksBeforeStop) callback();
+    await flush();
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(session.state).toBe("degraded");
+    await session.stop();
+    expect(session.state).toBe("stopped");
+    expect(String(failures[0])).not.toContain(providerSecret);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
+  it("deactivates opaque timer callbacks when clearTimeout throws during stop or exact handoff", async () => {
+    const providerSecret = "clock-clear-timeout-provider-secret";
+    const oldScope = { missionId: "mission-a", roomId: "room-a" };
+    const newScope = { missionId: "mission-a", roomId: "room-b" };
+    for (const action of ["stop", "handoff"] as const) {
+      const clock = new FakeClock();
+      const callbacks: Array<() => void> = [];
+      const { transport, connect, connections } = createTransport();
+      const expired: RealtimeEnvelope[] = [];
+      const session = new RealtimeRoomSession({
+        tokenProvider: async () => token(clock.now() + 300_000),
+        transport,
+        reconnectDelayMs: () => 11,
+        onTransientMessageExpired: (value) => expired.push(value),
+        clock: {
+          now: () => clock.now(),
+          setTimeout: (callback) => {
+            callbacks.push(callback);
+            return { timer: callbacks.length } as unknown as ReturnType<typeof setTimeout>;
+          },
+          clearTimeout: () => { throw new Error(providerSecret); },
+        },
+      });
+      await session.start(oldScope);
+      const expiring = message(clock, { messageId: `opaque-${action}`, expiresAtMs: clock.now() + 6 });
+      connections[0]!.input.onMessage(expiring);
+      connections[0]!.input.onFailure(new Error("ordinary failure"));
+      expect(session.state).toBe("degraded");
+      const staleCallbacks = [...callbacks];
+
+      if (action === "stop") await session.stop();
+      else await session.start(newScope);
+      await vi.waitFor(() => expect(session.state).toBe(action === "stop" ? "stopped" : "live"));
+      for (const callback of staleCallbacks) callback();
+      await flush();
+
+      expect(session.state).toBe(action === "stop" ? "stopped" : "live");
+      expect(connect).toHaveBeenCalledTimes(action === "stop" ? 1 : 2);
+      if (action === "handoff") expect(session.scope).toEqual(newScope);
+      expect(expired).toEqual([]);
+      expect(connections[0]!.unsubscribe).toHaveBeenCalledTimes(1);
+    }
+  });
+
   it("expires accepted transient messages on their visibility deadline", async () => {
     const clock = new FakeClock();
     const { transport, connections } = createTransport();
