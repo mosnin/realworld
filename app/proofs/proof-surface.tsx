@@ -157,7 +157,7 @@ export function ProofSurface({ mission, rooms, moves }: Readonly<{ mission: Miss
 
   return <section aria-label="Mission Proofs" className="proof-surface">
     <button className="proof-surface__trigger" onClick={openComposer} type="button"><span aria-hidden="true">✓</span> {canCreate ? "Open Proofs" : "View Proofs"}{proofs === undefined ? "" : ` (${proofs.length})`}</button>
-    <div aria-label="Proofs anchored to Mission rooms" className="proof-beacons">{proofs?.map((proof, index) => {
+    <div aria-label="Proofs anchored to Mission rooms" className="proof-beacons" role="group">{proofs?.map((proof, index) => {
       const room = rooms.find((candidate) => candidate._id === proof.roomId);
       return <button aria-label={`Open Proof: ${proof.title}, ${statusLabel(proof.status)}`} className={`proof-beacon proof-beacon--${proof.status}`} key={proof._id} onClick={(event) => inspectProof(proof._id, event)} style={{ left: `calc(${room?.x ?? 50}% + ${(index % 2) * 14}px)`, top: `calc(${room?.y ?? 50}% + ${-68 - Math.floor(index / 2) * 12}px)` }} type="button"><span aria-hidden="true">✓</span><strong>{proof.title}</strong><small>{statusLabel(proof.status)}</small></button>;
     })}</div>

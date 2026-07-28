@@ -51,7 +51,7 @@ jobs:
         run: pnpm exec convex dev --once --tail-logs disable --start "node scripts/verification/run-authenticated-e2e.mjs"
       - name: Verify foundation evidence
         env:
-          RW_EVIDENCE_AUTOMATED: install,lint,typecheck,unit,convex-tests,build,chromium
+          RW_EVIDENCE_AUTOMATED: install,lint,typecheck,unit,convex-tests,build,chromium,accessibility
           RW_EVIDENCE_RENDER: mission-world
           RW_EVIDENCE_INTERACTION: mission-world,room-directory,keyboard
         run: node scripts/verification/phase-evidence.mjs --phase=foundation

@@ -284,7 +284,7 @@ function RoomLandmark({
 function PersonToken({ name, index }: Readonly<{ name: string; index: number }>) {
   const isAgent = name.endsWith("Agent");
   return (
-    <span className={`person-token ${isAgent ? "person-token--agent" : ""}`} title={name} aria-label={name}>
+    <span className={`person-token ${isAgent ? "person-token--agent" : ""}`} role="img" title={name} aria-label={name}>
       {isAgent ? <Icon name="agent" /> : name.slice(0, 1)}
       <i className={`person-token__dot person-token__dot--${index % 3}`} aria-hidden="true" />
     </span>

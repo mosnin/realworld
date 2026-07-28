@@ -315,7 +315,7 @@ export function CallSurface({
         <Icon name="spark" /> {canCreate ? "Issue Call" : "View Calls"}{calls === undefined ? "" : ` (${calls.length})`}
       </button>
 
-      <div className="call-beacons" aria-label="Calls anchored to Mission rooms">
+      <div className="call-beacons" role="group" aria-label="Calls anchored to Mission rooms">
         {calls?.map((call, index) => {
           const room = rooms.find((candidate) => candidate._id === call.roomId);
           return (

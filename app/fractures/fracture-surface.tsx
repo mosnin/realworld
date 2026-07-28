@@ -180,7 +180,7 @@ export function FractureSurface({
   return (
     <section className="fracture-surface" aria-label="Mission Fractures">
       <button className="fracture-surface__trigger" onClick={openComposer} type="button"><Icon name="branch" /> {canCreate ? "Open Fractures" : "View Fractures"}{fractures === undefined ? "" : ` (${fractures.length})`}</button>
-      <div aria-label="Fractures anchored to Mission rooms" className="fracture-beacons">
+      <div aria-label="Fractures anchored to Mission rooms" className="fracture-beacons" role="group">
         {fractures?.map((fracture, index) => {
           const room = rooms.find((candidate) => candidate._id === fracture.roomId);
           return <button aria-label={`Open Fracture: ${fracture.title}, ${statusLabel(fracture.status)}, ${fracture.severity} severity`} className={`fracture-beacon fracture-beacon--${fracture.severity} fracture-beacon--${fracture.status}`} key={fracture._id} onClick={(event) => inspectFracture(fracture._id, event)} style={{ left: `calc(${room?.x ?? 50}% + ${(index % 2) * 14}px)`, top: `calc(${room?.y ?? 44}% + ${34 + Math.floor(index / 2) * 12}px)` }} type="button"><span aria-hidden="true"><Icon name="branch" /></span><strong>{fracture.title}</strong><small>{fracture.severity} · {statusLabel(fracture.status)}</small></button>;

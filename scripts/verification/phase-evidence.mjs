@@ -7,7 +7,7 @@ const phase = phaseArgument?.split("=", 2)[1] ?? "foundation";
 
 const requirements = {
   foundation: {
-    automated: ["install", "lint", "typecheck", "unit", "convex-tests", "build", "chromium"],
+    automated: ["install", "lint", "typecheck", "unit", "convex-tests", "build", "chromium", "accessibility"],
     render: ["mission-world"],
     interaction: ["mission-world", "room-directory", "keyboard"],
     role: [],
@@ -15,7 +15,7 @@ const requirements = {
     deployment: [],
   },
   phase1: {
-    automated: ["install", "lint", "typecheck", "unit", "convex-tests", "build", "chromium"],
+    automated: ["install", "lint", "typecheck", "unit", "convex-tests", "build", "chromium", "accessibility"],
     render: ["mission-world", "authenticated-shell"],
     interaction: ["mission-world", "room-directory", "keyboard", "authenticated-shell"],
     role: ["authorization"],
