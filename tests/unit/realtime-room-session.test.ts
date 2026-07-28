@@ -3295,6 +3295,181 @@ describe("RealtimeRoomSession", () => {
     }
   });
 
+  it("captures message-id capacity once and recovers capacity when captured TTL entries expire", async () => {
+    const providerSecret = "tracked-message-mutation-secret";
+    const clock = new FakeClock();
+    const { transport, connections } = createTransport();
+    const received: RealtimeEnvelope[] = [];
+    const reads = { maxTrackedMessageIds: 0, maxTrackedSenderStreams: 0 };
+    let maxTrackedMessageIds: unknown = 2;
+    let maxTrackedSenderStreams: unknown = 10;
+    const options = {
+      tokenProvider: async () => token(clock.now() + 300_000),
+      transport,
+      clock,
+      onMessage: (value: RealtimeEnvelope) => received.push(value),
+    } as unknown as RoomSessionOptions;
+    Object.defineProperties(options, {
+      maxTrackedMessageIds: {
+        get: () => {
+          reads.maxTrackedMessageIds += 1;
+          return maxTrackedMessageIds;
+        },
+      },
+      maxTrackedSenderStreams: {
+        get: () => {
+          reads.maxTrackedSenderStreams += 1;
+          return maxTrackedSenderStreams;
+        },
+      },
+    });
+    const session = new RealtimeRoomSession(options);
+    maxTrackedMessageIds = providerSecret;
+    maxTrackedSenderStreams = providerSecret;
+    await session.start({ missionId: "mission-a", roomId: "room-a" });
+    const current = clock.now();
+    const first = message(clock, { messageId: "capacity-1", clientSeq: 1, expiresAtMs: current + 5 });
+    const second = message(clock, { messageId: "capacity-2", clientSeq: 2, expiresAtMs: current + 5 });
+    const third = message(clock, { messageId: "capacity-3", clientSeq: 3, expiresAtMs: current + 5 });
+    connections[0]!.input.onMessage(first);
+    connections[0]!.input.onMessage(second);
+    connections[0]!.input.onMessage(third);
+    expect(received.map((value) => value.messageId)).toEqual([first.messageId, second.messageId]);
+    clock.advance(5);
+    const recovered = message(clock, { ...third, expiresAtMs: clock.now() + 5 });
+    connections[0]!.input.onMessage(recovered);
+
+    expect(reads).toEqual({ maxTrackedMessageIds: 1, maxTrackedSenderStreams: 1 });
+    expect(received.map((value) => value.messageId)).toEqual([first.messageId, second.messageId, recovered.messageId]);
+    await session.stop();
+  });
+
+  it("captures sender-stream capacity once and evicts the LRU stream with sequence cleanup", async () => {
+    const providerSecret = "tracked-sender-mutation-secret";
+    const clock = new FakeClock();
+    const { transport, connections } = createTransport();
+    const received: RealtimeEnvelope[] = [];
+    const reads = { maxTrackedMessageIds: 0, maxTrackedSenderStreams: 0 };
+    let maxTrackedMessageIds: unknown = 10;
+    let maxTrackedSenderStreams: unknown = 2;
+    const options = {
+      tokenProvider: async () => token(clock.now() + 300_000),
+      transport,
+      clock,
+      onMessage: (value: RealtimeEnvelope) => received.push(value),
+    } as unknown as RoomSessionOptions;
+    Object.defineProperties(options, {
+      maxTrackedMessageIds: {
+        get: () => {
+          reads.maxTrackedMessageIds += 1;
+          return maxTrackedMessageIds;
+        },
+      },
+      maxTrackedSenderStreams: {
+        get: () => {
+          reads.maxTrackedSenderStreams += 1;
+          return maxTrackedSenderStreams;
+        },
+      },
+    });
+    const session = new RealtimeRoomSession(options);
+    maxTrackedMessageIds = providerSecret;
+    maxTrackedSenderStreams = providerSecret;
+    await session.start({ missionId: "mission-a", roomId: "room-a" });
+    const sender = (clientId: string) => ({ clientId, clientInstanceId: `${clientId}-tab`, connectionEpoch: 1 });
+    const inbound = (messageId: string, clientId: string, clientSeq: number) => message(clock, {
+      messageId,
+      sender: sender(clientId),
+      clientSeq,
+    });
+    const a1 = inbound("sender-a-1", "sender-a", 10);
+    const b1 = inbound("sender-b-1", "sender-b", 10);
+    const a2 = inbound("sender-a-2", "sender-a", 11);
+    const c1 = inbound("sender-c-1", "sender-c", 1);
+    const bAfterEviction = inbound("sender-b-after-eviction", "sender-b", 1);
+    for (const envelope of [a1, b1, a2, c1, bAfterEviction]) connections[0]!.input.onMessage(envelope);
+
+    expect(reads).toEqual({ maxTrackedMessageIds: 1, maxTrackedSenderStreams: 1 });
+    expect(received.map((value) => value.messageId)).toEqual([a1.messageId, b1.messageId, a2.messageId, c1.messageId, bAfterEviction.messageId]);
+    await session.stop();
+  });
+
+  it("contains malformed, hostile, async, and bounded receiver-capacity getters without provider leakage", async () => {
+    const providerSecret = "hostile-receiver-capacity-secret";
+    const cases: Array<{ label: string; value?: unknown; acceptedMessages: number }> = [
+      { label: "missing", acceptedMessages: 3 },
+      { label: "malformed", value: providerSecret, acceptedMessages: 3 },
+      { label: "nan", value: Number.NaN, acceptedMessages: 3 },
+      { label: "infinite", value: Number.POSITIVE_INFINITY, acceptedMessages: 3 },
+      { label: "negative", value: -1, acceptedMessages: 1 },
+      { label: "zero", value: 0, acceptedMessages: 1 },
+      { label: "fractional", value: 2.9, acceptedMessages: 2 },
+      { label: "oversized", value: 99_999, acceptedMessages: 3 },
+      { label: "throwing-getter", acceptedMessages: 3 },
+      { label: "rejected-promise", acceptedMessages: 3 },
+      { label: "hostile-then", acceptedMessages: 3 },
+    ];
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      for (const { label, value, acceptedMessages } of cases) {
+        const clock = new FakeClock();
+        const { transport, connections } = createTransport();
+        const received: RealtimeEnvelope[] = [];
+        const failures: unknown[] = [];
+        const reads = { maxTrackedMessageIds: 0, maxTrackedSenderStreams: 0 };
+        let thenReads = 0;
+        const options = {
+          tokenProvider: async () => token(clock.now() + 300_000),
+          transport,
+          clock,
+          onMessage: (envelope: RealtimeEnvelope) => received.push(envelope),
+          onTransportFailure: (error: unknown) => failures.push(error),
+        } as unknown as RoomSessionOptions;
+        for (const property of ["maxTrackedMessageIds", "maxTrackedSenderStreams"] as const) {
+          Object.defineProperty(options, property, {
+            get: () => {
+              reads[property] += 1;
+              if (label === "throwing-getter") throw new Error(providerSecret);
+              if (label === "rejected-promise") return Promise.reject(new Error(providerSecret));
+              if (label === "hostile-then") {
+                const hostileThenable = {};
+                Object.defineProperty(hostileThenable, "then", {
+                  get: () => {
+                    thenReads += 1;
+                    throw new Error(providerSecret);
+                  },
+                });
+                return hostileThenable;
+              }
+              return value;
+            },
+          });
+        }
+        let session: RealtimeRoomSession | undefined;
+        expect(() => { session = new RealtimeRoomSession(options); }).not.toThrow();
+        await session!.start({ missionId: "mission-a", roomId: "room-a" });
+        for (let index = 1; index <= 3; index += 1) {
+          connections[0]!.input.onMessage(message(clock, {
+            messageId: `${label}-capacity-${index}`,
+            clientSeq: index,
+          }));
+        }
+
+        expect(reads).toEqual({ maxTrackedMessageIds: 1, maxTrackedSenderStreams: 1 });
+        if (label === "hostile-then") expect(thenReads).toBe(2);
+        expect(received).toHaveLength(acceptedMessages);
+        expect(failures).toEqual([]);
+        await session!.stop();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
   it("snapshots recovery policy getters and receivers once, ignoring later replacements", async () => {
     const providerSecret = "recovery-policy-replacement-secret";
     for (const policy of ["random", "reconnect"] as const) {

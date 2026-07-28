@@ -267,6 +267,21 @@ function snapshotMessageAcceptanceLimits(options: RoomSessionOptions) {
   };
 }
 
+function snapshotReceiverCacheBounds(options: RoomSessionOptions) {
+  return {
+    maxTrackedMessageIds: snapshotBoundedPositive(
+      () => options.maxTrackedMessageIds,
+      defaultMaxTrackedMessageIds,
+      maximumMaxTrackedMessageIds,
+    ),
+    maxTrackedSenderStreams: snapshotBoundedPositive(
+      () => options.maxTrackedSenderStreams,
+      defaultMaxTrackedSenderStreams,
+      maximumMaxTrackedSenderStreams,
+    ),
+  };
+}
+
 function snapshotOperationTimeouts(options: RoomSessionOptions) {
   return {
     tokenAcquisition: snapshotBoundedPositive(
@@ -705,6 +720,7 @@ export class RealtimeRoomSession {
     const operationTimeouts = snapshotOperationTimeouts(options);
     const refreshTiming = snapshotRefreshTiming(options);
     const messageAcceptanceLimits = snapshotMessageAcceptanceLimits(options);
+    const receiverCacheBounds = snapshotReceiverCacheBounds(options);
     this.onStateChange = snapshotObserver(options, () => options.onStateChange);
     this.onMessage = snapshotObserver(options, () => options.onMessage);
     this.onTransientMessageExpired = snapshotObserver(options, () => options.onTransientMessageExpired);
@@ -723,8 +739,8 @@ export class RealtimeRoomSession {
     this.maxMessageTtlMs = messageAcceptanceLimits.maxMessageTtl;
     this.maxFutureIssuedAtMs = messageAcceptanceLimits.maxFutureIssuedAt;
     this.maxSerializedPayloadBytes = messageAcceptanceLimits.maxSerializedPayloadBytes;
-    this.maxTrackedMessageIds = normalizedBoundedPositive(options.maxTrackedMessageIds, defaultMaxTrackedMessageIds, maximumMaxTrackedMessageIds);
-    this.maxTrackedSenderStreams = normalizedBoundedPositive(options.maxTrackedSenderStreams, defaultMaxTrackedSenderStreams, maximumMaxTrackedSenderStreams);
+    this.maxTrackedMessageIds = receiverCacheBounds.maxTrackedMessageIds;
+    this.maxTrackedSenderStreams = receiverCacheBounds.maxTrackedSenderStreams;
     this.isUnauthorizedError = snapshotUnauthorizedClassifier(options, () => options.isUnauthorizedError);
   }
 
