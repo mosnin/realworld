@@ -68,6 +68,10 @@ export function CallSurface({
   const canWrite = mission.lifecycle === "active" && ["owner", "steward", "builder", "contributor"].includes(mission.role);
   const selectedCall = calls?.find((call) => call._id === selectedCallId);
   const linkedMoveOptions = moves.filter((move) => move.roomId === roomId);
+  const selectedCallRoom = rooms.find((room) => room._id === selectedCall?.roomId);
+  const selectedCallMove = moves.find((move) => move._id === selectedCall?.linkedMoveId);
+  const selectedTransitions = selectedCall === undefined ? [] : transitions[selectedCall.status] ?? [];
+  const isEditableCall = canWrite && (selectedCall === undefined || selectedCall.status === "open" || selectedCall.status === "accepted");
 
   useEffect(() => {
     if (!open) return;
@@ -220,7 +224,16 @@ export function CallSurface({
           {!canWrite ? <p aria-label="Mission Calls read-only">Calls are read-only for your role or this archived Mission.</p> : null}
           {selectedCall !== undefined && canWrite ? <button className="call-surface__back" disabled={pendingIntent !== null} onClick={() => resetComposer()} type="button">Issue another Call</button> : null}
 
-          {canWrite && rooms.length > 0 ? (
+          {selectedCall !== undefined ? (
+            <article className="call-detail" aria-label={`Call details for ${selectedCall.title}`}>
+              <p><strong>{selectedCall.title}</strong><span>{statusLabel(selectedCall.status)}</span></p>
+              <div>{selectedCall.detail}</div>
+              <small>Room: {selectedCallRoom?.title ?? "Mission-wide"}</small>
+              <small>Linked Move: {selectedCallMove?.title ?? "None"}</small>
+            </article>
+          ) : null}
+
+          {isEditableCall && rooms.length > 0 ? (
             <form className="call-form" onSubmit={(event) => { event.preventDefault(); void save(); }}>
               <label>
                 Call title
@@ -245,12 +258,12 @@ export function CallSurface({
               </label>
               <button disabled={pendingIntent !== null} type="submit">{pendingIntent === "create" ? "Issuing…" : selectedCall === undefined ? "Issue Call" : pendingIntent?.startsWith("update:") ? "Saving…" : "Save Call"}</button>
             </form>
-          ) : canWrite ? <p>No writable Room is available for a Call.</p> : null}
+          ) : isEditableCall ? <p>No writable Room is available for a Call.</p> : null}
 
-          {selectedCall !== undefined && canWrite ? (
+          {selectedCall !== undefined && canWrite && selectedTransitions.length > 0 ? (
             <section aria-label={`Call actions for ${selectedCall.title}`} className="call-actions">
               <p><strong>{selectedCall.title}</strong> <span>{statusLabel(selectedCall.status)}</span></p>
-              {(transitions[selectedCall.status] ?? []).map((nextStatus) => (
+              {selectedTransitions.map((nextStatus) => (
                 <button disabled={pendingIntent !== null} key={nextStatus} onClick={() => void transition(nextStatus)} type="button">
                   {pendingIntent === `transition:${selectedCall._id}:${nextStatus}` ? `${transitionLabel(nextStatus)}ing…` : `${transitionLabel(nextStatus)} ${selectedCall.title}`}
                 </button>
