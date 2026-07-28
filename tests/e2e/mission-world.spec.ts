@@ -46,6 +46,28 @@ test("the room directory provides a non-spatial path to Workshop", async ({ page
   await expect(page.getByRole("heading", { name: "Make room entry feel instantly useful" })).toBeVisible();
 });
 
+test.describe("on a phone-sized Mission World", () => {
+  test.use({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+  });
+
+  test("a participant can enter Workshop through the mobile room directory", async ({ page }) => {
+    await page.goto("/");
+
+    await expect(page.getByRole("heading", { name: "Company sprint" })).toBeVisible();
+    await page.getByRole("button", { name: "Room directory" }).click();
+    await expect(page.getByRole("heading", { name: "Mission rooms" })).toBeVisible();
+
+    await page.locator(".room-directory").getByRole("button", { name: "Enter Workshop" }).click();
+    await expect(page.getByRole("heading", { name: "A room should answer one useful question immediately." })).toBeVisible();
+
+    await page.getByRole("button", { name: "Mission World" }).click();
+    await expect(page.getByRole("heading", { name: "Company sprint" })).toBeVisible();
+  });
+});
+
 test("keyboard users can move between spatial landmarks without pointer input", async ({ page }) => {
   await page.goto("/");
 
@@ -53,8 +75,8 @@ test("keyboard users can move between spatial landmarks without pointer input", 
   await workshop.focus();
   await page.keyboard.press("ArrowRight");
 
-  await expect(page.getByRole("complementary", { name: "Branch Lab" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Branch Lab\. 5 active people/i })).toBeFocused();
+  await expect(page.getByRole("complementary", { name: "Review Deck" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Review Deck\. 3 active people/i })).toBeFocused();
 });
 
 test("view preferences persist density, accent, reduced decoration, and default room list", async ({ page }) => {

@@ -154,31 +154,25 @@ function clamp(value: number, lower: number, upper: number) {
 
 function canvasRoom(record: { _id: Id<"rooms">; title: string; kind: string; layout: { x: number; y: number; width: number; height: number }; layoutVersion: number; currentVersion: number }): Room {
   const fallback = rooms.find((room) => room.position === ({ missionCore: "core", workshop: "workshop", observatory: "observatory", branchLab: "branch", reviewDeck: "library", signalTower: "observatory", surgeHall: "surge" }[record.kind] ?? "core")) ?? rooms[0]!;
+  const isCustom = record.kind === "branchLab" && record.title !== "Branch Lab";
   return {
     ...fallback,
     id: record._id,
     name: record.title,
-    x: clamp((record.layout.x / 1600) * 100, 5, 95),
-    y: clamp((record.layout.y / 1200) * 100, 6, 92),
+    x: clamp(5 + (record.layout.x / 1200) * 90, 5, 95),
+    y: clamp(6 + (record.layout.y / 800) * 86, 6, 92),
     layout: record.layout,
     layoutVersion: record.layoutVersion,
     currentVersion: record.currentVersion,
-    custom: record.kind === "branchLab" && record.title !== "Branch Lab",
+    ...(isCustom ? { active: 0, agents: 0, accent: "blue" as const, icon: "spark" as const, position: "custom" as const, description: "A room shaped for this Mission's next mode of work.", eyebrow: "Custom room", activity: "Ready for its first Move.", action: "Open room", custom: true } : {}),
   };
 }
 
 const people = ["Priya", "Marco", "Lina", "Aisha", "SonicAgent", "Ira", "Noah", "Tess"];
-const directionalRoomIds: Record<RoomId, Partial<Record<string, RoomId>>> = {
-  core: { ArrowUp: "workshop", ArrowLeft: "observatory", ArrowRight: "branch", ArrowDown: "surge" },
-  workshop: { ArrowDown: "core", ArrowLeft: "observatory", ArrowRight: "branch" },
-  observatory: { ArrowRight: "core", ArrowDown: "library" },
-  branch: { ArrowLeft: "core", ArrowDown: "surge" },
-  library: { ArrowUp: "observatory", ArrowRight: "surge" },
-  surge: { ArrowUp: "core", ArrowLeft: "library", ArrowRight: "branch" },
-};
 
 function RoomLandmark({
   room,
+  navigationRooms,
   selected,
   onSelect,
   onEnter,
@@ -186,6 +180,7 @@ function RoomLandmark({
   locked,
 }: Readonly<{
   room: Room;
+  navigationRooms: Room[];
   selected: boolean;
   onSelect: (id: RoomId) => void;
   onEnter: (id: RoomId) => void;
@@ -195,19 +190,31 @@ function RoomLandmark({
   const roomRef = useRef<HTMLButtonElement>(null);
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
-    const nextRoom = directionalRoomIds[room.id]?.[event.key];
-    if (nextRoom) {
-      event.preventDefault();
-      onSelect(nextRoom);
-      requestAnimationFrame(() => document.getElementById(`room-${nextRoom}`)?.focus());
-    }
-
     if (event.altKey && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
       event.preventDefault();
       if (!locked) {
         const distance = event.shiftKey ? 5 : 2;
         onReposition(room.id, room.x + (event.key === "ArrowRight" ? distance : event.key === "ArrowLeft" ? -distance : 0), room.y + (event.key === "ArrowDown" ? distance : event.key === "ArrowUp" ? -distance : 0));
       }
+      return;
+    }
+
+    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
+      const horizontal = event.key === "ArrowLeft" || event.key === "ArrowRight";
+      const direction = event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1;
+      const nextRoom = navigationRooms
+        .filter((candidate) => candidate.id !== room.id && ((horizontal ? candidate.x - room.x : candidate.y - room.y) * direction > 0))
+        .sort((left, right) => {
+          const leftPrimary = Math.abs((horizontal ? left.x : left.y) - (horizontal ? room.x : room.y));
+          const rightPrimary = Math.abs((horizontal ? right.x : right.y) - (horizontal ? room.x : room.y));
+          const leftCross = Math.abs((horizontal ? left.y : left.x) - (horizontal ? room.y : room.x));
+          const rightCross = Math.abs((horizontal ? right.y : right.x) - (horizontal ? room.y : room.x));
+          return leftPrimary + leftCross * 0.5 - (rightPrimary + rightCross * 0.5);
+        })[0];
+      if (nextRoom === undefined) return;
+      event.preventDefault();
+      onSelect(nextRoom.id);
+      requestAnimationFrame(() => document.getElementById(`room-${nextRoom.id}`)?.focus());
     }
 
     if (event.key === "Enter" && selected) {
@@ -399,7 +406,7 @@ export function MissionWorld() {
   const [preferences, setPreferences] = useState<Preferences>(defaultPreferences);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [invitePanelOpen, setInvitePanelOpen] = useState(false);
-  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
+  const [loadedPreferencesMissionId, setLoadedPreferencesMissionId] = useState<Id<"missions"> | null>(null);
   const [canvas, setCanvas] = useState<CanvasState>(defaultCanvasState);
   const [newRoomName, setNewRoomName] = useState("");
   const [roomError, setRoomError] = useState<string | null>(null);
@@ -412,6 +419,9 @@ export function MissionWorld() {
     const frame = window.requestAnimationFrame(() => {
       try {
         if (activeMission === undefined) return;
+        setPreferences(defaultPreferences);
+        setCanvas(defaultCanvasState);
+        setShowDirectory(false);
         const stored = window.localStorage.getItem(missionWorldStorageKey(activeMission._id));
         if (stored) {
         const candidate = JSON.parse(stored) as Partial<Preferences> & { version?: number; preferences?: Partial<Preferences>; canvas?: Partial<CanvasState> };
@@ -429,17 +439,17 @@ export function MissionWorld() {
       } catch {
         // An unavailable or malformed local preference must never block the Mission World.
       } finally {
-        setPreferencesLoaded(true);
+        if (activeMission !== undefined) setLoadedPreferencesMissionId(activeMission._id);
       }
     });
     return () => window.cancelAnimationFrame(frame);
   }, [activeMission]);
 
   useEffect(() => {
-    if (preferencesLoaded && activeMission !== undefined) {
+    if (activeMission !== undefined && loadedPreferencesMissionId === activeMission._id) {
       window.localStorage.setItem(missionWorldStorageKey(activeMission._id), JSON.stringify({ version: 3, preferences, canvas }));
     }
-  }, [activeMission, canvas, preferences, preferencesLoaded]);
+  }, [activeMission, canvas, loadedPreferencesMissionId, preferences]);
 
   useEffect(() => {
     if (selectedRoomHash !== undefined) window.history.replaceState(null, "", view === "workshop" ? "#workshop" : `#${selectedRoomHash}`);
@@ -447,7 +457,7 @@ export function MissionWorld() {
 
   function enterRoom(roomId: RoomId) {
     setSelectedRoomId(roomId);
-    if (roomId === "workshop") {
+    if (canvasRooms.find((room) => room.id === roomId)?.position === "workshop") {
       setView("workshop");
       requestAnimationFrame(() => document.getElementById("main-content")?.focus());
     }
@@ -458,7 +468,7 @@ export function MissionWorld() {
     if (!room?.layout || room.layoutVersion === undefined) return;
     setRoomError(null);
     try {
-      await updateRoomLayout({ roomId: roomId as Id<"rooms">, expectedLayoutVersion: room.layoutVersion, layout: { ...room.layout, x: (clamp(x, 5, 95) / 100) * 1600, y: (clamp(y, 6, 92) / 100) * 1200 }, idempotencyKey: crypto.randomUUID() });
+      await updateRoomLayout({ roomId: roomId as Id<"rooms">, expectedLayoutVersion: room.layoutVersion, layout: { ...room.layout, x: ((clamp(x, 5, 95) - 5) / 90) * 1200, y: ((clamp(y, 6, 92) - 6) / 86) * 800 }, idempotencyKey: crypto.randomUUID() });
     } catch {
       setRoomError("That room changed elsewhere. The live map has been refreshed.");
     }
@@ -470,7 +480,7 @@ export function MissionWorld() {
     if (activeMission === undefined) return;
     setRoomError(null);
     try {
-      const created = await createRoomMutation({ missionId: activeMission._id, title: name, kind: "branchLab", layout: { x: 1008, y: 792, width: 220, height: 140 }, idempotencyKey: crypto.randomUUID() });
+      const created = await createRoomMutation({ missionId: activeMission._id, title: name, kind: "branchLab", layout: { x: 900, y: 500, width: 220, height: 140 }, idempotencyKey: crypto.randomUUID() });
       setSelectedRoomId(created.roomId);
       setNewRoomName("");
     } catch {
@@ -614,7 +624,7 @@ export function MissionWorld() {
                 {visibleRooms.filter((room) => room.id !== "core").map((room) => <path d={`M ${visibleRooms.find((candidate) => candidate.id === "core")?.x ?? 50} ${visibleRooms.find((candidate) => candidate.id === "core")?.y ?? 46} L ${room.x} ${room.y}`} key={room.id} />)}
                 <path className="world-routes__active" d={`M ${visibleRooms.find((room) => room.id === "core")?.x ?? 50} ${visibleRooms.find((room) => room.id === "core")?.y ?? 46} L ${visibleRooms.find((room) => room.id === "workshop")?.x ?? 74} ${visibleRooms.find((room) => room.id === "workshop")?.y ?? 19}`} />
               </svg>
-              {visibleRooms.map((room) => <RoomLandmark key={room.id} locked={canvas.locked} onReposition={repositionRoom} room={room} selected={selectedRoom.id === room.id} onSelect={setSelectedRoomId} onEnter={enterRoom} />)}
+              {visibleRooms.map((room) => <RoomLandmark key={room.id} locked={canvas.locked} navigationRooms={visibleRooms} onReposition={repositionRoom} room={room} selected={selectedRoom.id === room.id} onSelect={setSelectedRoomId} onEnter={enterRoom} />)}
               <div className="map-event map-event--call"><span><Icon name="spark" /></span><strong>Open Call</strong><small>UI/UX critique</small><button type="button">Join Call</button></div>
               <div className="map-event map-event--fracture"><span><Icon name="branch" /></span><strong>Fracture</strong><small>Auth session restoration stalls</small><button type="button">Review</button></div>
               <div className="map-event map-event--proof"><span>✓</span><strong>Proof complete</strong><small>Mission authorization contract verified</small></div>

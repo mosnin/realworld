@@ -73,7 +73,7 @@ button,a { font:inherit; } button { cursor:pointer; } a { color:inherit; text-de
 .world-map { overflow:hidden; touch-action:none; }
 .world-map__canvas { position:absolute; inset:0; transform-origin:center; transition:transform 180ms ease; }
 .world-map__canvas .world-routes { inset:0; width:100%; height:100%; transform:none; }
-.world-map__canvas .landmark { transform:translate(-50%,-50%); cursor:grab; touch-action:none; }
+.world-map__canvas .landmark { right:auto; bottom:auto; z-index:3; transform:translate(-50%,-50%); cursor:grab; touch-action:none; }
 .world-map__canvas .landmark:hover,.world-map__canvas .landmark.is-selected { transform:translate(-50%,-54%); }
 .world-map.is-locked .landmark { cursor:pointer; }
 .world-map.is-locked .landmark:hover,.world-map.is-locked .landmark.is-selected { transform:translate(-50%,-52%); }
