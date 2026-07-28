@@ -62,6 +62,7 @@ Deliverables:
 - Conflict-recovery and role-matrix CI gate: commit `1a120e2`; GitHub Actions run `30320832450` passed install, lint, typecheck, 16 Vitest tests, Convex validation, production build, ten authenticated Chromium journeys with concurrent OCC convergence, and foundation evidence on 2026-07-27
 - Mission lifecycle and reconnect CI gate: commit `916ca42`; GitHub Actions run `30321896429` passed install, lint, typecheck, 21 automated tests, Convex validation, production build, twelve authenticated Chromium journeys, and foundation evidence on 2026-07-27. Evidence includes owner edit/archive/restore, an explicit archived read-only world, mutation freeze, membership expiry, replay-safe idempotency, mobile interaction, and true offline-to-online convergence.
 - Multi-Mission and Constitution CI gate: commit `f8cfba2`; GitHub Actions run `30322672825` passed install, lint, typecheck, 27 automated tests, Convex validation, production build, thirteen authenticated Chromium journeys, and foundation evidence on 2026-07-27. Evidence includes durable Constitution/outcomes with OCC and replay, exact room-scope write grants, stable Mission selection, in-world second-Mission launch, reload persistence, and archive/switch isolation.
+- Local Constitution UI, Move kernel, and fifty-participant simulation gate: commits `ee0b8c0`, `6f33af5`, `81963f8`, `5b423e2`, `4073db3`, and `8b395eb`; lint, typecheck, 32 automated tests, Convex validation, production build, and fourteen authenticated Chromium journeys passed on 2026-07-27. Evidence includes an owner Constitution lifecycle with two intentional saves and archive/restore persistence; scoped Move list/create/update/dependencies/transitions with OCC, receipts, event ordering, and archive freeze; plus 50 concurrent local Convex reads and eight isolated layout updates. The 50-participant check is deterministic local authorization/concurrency evidence, not browser, network, Ably, or production load evidence. Hosted CI confirmation is pending.
 - Observability, error boundaries, structured logs, and environment validation: shell error boundaries and safe environment-name validation started in commit `a9679c0`
 
 Evidence boundary:
@@ -69,7 +70,7 @@ Evidence boundary:
 - The current Mission World and Workshop still use fixture content for occupants, activity, and artifacts. Room identity, titles, lifecycle, and coordinates are now durable Convex state; presentation preferences and layout lock intentionally remain personal and browser-local.
 - The authenticated Mission title, membership role, invitation issuance, invitation acceptance, room lifecycle, layout persistence, scoped visibility, cross-browser reactive movement, and concurrent conflict recovery are real local Convex evidence. They do not prove cloud deployment, Ably presence, exhaustive role coverage, agent runtime, disaster recovery, load, or production readiness.
 - Overall production capability remains below one percent until the same flows pass against the connected cloud backend and current preview.
-- Thirteen browser journeys pass locally and in GitHub Actions run `30322672825` against an ephemeral Convex deployment with real private-alpha account creation, including real multi-Mission creation/selection/reload/archive, mobile room entry, durable Mission lifecycle, archived read-only controls, deny-by-default scoped discovery, live two-context movement, a concurrent owner/builder OCC race with visible recovery, and a true browser disconnect/reconnect cycle.
+- Fourteen browser journeys pass locally against an ephemeral Convex deployment with real private-alpha account creation, including Constitution edit/re-edit/archive/restore persistence, real multi-Mission creation/selection/reload/archive, mobile room entry, durable Mission lifecycle, archived read-only controls, deny-by-default scoped discovery, live two-context movement, a concurrent owner/builder OCC race with visible recovery, and a true browser disconnect/reconnect cycle. The prior thirteen-journey slice passes GitHub Actions run `30322672825`; hosted confirmation of the new slice is pending.
 
 Exit gates:
 
@@ -82,7 +83,7 @@ Current gate status:
 
 - CI and production build: passed in GitHub Actions run `30322672825`
 - Signed-in responsive shell: passed with local ephemeral Convex Auth
-- Authorization boundaries: twenty-seven automated tests pass across Mission, Constitution, membership, invitation, room scopes, lifecycle, expiry, and idempotency behavior
+- Authorization boundaries: thirty-two automated tests pass across Mission, Constitution, Move, membership, invitation, room scopes, lifecycle, expiry, dependencies, OCC, and idempotency behavior
 - Reproducible current preview and connected cloud Convex state: still open
 
 ## Phase 2 — Mission kernel
