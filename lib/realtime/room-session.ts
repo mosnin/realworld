@@ -1169,17 +1169,20 @@ export class RealtimeRoomSession {
       this.token = token;
       if (authorizationChanged) this.clearTransient("authorization-changed");
       if (generation !== this.generation || this.scopeValue !== scope || this.stateValue !== nextState) return;
-      const subscription = await this.acquireTransportSubscription({
+      const onMessage = (message: unknown) => {
+        if (generation !== this.generation) return;
+        const accepted = this.acceptMessage(message);
+        if (typeof accepted !== "string") this.onMessage?.(accepted);
+      };
+      const onFailure = (error: unknown) => this.handleFailure(error, generation);
+      const connectionRequest = Object.freeze({
         scope,
         token,
         connectionEpoch: generation,
-        onMessage: (message) => {
-          if (generation !== this.generation) return;
-          const accepted = this.acceptMessage(message);
-          if (typeof accepted !== "string") this.onMessage?.(accepted);
-        },
-        onFailure: (error) => this.handleFailure(error, generation),
+        onMessage,
+        onFailure,
       });
+      const subscription = await this.acquireTransportSubscription(connectionRequest);
       if (generation !== this.generation || this.scopeValue !== scope) {
         this.detachSubscription(subscription);
         return;

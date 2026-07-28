@@ -3823,6 +3823,40 @@ describe("RealtimeRoomSession", () => {
     } finally { process.off("unhandledRejection", observeUnhandled); }
   });
 
+  it("passes frozen transport connection requests whose stale callbacks cannot revive a handed-off or stopped scope", async () => {
+    const clock = new FakeClock();
+    const inputs: Array<Parameters<RealtimeTransportAdapter["connect"]>[0]> = [];
+    const received: RealtimeEnvelope[] = [];
+    const failures: unknown[] = [];
+    const connect = vi.fn(async (input: Parameters<RealtimeTransportAdapter["connect"]>[0]) => {
+      inputs.push(input);
+      return { unsubscribe: vi.fn(() => undefined), publish: vi.fn(() => undefined) };
+    });
+    const session = new RealtimeRoomSession({ tokenProvider: async () => token(clock.now() + 300_000), transport: { connect }, clock, onMessage: (value) => received.push(value), onTransportFailure: (error) => failures.push(error) });
+    await session.start({ missionId: "mission-a", roomId: "room-a" });
+    const first = inputs[0]!;
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(Object.isFrozen(first.scope)).toBe(true);
+    expect(Object.isFrozen(first.token)).toBe(true);
+    expect(Object.isFrozen(first.token.tokenRequest)).toBe(true);
+    expect(() => { (first.scope as { roomId: string }).roomId = "room-b"; }).toThrow();
+    expect(() => { (first as { connectionEpoch: number }).connectionEpoch = 99; }).toThrow();
+
+    await session.start({ missionId: "mission-a", roomId: "room-b" });
+    first.onMessage(message(clock, { messageId: "stale-request", roomId: "room-a" }));
+    first.onFailure(new Error("ordinary stale failure"));
+    await flush();
+    expect(session.scope).toEqual({ missionId: "mission-a", roomId: "room-b" });
+    expect(session.state).toBe("live");
+    expect(received).toEqual([]);
+    expect(failures).toEqual([]);
+    await session.stop();
+    first.onFailure(new Error("post-stop failure"));
+    first.onMessage(message(clock, { messageId: "post-stop", roomId: "room-a" }));
+    await flush();
+    expect(session.state).toBe("stopped");
+  });
+
   it("snapshots recovery policy getters and receivers once, ignoring later replacements", async () => {
     const providerSecret = "recovery-policy-replacement-secret";
     for (const policy of ["random", "reconnect"] as const) {
