@@ -33,6 +33,10 @@ Development, test, and preview namespaces are explicit and fail closed when `REA
 
 This is offline issuer and authorization evidence only. No Ably application, credentialed provider request, client connection, presence session, network recovery, or load test has run. A revoked non-production token can remain usable until its five-minute expiry; a tested live disconnect/re-authentication path is therefore a production-enable gate.
 
+`lib/realtime/room-session.ts` also implements the provider-independent client lifecycle behind the future transport adapter. It owns a single ephemeral Mission/room scope, bounded refresh/reconnect state, authorization-version invalidation, per-tab epoch and sequence rejection, generic 2 KB payload and time bounds, TTL-driven signal removal, exact-scope inbound/outbound validation, and cleanup on stop, revocation, reconnect, or scope handoff. It never writes durable state and transport failure cannot block Convex work.
+
+This kernel is verified only with deterministic fake clocks and transports. Before connecting Ably, every allowed message kind still needs a strict payload schema and rate policy. Provider connectivity, live refresh/revocation propagation, browser/background behavior, telemetry, multi-browser recovery, and load remain unverified.
+
 ## Channel namespace and capability design
 
 ### Names
