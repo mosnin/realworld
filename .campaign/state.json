@@ -5,7 +5,7 @@
   "currentPhase": 1,
   "phaseName": "Production foundation",
   "startedAt": "2026-07-27T00:00:00-04:00",
-  "lastUpdatedAt": "2026-07-27T21:58:38-04:00",
+  "lastUpdatedAt": "2026-07-27T22:02:54-04:00",
   "exactNextActions": [
     "Create or connect a cloud Convex development deployment and verify the current preview creates and reloads a durable Mission",
     "Implement the Mission Constitution, desired outcomes, and first durable Move with replayable events",
@@ -21,7 +21,7 @@
     "artifactStudio": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"artifact domain and surfaces","exactNextAction":"Wait for client, realtime, and agent contracts"},
     "discoverySocial": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"discovery and contribution surfaces","exactNextAction":"Wait for Artifact Studio and reputation contracts"},
     "trustGovernance": {"status":"review","model":"gpt-5.6-terra","writeScope":"docs/program/trust-quality-release.md","lastMeaningfulHeartbeatAt":"2026-07-27T21:58:00-04:00","evidence":"commits c1f156b, e90d1ee, 44d944b, 5f49c17, and d21d37a; deny-by-default room scope, nine actor states, membership expiry, archived mutation freeze, and replay authorization have automated coverage","exactNextAction":"Complete remaining rename, archive, and layout variants for every eligible role"},
-    "qualityOperations": {"status":"review","model":"gpt-5.6-terra","writeScope":"CI and verification infrastructure","lastMeaningfulHeartbeatAt":"2026-07-27T21:58:00-04:00","evidence":"Local gate passes lint, typecheck, 21 automated tests, production build, Convex validation, and twelve authenticated Chromium journeys including archive/read-only/restore, mobile entry, concurrent OCC recovery, and true offline reconnect convergence; hosted CI confirmation is pending","exactNextAction":"Confirm the lifecycle and reconnect slice in hosted CI, then add load evidence"}
+    "qualityOperations": {"status":"review","model":"gpt-5.6-terra","writeScope":"CI and verification infrastructure","lastMeaningfulHeartbeatAt":"2026-07-27T22:02:00-04:00","evidence":"GitHub Actions run 30321896429 passes install, lint, typecheck, 21 automated tests, Convex validation, production build, twelve authenticated Chromium journeys including archive/read-only/restore, mobile entry, concurrent OCC recovery, and true offline reconnect convergence, plus foundation evidence","exactNextAction":"Add bounded load and failure-recovery evidence"}
   },
   "orchestration": {
     "preferredRuntime": "orca",
@@ -40,7 +40,7 @@
   },
   "productionReadiness": {
     "estimate": "below_1_percent",
-    "currentEvidence": ["source_review","local_automated","local_render","local_interaction","vercel_preview_build","local_convex_push","local_auth_round_trip","local_durable_mission","local_two_user_membership","local_shared_canvas_persistence","local_two_user_canvas_sync","local_conflict_recovery","disconnect_reconnect","local_mission_lifecycle","local_archived_write_freeze","local_role_matrix_partial","mobile_interaction"],
+    "currentEvidence": ["source_review","local_automated","local_render","local_interaction","hosted_ci","vercel_preview_build","local_convex_push","local_auth_round_trip","local_durable_mission","local_two_user_membership","local_shared_canvas_persistence","local_two_user_canvas_sync","local_conflict_recovery","disconnect_reconnect","local_mission_lifecycle","local_archived_write_freeze","local_role_matrix_partial","mobile_interaction"],
     "missingCriticalEvidence": ["cloud_auth_round_trip","cloud_convex_push","cloud_two_user_sync","ably_runtime","agent_runtime","full_role_matrix","recovery","load"]
   },
   "notificationPolicy": {
