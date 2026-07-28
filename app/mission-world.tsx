@@ -544,6 +544,7 @@ export function MissionWorld() {
   if (roomRecords === undefined || selectedRoom === undefined || activeMission === undefined) {
     return <main id="main-content" className="foundation">Loading your shared room map…</main>;
   }
+  const missionWritable = activeMission.lifecycle === "active";
 
   if (view === "workshop") {
     return <Workshop onExit={() => setView("world")} />;
@@ -561,7 +562,7 @@ export function MissionWorld() {
         <div className="momentum" aria-label="Mission Momentum: strong. One fracture. Surge opening in one minute and twenty-four seconds.">
           <span className="momentum__mark"><Icon name="spark" /></span><strong>Mission Momentum</strong><span className="momentum__bars" aria-hidden="true"><i /><i /><i /><i /><i /></span><b>Strong</b><span>Fractures <em>1</em></span><span>Surge opening <time>01:24</time></span>
         </div>
-        {activeMission.role === "owner" ? (
+        {activeMission.role === "owner" && missionWritable ? (
           <button className="create-button" onClick={() => setInvitePanelOpen(true)} type="button">
             <Icon name="plus" /> Invite collaborators
           </button>
@@ -587,8 +588,8 @@ export function MissionWorld() {
       <section className="mission-summary" aria-labelledby="mission-title">
         <p className="eyebrow">Mission</p>
         <h1 id="mission-title">{activeMission.title}</h1>
-        <p>Give humans and autonomous agents shared Missions, live rooms, durable Artifacts, and the tools to accomplish ambitious work together.</p>
-        <div className="mission-summary__facts"><span><i /> Active</span><span>{activeMission.role}</span><span>Durable Mission</span><span>Live projection</span></div>
+        <p>{missionWritable ? "Give humans and autonomous agents shared Missions, live rooms, durable Artifacts, and the tools to accomplish ambitious work together." : "This Mission is archived and read-only. Its owner can restore it from Manage Mission."}</p>
+        <div className="mission-summary__facts"><span><i /> {missionWritable ? "Active" : "Archived"}</span><span>{activeMission.role}</span><span>Durable Mission</span><span>{missionWritable ? "Live projection" : "Read-only projection"}</span></div>
         <div className="summary-pulse"><strong>Pulse</strong><svg viewBox="0 0 220 34" aria-hidden="true"><path d="M1 21 C20 30 26 6 45 17 S70 26 88 11 S113 9 130 22 S155 25 169 14 S194 12 219 9" /></svg></div>
       </section>
 
