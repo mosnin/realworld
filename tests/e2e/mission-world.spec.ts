@@ -298,4 +298,81 @@ test.describe("a reactive scoped Mission canvas", () => {
       await builderContext.close();
     }
   });
+
+  test("an offline participant converges to the durable Workshop layout when connectivity returns", async ({ browser, page }) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: "Invite collaborators" }).click();
+
+    const invitations = page.getByRole("dialog", { name: "Invite collaborators" });
+    await invitations.getByRole("checkbox", { name: /Workshop/i }).check();
+    await invitations.getByRole("button", { name: "Create invitation" }).click();
+
+    const inviteUrl = await invitations.getByLabel("Invitation link").inputValue();
+    const participantContext = await browser.newContext();
+    try {
+      const participant = await participantContext.newPage();
+      await participant.goto(inviteUrl);
+      await participant.getByLabel("Email").fill(
+        `offline-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`,
+      );
+      await participant.getByLabel("Password").fill("Realworld-browser-test-2026");
+      await participant.getByRole("button", { name: "Need an invitation? Create an account" }).click();
+      await participant.getByRole("button", { name: "Create private-alpha account" }).click();
+      await expect(participant.getByRole("heading", { name: "You have a Mission invitation." })).toBeVisible({ timeout: 15_000 });
+      await participant.getByRole("button", { name: "Join Mission" }).click();
+      await participant.getByRole("link", { name: "Enter the Mission World" }).click();
+
+      const ownerWorkshop = page.getByRole("button", { name: /Workshop\. 4 active people/i });
+      const participantWorkshop = participant.getByRole("button", { name: /Workshop\. 4 active people/i });
+      await expect(ownerWorkshop).toBeVisible();
+      await expect(participantWorkshop).toBeVisible();
+      await page.getByRole("button", { name: "Close invitations" }).click();
+      await expect(page.getByRole("button", { name: "Layout unlocked" })).toBeVisible();
+
+      const initialParticipantPosition = await participantWorkshop.evaluate((element) => ({
+        left: (element as HTMLElement).style.left,
+        top: (element as HTMLElement).style.top,
+      }));
+      await participantContext.setOffline(true);
+
+      const initialOwnerPosition = await ownerWorkshop.evaluate((element) => ({
+        left: (element as HTMLElement).style.left,
+        top: (element as HTMLElement).style.top,
+      }));
+      await ownerWorkshop.focus();
+      await page.keyboard.press("Alt+ArrowRight");
+      await expect.poll(async () => ownerWorkshop.evaluate((element) => ({
+        left: (element as HTMLElement).style.left,
+        top: (element as HTMLElement).style.top,
+      }))).not.toEqual(initialOwnerPosition);
+      const updatedOwnerPosition = await ownerWorkshop.evaluate((element) => ({
+        left: (element as HTMLElement).style.left,
+        top: (element as HTMLElement).style.top,
+      }));
+
+      for (let observation = 0; observation < 3; observation += 1) {
+        await participant.waitForTimeout(250);
+        expect(await participantWorkshop.evaluate((element) => ({
+          left: (element as HTMLElement).style.left,
+          top: (element as HTMLElement).style.top,
+        }))).toEqual(initialParticipantPosition);
+      }
+
+      await participantContext.setOffline(false);
+      await expect.poll(async () => participantWorkshop.evaluate((element) => ({
+        left: (element as HTMLElement).style.left,
+        top: (element as HTMLElement).style.top,
+      })), { timeout: 15_000 }).toEqual(updatedOwnerPosition);
+
+      await participant.reload();
+      await expect(participant.getByRole("heading", { name: "Company sprint" })).toBeVisible();
+      await expect.poll(async () => participant.getByRole("button", { name: /Workshop\. 4 active people/i }).evaluate((element) => ({
+        left: (element as HTMLElement).style.left,
+        top: (element as HTMLElement).style.top,
+      }))).toEqual(updatedOwnerPosition);
+    } finally {
+      await participantContext.setOffline(false);
+      await participantContext.close();
+    }
+  });
 });
