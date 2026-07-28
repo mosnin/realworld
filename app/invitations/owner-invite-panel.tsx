@@ -23,6 +23,11 @@ function correlationId() {
 export function OwnerInvitePanel({ missionId }: Readonly<{ missionId: Id<"missions"> }>) {
   const context = useQuery(api.invites.inviteManagerContext, { missionId });
   const createInvite = useMutation(api.invites.createInvite);
+  const revokeInvite = useMutation(api.invites.revokeInvite);
+  const activeInvites = useQuery(
+    api.invites.listActiveInvites,
+    context?.role === "owner" && context.canIssue ? { missionId } : "skip",
+  );
   const [role, setRole] = useState<InviteRole>("contributor");
   const [roomIds, setRoomIds] = useState<Id<"rooms">[]>([]);
   const [expiry, setExpiry] = useState<"day" | "week">("week");
@@ -30,6 +35,7 @@ export function OwnerInvitePanel({ missionId }: Readonly<{ missionId: Id<"missio
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [revokingInviteIds, setRevokingInviteIds] = useState<ReadonlySet<Id<"invites">>>(() => new Set());
 
   const hasRooms = useMemo(() => (context?.rooms.length ?? 0) > 0, [context?.rooms.length]);
 
@@ -72,6 +78,28 @@ export function OwnerInvitePanel({ missionId }: Readonly<{ missionId: Id<"missio
       setFeedback("The invitation could not be created. Check your access and try again.");
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  async function revoke(inviteId: Id<"invites">) {
+    if (revokingInviteIds.has(inviteId)) return;
+    setFeedback(null);
+    setRevokingInviteIds((current) => new Set(current).add(inviteId));
+    try {
+      await revokeInvite({
+        inviteId,
+        idempotencyKey: crypto.randomUUID(),
+        correlationId: correlationId(),
+      });
+      setFeedback("Invitation revoked.");
+    } catch {
+      setFeedback("The invitation could not be revoked. Check your access and try again.");
+    } finally {
+      setRevokingInviteIds((current) => {
+        const next = new Set(current);
+        next.delete(inviteId);
+        return next;
+      });
     }
   }
 
@@ -118,6 +146,23 @@ export function OwnerInvitePanel({ missionId }: Readonly<{ missionId: Id<"missio
           <button onClick={() => void navigator.clipboard.writeText(inviteUrl)} type="button">Copy link</button>
         </div>
       )}
+      <section aria-labelledby="active-invitations-title">
+        <h3 id="active-invitations-title">Active invitations</h3>
+        {activeInvites === undefined ? <p aria-live="polite">Loading active invitations…</p> : activeInvites.length === 0 ? <p>No active invitations.</p> : (
+          <ul aria-label="Active invitations">
+            {activeInvites.map((invite) => (
+              <li aria-label={`Active ${invite.role} invitation for ${invite.rooms.map((room) => room.title).join(", ")}`} key={invite._id}>
+                <p><strong>{invite.role}</strong> · {invite.uses} of {invite.maxUses} uses</p>
+                <p>Rooms: {invite.rooms.map((room) => room.title).join(", ")}</p>
+                <p><time dateTime={new Date(invite.expiresAt).toISOString()}>Expires {new Date(invite.expiresAt).toLocaleString()}</time></p>
+                <button disabled={revokingInviteIds.has(invite._id)} onClick={() => void revoke(invite._id)} type="button">
+                  {revokingInviteIds.has(invite._id) ? "Revoking…" : "Revoke invitation"}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </section>
   );
 }

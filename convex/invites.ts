@@ -41,6 +41,58 @@ export const inviteManagerContext = query({
   },
 });
 
+/**
+ * Owner-facing recovery view for links that may need to be invalidated after
+ * the creation dialog has closed. It intentionally returns operational
+ * metadata only: invite secrets remain write-only inputs and are never part
+ * of a durable projection.
+ */
+export const listActiveInvites = query({
+  args: { missionId: v.id("missions") },
+  returns: v.array(v.object({
+    _id: v.id("invites"),
+    role: inviteRole,
+    rooms: v.array(v.object({ _id: v.id("rooms"), title: v.string() })),
+    expiresAt: v.number(),
+    uses: v.number(),
+    maxUses: v.number(),
+    createdAt: v.number(),
+  })),
+  handler: async (ctx, args) => {
+    const membership = await requireActiveMembership(ctx, args.missionId);
+    requireRole(membership, ["owner"]);
+    const mission = await ctx.db.get(args.missionId);
+    if (!mission || mission.visibility !== "private") throw new Error("Not found");
+
+    const now = Date.now();
+    const invites = await ctx.db
+      .query("invites")
+      .withIndex("by_mission_and_state", (index) => index.eq("missionId", args.missionId).eq("state", "active"))
+      .order("desc")
+      .take(100);
+
+    return await Promise.all(invites
+      .filter((invite) => invite.expiresAt > now && invite.uses < invite.maxUses)
+      .map(async (invite) => {
+        const rooms = (await Promise.all(invite.roomIds.map(async (roomId) => {
+          const room = await ctx.db.get(roomId);
+          return room !== null && room.missionId === args.missionId
+            ? { _id: room._id, title: room.title }
+            : null;
+        }))).flatMap((room) => room === null ? [] : [room]);
+        return {
+          _id: invite._id,
+          role: invite.role,
+          rooms,
+          expiresAt: invite.expiresAt,
+          uses: invite.uses,
+          maxUses: invite.maxUses,
+          createdAt: invite.createdAt,
+        };
+      }));
+  },
+});
+
 export const createInvite = mutation({
   args: { missionId: v.id("missions"), role: inviteRole, roomIds: v.array(v.id("rooms")), expiresAt: v.number(), maxUses: v.number(), inviteToken: v.string(), idempotencyKey: v.string(), correlationId: v.string() },
   returns: v.object({ inviteId: v.id("invites"), eventId: v.id("missionEvents") }),

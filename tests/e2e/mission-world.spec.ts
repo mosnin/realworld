@@ -816,6 +816,62 @@ test("an owner and contributor reactively coordinate a capacity-limited Call", a
 });
 
 test.describe("a reactive scoped Mission canvas", () => {
+  test("an owner can revoke a reopened scoped invitation before a fresh participant accepts it", async ({ browser, page }) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: "Invite collaborators" }).click();
+
+    const invitations = page.getByRole("dialog", { name: "Invite collaborators" });
+    await invitations.getByRole("checkbox", { name: /Workshop/i }).check();
+    await invitations.getByRole("button", { name: "Create invitation" }).click();
+
+    const inviteUrl = await invitations.getByLabel("Invitation link").inputValue();
+    const inviteToken = new URL(inviteUrl).pathname.split("/").at(-1);
+    if (inviteToken === undefined || inviteToken === "") {
+      throw new Error("Expected an invitation token");
+    }
+
+    await page.getByRole("button", { name: "Close invitations" }).click();
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Company sprint" })).toBeVisible();
+    await page.getByRole("button", { name: "Invite collaborators" }).click();
+
+    const reopenedInvitations = page.getByRole("dialog", { name: "Invite collaborators" });
+    const activeInvitations = reopenedInvitations.getByRole("list", { name: "Active invitations" });
+    const activeInvite = activeInvitations.getByRole("listitem", { name: "Active contributor invitation for Workshop" });
+    await expect(activeInvite).toContainText("contributor");
+    await expect(activeInvite).toContainText("0 of 1 uses");
+    await expect(activeInvite.getByText(/^Expires /)).toBeVisible();
+    await expect(reopenedInvitations.getByLabel("Invitation link")).toHaveCount(0);
+    expect(await reopenedInvitations.locator("*").evaluateAll((nodes, token) => nodes.some((node) => {
+      const element = node as HTMLElement;
+      return element.textContent?.includes(token) || Array.from(element.attributes).some((attribute) => attribute.value.includes(token));
+    }), inviteToken)).toBe(false);
+
+    await activeInvite.getByRole("button", { name: "Revoke invitation" }).click();
+    await expect(reopenedInvitations.getByText("Invitation revoked.")).toBeVisible();
+    await expect(reopenedInvitations.getByText("No active invitations.")).toBeVisible();
+
+    const participantContext = await browser.newContext();
+    try {
+      const participant = await participantContext.newPage();
+      await participant.goto(inviteUrl);
+      await participant.getByLabel("Email").fill(
+        `revoked-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`,
+      );
+      await participant.getByLabel("Password").fill("Realworld-browser-test-2026");
+      await participant.getByRole("button", { name: "Need an invitation? Create an account" }).click();
+      await participant.getByRole("button", { name: "Create private-alpha account" }).click();
+
+      await expect(participant.getByRole("heading", { name: "You have a Mission invitation." })).toBeVisible({ timeout: 15_000 });
+      await participant.getByRole("button", { name: "Join Mission" }).click();
+      await expect(participant.getByText("This invitation is unavailable, expired, revoked, or already used.", { exact: true })).toBeVisible();
+      await expect(participant.getByRole("button", { name: "Join Mission" })).toHaveCount(0);
+      await expect(participant.getByRole("link", { name: "Enter the Mission World" })).toHaveCount(0);
+    } finally {
+      await participantContext.close();
+    }
+  });
+
   test("an owner can invite a participant and their Workshop map reacts without a reload", async ({ browser, page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Invite collaborators" }).click();

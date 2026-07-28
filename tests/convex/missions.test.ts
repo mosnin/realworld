@@ -384,6 +384,48 @@ describe("invites and durable canvas", () => {
     await expect(t.withIdentity(contributorIdentity).query(api.invites.inviteManagerContext, { missionId: result.missionId })).resolves.toMatchObject({ role: "contributor", canIssue: false });
   });
 
+  it("projects only redeemable, token-safe invitations to the owner", async () => {
+    const { t, asOwner, result } = await createMission();
+    const workshopId = await roomFor(t, result.missionId);
+    const reviewId = await t.run(async (ctx) => ctx.db.insert("rooms", { missionId: result.missionId, kind: "reviewDeck", title: "Review Deck", accessPolicy: "mission", mapType: "field", layout: { x: 300, y: 180, width: 220, height: 140 }, layoutVersion: 1, state: "active", currentVersion: 1, createdAt: Date.now(), updatedAt: Date.now(), schemaVersion: 1 }));
+    const activeToken = "active-invite-token-".padEnd(40, "a");
+    const expiredToken = "expired-invite-token-".padEnd(40, "b");
+    const revokedToken = "revoked-invite-token-".padEnd(40, "c");
+    const active = await asOwner.mutation(api.invites.createInvite, { missionId: result.missionId, role: "contributor", roomIds: [workshopId, reviewId], expiresAt: Date.now() + 60_000, maxUses: 3, inviteToken: activeToken, idempotencyKey: "managed-active", correlationId: "managed" });
+    const expired = await asOwner.mutation(api.invites.createInvite, { missionId: result.missionId, role: "observer", roomIds: [workshopId], expiresAt: Date.now() + 60_000, maxUses: 1, inviteToken: expiredToken, idempotencyKey: "managed-expired", correlationId: "managed" });
+    const revoked = await asOwner.mutation(api.invites.createInvite, { missionId: result.missionId, role: "reviewer", roomIds: [reviewId], expiresAt: Date.now() + 60_000, maxUses: 1, inviteToken: revokedToken, idempotencyKey: "managed-revoked", correlationId: "managed" });
+    await t.run(async (ctx) => {
+      await ctx.db.patch(expired.inviteId, { expiresAt: Date.now() - 1 });
+    });
+    await asOwner.mutation(api.invites.revokeInvite, { inviteId: revoked.inviteId, idempotencyKey: "managed-revoke", correlationId: "managed" });
+
+    const projected = await asOwner.query(api.invites.listActiveInvites, { missionId: result.missionId });
+    expect(projected).toEqual([expect.objectContaining({
+      _id: active.inviteId,
+      role: "contributor",
+      rooms: expect.arrayContaining([
+        { _id: workshopId, title: "Workshop" },
+        { _id: reviewId, title: "Review Deck" },
+      ]),
+      uses: 0,
+      maxUses: 3,
+    })]);
+    expect(JSON.stringify(projected)).not.toContain(activeToken);
+    expect(projected[0]).not.toHaveProperty("tokenHash");
+    expect(projected.map((invite) => invite._id)).not.toContain(expired.inviteId);
+    expect(projected.map((invite) => invite._id)).not.toContain(revoked.inviteId);
+
+    await t.run(async (ctx) => {
+      const now = Date.now();
+      const stewardPrincipalId = await ctx.db.insert("principals", { type: "human", state: "active", tokenIdentifier: "https://realworld.test|managed-steward", createdAt: now, updatedAt: now, schemaVersion: 1 });
+      await ctx.db.insert("missionMembers", { missionId: result.missionId, principalId: stewardPrincipalId, role: "steward", state: "active", scope: ["mission:*"], grantVersion: 1, createdAt: now, updatedAt: now, schemaVersion: 1 });
+      const contributorPrincipalId = await ctx.db.insert("principals", { type: "human", state: "active", tokenIdentifier: contributorIdentity.tokenIdentifier, createdAt: now, updatedAt: now, schemaVersion: 1 });
+      await ctx.db.insert("missionMembers", { missionId: result.missionId, principalId: contributorPrincipalId, role: "contributor", state: "active", scope: [`room:${workshopId}`], grantVersion: 1, createdAt: now, updatedAt: now, schemaVersion: 1 });
+    });
+    await expect(t.withIdentity({ tokenIdentifier: "https://realworld.test|managed-steward", subject: "managed-steward", issuer: "https://realworld.test", name: "Managed steward" }).query(api.invites.listActiveInvites, { missionId: result.missionId })).rejects.toThrow("Not found");
+    await expect(t.withIdentity(contributorIdentity).query(api.invites.listActiveInvites, { missionId: result.missionId })).rejects.toThrow("Not found");
+  });
+
   it("rejects owner/steward grants, expired/max-use tokens, non-owner issuers, and cross-mission rooms", async () => {
     const { t, asOwner, result } = await createMission(); const roomId = await roomFor(t, result.missionId); const guest = t.withIdentity(contributorIdentity);
     await expect(asOwner.mutation(api.invites.createInvite, { missionId: result.missionId, role: "owner" as never, roomIds: [roomId], expiresAt: Date.now() + 60_000, maxUses: 1, inviteToken: "b".repeat(40), idempotencyKey: "bad-role", correlationId: "c" })).rejects.toThrow();
@@ -408,9 +450,11 @@ describe("invites and durable canvas", () => {
 
   it("freezes room and invitation writes while a Mission is archived", async () => {
     const { t, asOwner, result } = await createMission(); const roomId = await roomFor(t, result.missionId);
+    const invite = await asOwner.mutation(api.invites.createInvite, { missionId: result.missionId, role: "observer", roomIds: [roomId], expiresAt: Date.now() + 60_000, maxUses: 1, inviteToken: "p".repeat(40), idempotencyKey: "freeze-existing-invite", correlationId: "freeze" });
     await asOwner.mutation(api.missions.archivePrivateMission, { missionId: result.missionId, expectedVersion: 1, idempotencyKey: "freeze-archive", correlationId: "freeze" });
     await expect(asOwner.mutation(api.canvas.updateRoomLayout, { roomId, expectedLayoutVersion: 1, layout: { x: 20, y: 20, width: 220, height: 140 }, idempotencyKey: "freeze-layout" })).rejects.toThrow("Mission is not active");
     await expect(asOwner.mutation(api.invites.createInvite, { missionId: result.missionId, role: "observer", roomIds: [roomId], expiresAt: Date.now() + 60_000, maxUses: 1, inviteToken: "q".repeat(40), idempotencyKey: "freeze-invite", correlationId: "freeze" })).rejects.toThrow("Mission is not active");
+    await expect(asOwner.mutation(api.invites.revokeInvite, { inviteId: invite.inviteId, idempotencyKey: "freeze-revoke", correlationId: "freeze" })).rejects.toThrow("Mission is not active");
   });
 
   it("replays completed room and invitation commands after archive without unfreezing writes", async () => {
