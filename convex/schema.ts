@@ -46,6 +46,7 @@ export default defineSchema({
     lifecycle: missionLifecycle,
     currentVersion: v.number(),
     eventSequence: v.number(),
+    templateKey: v.optional(v.union(v.literal("companySprint"), v.literal("classroomProject"), v.literal("contentProduction"), v.literal("openChallenge"))),
     createdAt: v.number(),
     updatedAt: v.number(),
     schemaVersion: v.number(),
@@ -83,6 +84,9 @@ export default defineSchema({
     ),
     title: v.string(),
     accessPolicy: v.union(v.literal("mission"), v.literal("members"), v.literal("restricted")),
+    mapType: v.union(v.literal("field"), v.literal("canvas")),
+    layout: v.object({ x: v.number(), y: v.number(), width: v.number(), height: v.number() }),
+    layoutVersion: v.number(),
     state: v.union(v.literal("active"), v.literal("archived")),
     currentVersion: v.number(),
     createdAt: v.number(),
@@ -121,7 +125,7 @@ export default defineSchema({
   missionEvents: defineTable({
     missionId: v.id("missions"),
     missionSequence: v.number(),
-    type: v.union(v.literal("mission.created"), v.literal("mission.archived")),
+    type: v.union(v.literal("mission.created"), v.literal("mission.archived"), v.literal("membership.invited"), v.literal("membership.joined"), v.literal("invite.revoked")),
     aggregateType: v.literal("mission"),
     aggregateId: v.id("missions"),
     actorPrincipalId: v.id("principals"),
@@ -153,5 +157,23 @@ export default defineSchema({
     schemaVersion: v.number(),
   })
     .index("by_scope_and_idempotency_key", ["scope", "idempotencyKey"])
+    .index("by_expiry", ["expiresAt"]),
+
+  invites: defineTable({
+    missionId: v.id("missions"),
+    issuerPrincipalId: v.id("principals"),
+    tokenHash: v.string(),
+    role: v.union(v.literal("builder"), v.literal("reviewer"), v.literal("contributor"), v.literal("observer")),
+    roomIds: v.array(v.id("rooms")),
+    expiresAt: v.number(),
+    maxUses: v.number(),
+    uses: v.number(),
+    state: v.union(v.literal("active"), v.literal("revoked"), v.literal("expired"), v.literal("exhausted")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    schemaVersion: v.number(),
+  })
+    .index("by_token_hash", ["tokenHash"])
+    .index("by_mission_and_state", ["missionId", "state"])
     .index("by_expiry", ["expiresAt"]),
 });

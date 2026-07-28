@@ -9,8 +9,12 @@
  */
 
 import type * as auth from "../auth.js";
+import type * as canvas from "../canvas.js";
 import type * as http from "../http.js";
+import type * as invites from "../invites.js";
+import type * as launch from "../launch.js";
 import type * as lib_auth from "../lib/auth.js";
+import type * as lib_mission_templates from "../lib/mission_templates.js";
 import type * as missions from "../missions.js";
 
 import type {
@@ -21,8 +25,12 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
+  canvas: typeof canvas;
   http: typeof http;
+  invites: typeof invites;
+  launch: typeof launch;
   "lib/auth": typeof lib_auth;
+  "lib/mission_templates": typeof lib_mission_templates;
   missions: typeof missions;
 }>;
 
