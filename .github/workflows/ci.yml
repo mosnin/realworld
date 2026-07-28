@@ -35,6 +35,8 @@ jobs:
         run: pnpm test
       - name: Verify production dependency overrides
         run: pnpm verify:dependencies
+      - name: Audit production dependencies
+        run: pnpm audit:production
       - name: Convex tests
         run: pnpm exec vitest run tests/convex
       - name: Production build
