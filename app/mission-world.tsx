@@ -410,6 +410,7 @@ export function MissionWorld() {
   const [preferences, setPreferences] = useState<Preferences>(defaultPreferences);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [invitePanelOpen, setInvitePanelOpen] = useState(false);
+  const [newMissionOpen, setNewMissionOpen] = useState(false);
   const [loadedPreferencesMissionId, setLoadedPreferencesMissionId] = useState<Id<"missions"> | null>(null);
   const [canvas, setCanvas] = useState<CanvasState>(defaultCanvasState);
   const [newRoomName, setNewRoomName] = useState("");
@@ -496,6 +497,27 @@ export function MissionWorld() {
     setRoomError(null);
   }
 
+  async function launchMission(templateKey: string, title: string) {
+    if (launching !== null) return;
+    setLaunching(templateKey);
+    setLaunchError(null);
+    try {
+      const created = await launch({
+        templateKey,
+        slug: `${templateKey.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase()}-${crypto.randomUUID().slice(0, 8)}`,
+        title,
+        idempotencyKey: crypto.randomUUID(),
+        correlationId: crypto.randomUUID(),
+      });
+      selectMission(created.missionId);
+      setNewMissionOpen(false);
+    } catch {
+      setLaunchError("The Mission could not launch. Try again.");
+    } finally {
+      setLaunching(null);
+    }
+  }
+
   async function repositionRoom(roomId: RoomId, x: number, y: number) {
     const room = canvasRooms.find((candidate) => candidate.id === roomId);
     if (!room?.layout || room.layoutVersion === undefined) return;
@@ -562,24 +584,7 @@ export function MissionWorld() {
           <button
             key={key}
             disabled={launching !== null}
-            onClick={async () => {
-              setLaunching(key);
-              setLaunchError(null);
-              try {
-                const created = await launch({
-                  templateKey: key,
-                  slug: `${key.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase()}-${crypto.randomUUID().slice(0, 8)}`,
-                  title: label,
-                  idempotencyKey: crypto.randomUUID(),
-                  correlationId: crypto.randomUUID(),
-                });
-                selectMission(created.missionId);
-              } catch {
-                setLaunchError("The Mission could not launch. Try again.");
-              } finally {
-                setLaunching(null);
-              }
-            }}
+            onClick={() => void launchMission(key, label)}
             type="button"
           >
             {launching === key ? "Launching…" : `Launch ${label}`}
@@ -616,6 +621,9 @@ export function MissionWorld() {
         <div className="momentum" aria-label="Mission Momentum: strong. One fracture. Surge opening in one minute and twenty-four seconds.">
           <span className="momentum__mark"><Icon name="spark" /></span><strong>Mission Momentum</strong><span className="momentum__bars" aria-hidden="true"><i /><i /><i /><i /><i /></span><b>Strong</b><span>Fractures <em>1</em></span><span>Surge opening <time>01:24</time></span>
         </div>
+        <button className="create-button" onClick={() => setNewMissionOpen(true)} type="button">
+          <Icon name="plus" /> New Mission
+        </button>
         {activeMission.role === "owner" && missionWritable ? (
           <button className="create-button" onClick={() => setInvitePanelOpen(true)} type="button">
             <Icon name="plus" /> Invite collaborators
@@ -630,6 +638,14 @@ export function MissionWorld() {
       </header>
 
       {preferencesOpen ? <PreferencePanel onChange={(next) => { setPreferences(next); if (next.defaultView !== preferences.defaultView) setShowDirectory(next.defaultView === "list"); }} onClose={() => setPreferencesOpen(false)} preferences={preferences} /> : null}
+      {newMissionOpen ? (
+        <div aria-labelledby="new-mission-title" aria-modal="true" className="preference-panel" role="dialog">
+          <div className="preference-panel__header"><div><p className="eyebrow">New Mission</p><h2 id="new-mission-title">Choose a work shape</h2></div><button aria-label="Close new Mission" className="icon-button" disabled={launching !== null} onClick={() => setNewMissionOpen(false)} type="button"><Icon name="close" /></button></div>
+          <p className="preference-panel__intro">Start another world without leaving the one you are in.</p>
+          {launchError === null ? null : <p aria-live="polite">{launchError}</p>}
+          <fieldset disabled={launching !== null}><legend>Templates</legend>{templateOptions.map(({ key, label }) => <button key={key} onClick={() => void launchMission(key, label)} type="button">{launching === key ? `Launching ${label}…` : `Launch ${label}`}</button>)}</fieldset>
+        </div>
+      ) : null}
       {invitePanelOpen ? (
         <div aria-label="Invite collaborators" aria-modal="true" className="preference-panel" role="dialog">
           <button aria-label="Close invitations" onClick={() => setInvitePanelOpen(false)} type="button">
