@@ -864,9 +864,7 @@ describe("RealtimeRoomSession", () => {
         await new Promise((resolve) => setTimeout(resolve, 0));
 
         expect(session.state).toBe("stopped");
-        expect(failures).toHaveLength(1);
-        expect(failures[0]).toEqual(expect.objectContaining({ message: expect.stringMatching(/^Realtime /) }));
-        expect(String(failures[0])).not.toContain(providerSecret);
+        expect(failures).toEqual([]);
       }
       expect(unhandled).toEqual([]);
     } finally {
@@ -945,6 +943,106 @@ describe("RealtimeRoomSession", () => {
         expect(String(failures[0])).not.toContain(providerSecret);
       }
       await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
+  it("bounds hanging cleanup for timely and late invalid publish candidates without activating either connection", async () => {
+    const providerSecret = "hanging-invalid-candidate-secret";
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      const candidates = [
+        () => {
+          const cleanup = deferred<void>();
+          const unsubscribe = vi.fn(() => cleanup.promise);
+          return {
+            candidate: Object.defineProperties({}, {
+              unsubscribe: { value: unsubscribe },
+              publish: { get: () => { throw new Error(providerSecret); } },
+            }),
+            cleanup,
+            unsubscribe,
+          };
+        },
+        () => {
+          const cleanup = deferred<void>();
+          const unsubscribe = vi.fn(() => cleanup.promise);
+          return { candidate: { unsubscribe, publish: "not-a-function" }, cleanup, unsubscribe };
+        },
+      ];
+
+      for (const makeCandidate of candidates) {
+        const clock = new FakeClock();
+        const { candidate, cleanup, unsubscribe } = makeCandidate();
+        const failures: unknown[] = [];
+        const session = new RealtimeRoomSession({
+          tokenProvider: async () => token(clock.now() + 300_000),
+          transport: { connect: async () => candidate } as unknown as RealtimeTransportAdapter,
+          clock,
+          tokenAcquisitionTimeoutMs: 3,
+          transportConnectionTimeoutMs: 4,
+          transportDisposalTimeoutMs: 7,
+          maxReconnectAttempts: 0,
+          onTransportFailure: (error) => failures.push(error),
+        });
+
+        await session.start({ missionId: "mission-a", roomId: "room-a" });
+        expect(session.state).toBe("degraded");
+        expect(unsubscribe).toHaveBeenCalledTimes(1);
+        expect(clock.delays.filter((delay) => delay === 7)).toHaveLength(1);
+        await expect(session.publish(message(clock))).resolves.toBe(false);
+        expect(failures).toEqual([expect.objectContaining({ message: expect.stringMatching(/^Realtime /) })]);
+        expect(String(failures[0])).not.toContain(providerSecret);
+
+        clock.advance(7);
+        await flush();
+        expect(failures).toHaveLength(1);
+        cleanup.resolve();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(unsubscribe).toHaveBeenCalledTimes(1);
+        expect(failures).toHaveLength(1);
+      }
+
+      for (const makeCandidate of candidates) {
+        const clock = new FakeClock();
+        const { candidate, cleanup, unsubscribe } = makeCandidate();
+        const lateCandidate = deferred<unknown>();
+        const failures: unknown[] = [];
+        const session = new RealtimeRoomSession({
+          tokenProvider: async () => token(clock.now() + 300_000),
+          transport: { connect: () => lateCandidate.promise } as unknown as RealtimeTransportAdapter,
+          clock,
+          tokenAcquisitionTimeoutMs: 3,
+          transportConnectionTimeoutMs: 4,
+          transportDisposalTimeoutMs: 7,
+          maxReconnectAttempts: 0,
+          onTransportFailure: (error) => failures.push(error),
+        });
+        const start = session.start({ missionId: "mission-a", roomId: "room-a" });
+
+        await flush();
+        clock.advance(4);
+        await start;
+        lateCandidate.resolve(candidate);
+        await vi.waitFor(() => expect(unsubscribe).toHaveBeenCalledTimes(1));
+        expect(session.state).toBe("degraded");
+        expect(clock.delays.filter((delay) => delay === 7)).toHaveLength(1);
+        await expect(session.publish(message(clock))).resolves.toBe(false);
+        expect(failures).toEqual([expect.objectContaining({ message: expect.stringMatching(/^Realtime /) })]);
+        expect(String(failures[0])).not.toContain(providerSecret);
+
+        clock.advance(7);
+        await flush();
+        expect(failures).toHaveLength(1);
+        cleanup.reject(new Error(providerSecret));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(unsubscribe).toHaveBeenCalledTimes(1);
+        expect(failures).toHaveLength(1);
+      }
       expect(unhandled).toEqual([]);
     } finally {
       process.off("unhandledRejection", observeUnhandled);
@@ -1256,6 +1354,171 @@ describe("RealtimeRoomSession", () => {
       expect(unhandled).toEqual([]);
     } finally {
       process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
+  it("keeps stop, refresh, failure, and room handoff prompt while disposing each old subscription once", async () => {
+    const oldScope = { missionId: "mission-a", roomId: "room-a" };
+    const newScope = { missionId: "mission-a", roomId: "room-b" };
+    for (const lifecycle of ["stop", "refresh", "failure", "handoff"] as const) {
+      const clock = new FakeClock();
+      const { transport, connect, connections } = createTransport();
+      const cleanup = deferred<void>();
+      const failures: unknown[] = [];
+      const session = new RealtimeRoomSession({
+        tokenProvider: async () => token(clock.now() + 300_000),
+        transport,
+        clock,
+        tokenAcquisitionTimeoutMs: 3,
+        transportConnectionTimeoutMs: 4,
+        transportPublishTimeoutMs: 5,
+        transportDisposalTimeoutMs: 7,
+        reconnectDelayMs: () => 11,
+        onTransportFailure: (error) => failures.push(error),
+      });
+      await session.start(oldScope);
+      connections[0]!.unsubscribe.mockImplementation(() => cleanup.promise);
+
+      if (lifecycle === "stop") {
+        await Promise.all([session.stop(), session.stop()]);
+        expect(session.state).toBe("stopped");
+      } else if (lifecycle === "refresh") {
+        await session.refresh();
+        expect(session.state).toBe("live");
+        expect(connect).toHaveBeenCalledTimes(2);
+      } else if (lifecycle === "failure") {
+        connections[0]!.input.onFailure(new Error("connection-failure"));
+        expect(session.state).toBe("degraded");
+      } else {
+        await session.start(newScope);
+        expect(session.state).toBe("live");
+        expect(session.scope).toEqual(newScope);
+        expect(connect).toHaveBeenCalledTimes(2);
+      }
+
+      expect(connections[0]!.unsubscribe).toHaveBeenCalledTimes(1);
+      expect(clock.delays.filter((delay) => delay === 7)).toHaveLength(1);
+      clock.advance(7);
+      await flush();
+      expect(connections[0]!.unsubscribe).toHaveBeenCalledTimes(1);
+      expect(failures).toHaveLength(lifecycle === "failure" ? 1 : 0);
+
+      if (lifecycle === "failure") {
+        clock.advance(4);
+        await vi.waitFor(() => expect(session.state).toBe("live"));
+        expect(connect).toHaveBeenCalledTimes(2);
+      }
+
+      cleanup.reject(new Error("late-disposal-provider-secret"));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(connections[0]!.unsubscribe).toHaveBeenCalledTimes(1);
+      expect(failures).toHaveLength(lifecycle === "failure" ? 1 : 0);
+      if (lifecycle === "stop") expect(session.state).toBe("stopped");
+      else if (lifecycle === "handoff") expect(session.scope).toEqual(newScope);
+      else expect(session.state).toBe("live");
+    }
+  });
+
+  it("bounds throwing, rejected, never-settling, and hostile cleanup without leaking provider details or rejections", async () => {
+    const providerSecret = "unsubscribe-provider-secret";
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      const neverSettling = deferred<void>();
+      const cleanupVariants = [
+        () => { throw new Error(providerSecret); },
+        () => Promise.reject(new Error(providerSecret)),
+        () => neverSettling.promise,
+        () => Object.defineProperty({}, "then", { get: () => { throw new Error(providerSecret); } }),
+      ];
+      for (const unsubscribe of cleanupVariants) {
+        const clock = new FakeClock();
+        const { transport, connections } = createTransport();
+        const failures: unknown[] = [];
+        const session = new RealtimeRoomSession({
+          tokenProvider: async () => token(clock.now() + 300_000),
+          transport,
+          clock,
+          transportDisposalTimeoutMs: 7,
+          onTransportFailure: (error) => failures.push(error),
+        });
+        await session.start({ missionId: "mission-a", roomId: "room-a" });
+        connections[0]!.unsubscribe.mockImplementation(unsubscribe);
+
+        await session.stop();
+        expect(session.state).toBe("stopped");
+        expect(connections[0]!.unsubscribe).toHaveBeenCalledTimes(1);
+        expect(clock.delays.filter((delay) => delay === 7)).toHaveLength(1);
+        clock.advance(7);
+        await flush();
+
+        expect(failures).toEqual([]);
+        expect(session.state).toBe("stopped");
+      }
+      neverSettling.reject(new Error(providerSecret));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
+  it("clears a timely disposal deadline so late clock advancement cannot affect the replacement session", async () => {
+    const clock = new FakeClock();
+    const { transport, connect, connections } = createTransport();
+    const cleanup = deferred<void>();
+    const failures: unknown[] = [];
+    const session = new RealtimeRoomSession({
+      tokenProvider: async () => token(clock.now() + 300_000),
+      transport,
+      clock,
+      transportDisposalTimeoutMs: 7,
+      onTransportFailure: (error) => failures.push(error),
+    });
+    await session.start({ missionId: "mission-a", roomId: "room-a" });
+    connections[0]!.unsubscribe.mockImplementation(() => cleanup.promise);
+
+    await session.refresh();
+    expect(session.state).toBe("live");
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(connections[0]!.unsubscribe).toHaveBeenCalledTimes(1);
+    expect(clock.delays.filter((delay) => delay === 7)).toHaveLength(1);
+    cleanup.resolve();
+    await flush();
+    clock.advance(7);
+    await flush();
+
+    expect(session.state).toBe("live");
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(failures).toEqual([]);
+  });
+
+  it("normalizes the disposal deadline independently from acquisition, connection, publication, refresh, and reconnect timers", async () => {
+    const cases: Array<{ option?: number; expectedDelay: number }> = [
+      { expectedDelay: 10_000 },
+      { option: 0, expectedDelay: 1 },
+      { option: 300_001, expectedDelay: 30_000 },
+      { option: Number.NaN, expectedDelay: 10_000 },
+    ];
+    for (const { option, expectedDelay } of cases) {
+      const clock = new FakeClock();
+      const { transport, connections } = createTransport();
+      const session = new RealtimeRoomSession({
+        tokenProvider: async () => token(clock.now() + 300_000),
+        transport,
+        clock,
+        tokenAcquisitionTimeoutMs: 3,
+        transportConnectionTimeoutMs: 4,
+        transportPublishTimeoutMs: 5,
+        ...(option === undefined ? {} : { transportDisposalTimeoutMs: option }),
+      });
+      await session.start({ missionId: "mission-a", roomId: "room-a" });
+      await session.stop();
+
+      expect(connections[0]!.unsubscribe).toHaveBeenCalledTimes(1);
+      expect(clock.delays).toEqual(expect.arrayContaining([3, 4, expectedDelay]));
+      expect(clock.delays.filter((delay) => delay === expectedDelay)).toHaveLength(1);
     }
   });
 

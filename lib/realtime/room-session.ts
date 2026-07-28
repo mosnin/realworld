@@ -69,6 +69,7 @@ export type RoomSessionOptions = Readonly<{
   clock?: RealtimeClock;
   tokenAcquisitionTimeoutMs?: number;
   transportConnectionTimeoutMs?: number;
+  transportDisposalTimeoutMs?: number;
   transportPublishTimeoutMs?: number;
   refreshSkewMs?: number;
   minimumRefreshDelayMs?: number;
@@ -96,6 +97,8 @@ const defaultTokenAcquisitionTimeoutMs = 10_000;
 const maximumTokenAcquisitionTimeoutMs = 30_000;
 const defaultTransportConnectionTimeoutMs = 10_000;
 const maximumTransportConnectionTimeoutMs = 30_000;
+const defaultTransportDisposalTimeoutMs = 10_000;
+const maximumTransportDisposalTimeoutMs = 30_000;
 const defaultTransportPublishTimeoutMs = 10_000;
 const maximumTransportPublishTimeoutMs = 30_000;
 const maximumReconnectDelayMs = 30_000;
@@ -169,35 +172,38 @@ function snapshotRealtimeToken(value: unknown): RealtimeToken | undefined {
   }
 }
 
-function snapshotTransportSubscription(value: unknown): RealtimeTransportSubscription | undefined {
+type TransportSubscriptionSnapshot = Readonly<{
+  subscription?: RealtimeTransportSubscription;
+  disposable?: RealtimeTransportSubscription;
+}>;
+
+function snapshotTransportSubscription(value: unknown): TransportSubscriptionSnapshot | undefined {
   try {
     if (!isRecord(value)) return undefined;
     const unsubscribe = value.unsubscribe;
     if (typeof unsubscribe !== "function") return undefined;
-    let disposed = false;
+    let disposal: Promise<void> | undefined;
     const dispose = () => {
-      if (disposed) return Promise.resolve();
-      disposed = true;
+      if (disposal) return disposal;
       try {
-        return Promise.resolve(Reflect.apply(unsubscribe, value, [])).catch(() => {
+        disposal = Promise.resolve(Reflect.apply(unsubscribe, value, [])).catch(() => {
           throw new Error("Realtime transport disposal failed");
         });
       } catch {
-        return Promise.reject(new Error("Realtime transport disposal failed"));
+        disposal = Promise.reject(new Error("Realtime transport disposal failed"));
       }
+      return disposal;
     };
     let publish: unknown;
     try {
       publish = value.publish;
     } catch {
-      void dispose().catch(() => undefined);
-      return undefined;
+      return { disposable: { unsubscribe: dispose } };
     }
     if (publish !== undefined && typeof publish !== "function") {
-      void dispose().catch(() => undefined);
-      return undefined;
+      return { disposable: { unsubscribe: dispose } };
     }
-    return {
+    const subscription: RealtimeTransportSubscription = {
       unsubscribe: dispose,
       publish: publish === undefined
         ? undefined
@@ -213,17 +219,43 @@ function snapshotTransportSubscription(value: unknown): RealtimeTransportSubscri
           }
         },
     };
+    return { subscription, disposable: subscription };
   } catch {
     return undefined;
   }
 }
 
-function disposeLateTransportSubscription(subscription: RealtimeTransportSubscription) {
-  try {
-    void Promise.resolve(subscription.unsubscribe()).catch(() => undefined);
-  } catch {
-    // A late subscription is never active and provider disposal stays contained.
-  }
+function disposeTransportSubscription(
+  subscription: RealtimeTransportSubscription,
+  clock: RealtimeClock,
+  timeoutMs: number,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let settled = false;
+  return new Promise<void>((resolve, reject) => {
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      if (timer !== undefined) clock.clearTimeout(timer);
+      if (error) reject(error);
+      else resolve();
+    };
+    timer = clock.setTimeout(
+      () => finish(new Error("Realtime transport disposal timed out")),
+      timeoutMs,
+    );
+    let disposal: void | Promise<void>;
+    try {
+      disposal = subscription.unsubscribe();
+    } catch {
+      finish(new Error("Realtime transport disposal failed"));
+      return;
+    }
+    void Promise.resolve(disposal).then(
+      () => finish(),
+      () => finish(new Error("Realtime transport disposal failed")),
+    );
+  });
 }
 
 function hasSerializedPayloadWithinLimit(value: unknown, maxBytes: number) {
@@ -304,6 +336,7 @@ export class RealtimeRoomSession {
   private readonly clock: RealtimeClock;
   private readonly tokenAcquisitionTimeoutMs: number;
   private readonly transportConnectionTimeoutMs: number;
+  private readonly transportDisposalTimeoutMs: number;
   private readonly transportPublishTimeoutMs: number;
   private readonly refreshSkewMs: number;
   private readonly minimumRefreshDelayMs: number;
@@ -327,6 +360,7 @@ export class RealtimeRoomSession {
   private cancelTokenAcquisition: (() => void) | undefined;
   private cancelTransportConnection: (() => void) | undefined;
   private readonly cancelPublications = new Set<() => void>();
+  private readonly disposalObservations = new WeakMap<RealtimeTransportSubscription, Promise<void>>();
   private readonly seenMessageExpiry = new Map<string, number>();
   private readonly messageExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly senderEpoch = new Map<string, number>();
@@ -343,6 +377,11 @@ export class RealtimeRoomSession {
       options.transportConnectionTimeoutMs,
       defaultTransportConnectionTimeoutMs,
       maximumTransportConnectionTimeoutMs,
+    );
+    this.transportDisposalTimeoutMs = normalizedBoundedPositive(
+      options.transportDisposalTimeoutMs,
+      defaultTransportDisposalTimeoutMs,
+      maximumTransportDisposalTimeoutMs,
     );
     this.transportPublishTimeoutMs = normalizedBoundedPositive(
       options.transportPublishTimeoutMs,
@@ -445,14 +484,15 @@ export class RealtimeRoomSession {
   private detachSubscription(subscription = this.subscription) {
     if (!subscription) return;
     if (subscription === this.subscription) this.subscription = undefined;
-    try {
-      const result = subscription.unsubscribe();
-      if (result && typeof (result as Promise<void>).then === "function") {
-        void (result as Promise<void>).catch((error: unknown) => this.options.onTransportFailure?.(error));
-      }
-    } catch (error) {
-      this.options.onTransportFailure?.(error);
-    }
+    void this.observeSubscriptionDisposal(subscription).catch(() => undefined);
+  }
+
+  private observeSubscriptionDisposal(subscription: RealtimeTransportSubscription): Promise<void> {
+    const existing = this.disposalObservations.get(subscription);
+    if (existing) return existing;
+    const observation = disposeTransportSubscription(subscription, this.clock, this.transportDisposalTimeoutMs);
+    this.disposalObservations.set(subscription, observation);
+    return observation;
   }
 
   private async stopInternal(reason: "scope-changed" | "stopped", nextState: RoomSessionState) {
@@ -586,16 +626,17 @@ export class RealtimeRoomSession {
       }
       void connectionPromise.then(
         (candidate) => {
-          const subscription = snapshotTransportSubscription(candidate);
+          const snapshot = snapshotTransportSubscription(candidate);
           if (settled) {
-            if (subscription) disposeLateTransportSubscription(subscription);
+            if (snapshot?.disposable) void this.observeSubscriptionDisposal(snapshot.disposable).catch(() => undefined);
             return;
           }
-          if (!subscription) {
+          if (!snapshot?.subscription) {
+            if (snapshot?.disposable) void this.observeSubscriptionDisposal(snapshot.disposable).catch(() => undefined);
             finish(new Error("Realtime transport connection failed"));
             return;
           }
-          finish(undefined, subscription);
+          finish(undefined, snapshot.subscription);
         },
         () => finish(new Error("Realtime transport connection failed")),
       );
