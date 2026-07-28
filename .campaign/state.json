@@ -5,11 +5,12 @@
   "currentPhase": 1,
   "phaseName": "Production foundation",
   "startedAt": "2026-07-27T00:00:00-04:00",
-  "lastUpdatedAt": "2026-07-28T11:02:17-04:00",
+  "lastUpdatedAt": "2026-07-28T11:16:36-04:00",
+  "latestReleaseGate": {"commit":"c7e7964","githubRun":"30372322108","automatedTests":206,"convexTests":67,"browserTests":22,"evidenceBoundary":"local fake-clock and hosted provider-independent CI only; no live Ably or product wiring"},
   "exactNextActions": [
     "Create or connect a cloud Convex development deployment and verify the current preview creates and reloads a durable Mission",
     "After the cloud preview gate, create a dedicated Ably development application and add its key only through encrypted Convex environment settings",
-    "Snapshot and validate the provider-independent maxReconnectAttempts option so hostile getters, malformed values, and async objects cannot escape or alter bounded recovery exhaustion while current product wiring remains absent"
+    "Snapshot and validate the provider-independent message TTL and future-issued-at limits so hostile getters, malformed values, and async objects cannot escape or alter transient-message acceptance while current product wiring remains absent"
   ],
   "teams": {
     "worldNetwork": {"status":"complete","model":"gpt-5.6-terra","writeScope":"docs/program/world-network-system.md","lastMeaningfulHeartbeatAt":"2026-07-27T18:52:00-04:00","evidence":"commit 0ca7a39","exactNextAction":"Review the product contract against the room interaction specification"},
