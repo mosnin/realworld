@@ -247,6 +247,102 @@ describe("Call kernel", () => {
     })).rejects.toThrow("Mission is not active");
   });
 
+  it("persists valid deadlines and an immutable resolution record", async () => {
+    const { asOwner, missionId, roomId } = await setup();
+    await expect(asOwner.mutation(api.calls.createCall, {
+      ...createArgs(missionId, roomId, "expired-deadline"),
+      deadlineAt: Date.now() - 1,
+    })).rejects.toThrow("Invalid Call deadline");
+    const deadlineAt = Date.now() + 60_000;
+    const call = await asOwner.mutation(api.calls.createCall, {
+      ...createArgs(missionId, roomId, "deadline-call"),
+      deadlineAt,
+    });
+    expect(await asOwner.query(api.calls.listMissionCalls, { missionId })).toEqual([
+      expect.objectContaining({ _id: call.callId, deadlineAt }),
+    ]);
+    const revisedDeadlineAt = Date.now() + 120_000;
+    const updated = await asOwner.mutation(api.calls.updateCall, {
+      callId: call.callId,
+      expectedVersion: call.currentVersion,
+      roomId,
+      linkedMoveId: null,
+      title: "Need a product decision",
+      detail: "Please help choose the next durable work slice.",
+      deadlineAt: revisedDeadlineAt,
+      idempotencyKey: "revise-deadline",
+      correlationId: "revise-deadline",
+    });
+    const accepted = await asOwner.mutation(api.calls.transitionCall, {
+      callId: call.callId,
+      expectedVersion: updated.currentVersion,
+      nextStatus: "accepted",
+      resolutionSummary: null,
+      idempotencyKey: "deadline-accept",
+      correlationId: "deadline-accept",
+    });
+    await expect(asOwner.mutation(api.calls.transitionCall, {
+      callId: call.callId,
+      expectedVersion: accepted.currentVersion,
+      nextStatus: "resolved",
+      resolutionSummary: "   ",
+      idempotencyKey: "empty-resolution",
+      correlationId: "empty-resolution",
+    })).rejects.toThrow("Invalid Call resolution summary");
+    const resolvedArgs = {
+      callId: call.callId,
+      expectedVersion: accepted.currentVersion,
+      nextStatus: "resolved" as const,
+      resolutionSummary: "Ship the reviewed decision record.",
+      idempotencyKey: "resolve-deadline-call",
+      correlationId: "resolve-deadline-call",
+    };
+    const resolved = await asOwner.mutation(api.calls.transitionCall, resolvedArgs);
+    expect(await asOwner.mutation(api.calls.transitionCall, resolvedArgs)).toEqual(resolved);
+    const resolvedCall = (await asOwner.query(api.calls.listMissionCalls, { missionId }))[0]!;
+    expect(resolvedCall).toMatchObject({
+      _id: call.callId,
+      deadlineAt: revisedDeadlineAt,
+      status: "resolved",
+      resolutionSummary: "Ship the reviewed decision record.",
+      resolvedAt: expect.any(Number),
+    });
+    await expect(asOwner.mutation(api.calls.updateCall, {
+      callId: call.callId,
+      expectedVersion: resolved.currentVersion,
+      roomId,
+      linkedMoveId: null,
+      title: "Attempted terminal rewrite",
+      detail: "Terminal calls retain their immutable resolution record.",
+      deadlineAt: null,
+      idempotencyKey: "terminal-deadline-rewrite",
+      correlationId: "terminal-deadline-rewrite",
+    })).rejects.toThrow("Terminal Calls");
+
+    const cancelled = await asOwner.mutation(api.calls.createCall, {
+      ...createArgs(missionId, roomId, "cancelled-without-summary"),
+      deadlineAt: null,
+    });
+    await expect(asOwner.mutation(api.calls.transitionCall, {
+      callId: cancelled.callId,
+      expectedVersion: cancelled.currentVersion,
+      nextStatus: "cancelled",
+      resolutionSummary: "This cannot be stored on a cancellation.",
+      idempotencyKey: "cancel-with-summary",
+      correlationId: "cancel-with-summary",
+    })).rejects.toThrow("Only resolved Calls");
+    await asOwner.mutation(api.calls.transitionCall, {
+      callId: cancelled.callId,
+      expectedVersion: cancelled.currentVersion,
+      nextStatus: "cancelled",
+      resolutionSummary: null,
+      idempotencyKey: "cancel-without-summary",
+      correlationId: "cancel-without-summary",
+    });
+    expect((await asOwner.query(api.calls.listMissionCalls, { missionId })).find((item) => item._id === cancelled.callId))
+      .not.toHaveProperty("resolutionSummary");
+  });
+
   it("rejects revoked and expired memberships before they can create Calls", async () => {
     const { t, missionId, roomId } = await setup();
     await grant(t, missionId, revoked, "builder", [`room:${roomId}`], "revoked");

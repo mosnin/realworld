@@ -42,6 +42,28 @@ function transitionLabel(status: CallStatus) {
   return ({ accepted: "Accept", open: "Reopen", resolved: "Resolve", cancelled: "Cancel" } as const)[status];
 }
 
+function localDateTimeValue(timestamp: number | undefined) {
+  if (timestamp === undefined) return "";
+  const date = new Date(timestamp);
+  const offset = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+}
+
+function deadlineState(deadlineAt: number | undefined) {
+  if (deadlineAt === undefined) return undefined;
+  const difference = deadlineAt - Date.now();
+  if (difference < 0) return "overdue";
+  if (difference < 86_400_000) return "soon";
+  return "scheduled";
+}
+
+function deadlineLabel(deadlineAt: number | undefined) {
+  if (deadlineAt === undefined) return "No deadline";
+  const state = deadlineState(deadlineAt);
+  const when = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(deadlineAt);
+  return state === "overdue" ? `Overdue since ${when}` : state === "soon" ? `Due ${when}` : `Due ${when}`;
+}
+
 export function CallSurface({
   mission,
   rooms,
@@ -70,12 +92,18 @@ export function CallSurface({
   const [roomId, setRoomId] = useState<Id<"rooms"> | "">(rooms[0]?._id ?? "");
   const [linkedMoveId, setLinkedMoveId] = useState<Id<"moves"> | "">("");
   const [maxParticipants, setMaxParticipants] = useState("50");
+  const [deadlineInput, setDeadlineInput] = useState("");
+  const [resolutionSummary, setResolutionSummary] = useState("");
   const [responseDraft, setResponseDraft] = useState<{ callId: Id<"calls"> | null; participantVersion: number; value: string }>({ callId: null, participantVersion: -1, value: "" });
   const [pendingIntent, setPendingIntent] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const participants = useQuery(
     api.calls.listCallParticipants,
     selectedCallId === null ? "skip" : { callId: selectedCallId },
+  );
+  const responseHistory = useQuery(
+    api.calls.listCallResponseHistory,
+    selectedCallId === null ? "skip" : { callId: selectedCallId, limit: 50 },
   );
   const canCreate = mission.lifecycle === "active" && ["owner", "steward", "builder", "contributor"].includes(mission.role);
   const canParticipate = mission.lifecycle === "active" && ["owner", "steward", "builder", "reviewer", "contributor"].includes(mission.role);
@@ -136,6 +164,8 @@ export function CallSurface({
     setRoomId(rooms[0]?._id ?? "");
     setLinkedMoveId("");
     setMaxParticipants("50");
+    setDeadlineInput("");
+    setResolutionSummary("");
     setResponseDraft({ callId: null, participantVersion: -1, value: "" });
     if (clearStatus) setStatus(null);
   }
@@ -156,6 +186,8 @@ export function CallSurface({
     setRoomId(call.roomId ?? "");
     setLinkedMoveId(call.linkedMoveId ?? "");
     setMaxParticipants(String(call.maxParticipants));
+    setDeadlineInput(localDateTimeValue(call.deadlineAt));
+    setResolutionSummary(call.resolutionSummary ?? "");
     setResponseDraft({ callId: null, participantVersion: -1, value: "" });
     setStatus(null);
     setOpen(true);
@@ -187,6 +219,11 @@ export function CallSurface({
       setStatus("Choose a participant limit from 1 to 50.");
       return;
     }
+    const deadlineAt = deadlineInput === "" ? null : Date.parse(deadlineInput);
+    if (deadlineAt !== null && Number.isNaN(deadlineAt)) {
+      setStatus("Choose a valid deadline or clear the field.");
+      return;
+    }
     if (selectedCall === undefined) {
       const succeeded = await runCommand(
         "create",
@@ -197,6 +234,7 @@ export function CallSurface({
           title,
           detail,
           maxParticipants: participantLimit,
+          deadlineAt,
           idempotencyKey,
           correlationId: crypto.randomUUID(),
         }),
@@ -215,6 +253,7 @@ export function CallSurface({
         title,
         detail,
         maxParticipants: participantLimit,
+        deadlineAt,
         idempotencyKey,
         correlationId: crypto.randomUUID(),
       }),
@@ -225,12 +264,17 @@ export function CallSurface({
 
   async function transition(nextStatus: CallStatus) {
     if (selectedCall === undefined) return;
+    if (nextStatus === "resolved" && resolutionSummary.trim().length === 0) {
+      setStatus("Add a resolution summary before resolving this Call.");
+      return;
+    }
     await runCommand(
       `transition:${selectedCall._id}:${nextStatus}`,
       (idempotencyKey) => transitionCall({
         callId: selectedCall._id,
         expectedVersion: selectedCall.currentVersion,
         nextStatus,
+        resolutionSummary: nextStatus === "resolved" ? resolutionSummary.trim() : null,
         idempotencyKey,
         correlationId: crypto.randomUUID(),
       }),
@@ -276,8 +320,8 @@ export function CallSurface({
           const room = rooms.find((candidate) => candidate._id === call.roomId);
           return (
             <button
-              aria-label={`Open Call: ${call.title}, ${statusLabel(call.status)}, ${call.joinedCount} of ${call.maxParticipants} participants`}
-              className={`call-beacon call-beacon--${call.status}`}
+              aria-label={`Open Call: ${call.title}, ${statusLabel(call.status)}, ${call.joinedCount} of ${call.maxParticipants} participants${call.deadlineAt === undefined ? "" : `, ${deadlineLabel(call.deadlineAt)}`}`}
+              className={`call-beacon call-beacon--${call.status}${deadlineState(call.deadlineAt) === "overdue" ? " call-beacon--overdue" : deadlineState(call.deadlineAt) === "soon" ? " call-beacon--soon" : ""}`}
               key={call._id}
               onClick={(event) => inspectCall(call._id, event)}
               style={{
@@ -288,7 +332,7 @@ export function CallSurface({
             >
               <span aria-hidden="true"><Icon name="spark" /></span>
               <strong>{call.title}</strong>
-              <small>{statusLabel(call.status)} · {call.joinedCount}/{call.maxParticipants}</small>
+              <small>{statusLabel(call.status)} · {call.joinedCount}/{call.maxParticipants}{call.deadlineAt === undefined ? "" : ` · ${deadlineState(call.deadlineAt) === "overdue" ? "overdue" : "due"}`}</small>
             </button>
           );
         })}
@@ -314,6 +358,8 @@ export function CallSurface({
               <small>Room: {selectedCallRoom?.title ?? "Mission-wide"}</small>
               <small>Linked Move: {selectedCallMove?.title ?? "None"}</small>
               <small aria-live="polite" className="call-detail__capacity" role="status">{selectedCall.joinedCount} / {selectedCall.maxParticipants} participants</small>
+              {selectedCall.deadlineAt === undefined ? null : <small className={`call-detail__deadline call-detail__deadline--${deadlineState(selectedCall.deadlineAt)}`}>{deadlineLabel(selectedCall.deadlineAt)}</small>}
+              {selectedCall.resolutionSummary ? <div className="call-detail__resolution"><b>Resolution</b><p>{selectedCall.resolutionSummary}</p>{selectedCall.resolvedAt ? <small>Resolved {new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(selectedCall.resolvedAt)}</small> : null}</div> : null}
             </article>
           ) : null}
 
@@ -344,6 +390,10 @@ export function CallSurface({
                 Participant limit (1–50)
                 <input disabled={pendingIntent !== null} max="50" min="1" onChange={(event) => setMaxParticipants(event.target.value)} required type="number" value={maxParticipants} />
               </label>
+              <label>
+                Deadline (optional)
+                <input disabled={pendingIntent !== null} onChange={(event) => setDeadlineInput(event.target.value)} type="datetime-local" value={deadlineInput} />
+              </label>
               <button disabled={pendingIntent !== null} type="submit">{pendingIntent === "create" ? "Issuing…" : selectedCall === undefined ? "Issue Call" : pendingIntent?.startsWith("update:") ? "Saving…" : "Save Call"}</button>
             </form>
           ) : isEditableCall ? <p>No writable Room is available for a Call.</p> : null}
@@ -351,13 +401,19 @@ export function CallSurface({
           {selectedCall !== undefined && selectedCall.canAdminister && selectedTransitions.length > 0 ? (
             <section aria-label={`Call actions for ${selectedCall.title}`} className="call-actions">
               <p><strong>{selectedCall.title}</strong> <span>{statusLabel(selectedCall.status)}</span></p>
+              {selectedTransitions.includes("resolved") ? <label className="call-actions__resolution">Resolution summary<textarea disabled={pendingIntent !== null} onChange={(event) => setResolutionSummary(event.target.value)} required value={resolutionSummary} /></label> : null}
               {selectedTransitions.map((nextStatus) => (
-                <button disabled={pendingIntent !== null} key={nextStatus} onClick={() => void transition(nextStatus)} type="button">
+                <button disabled={pendingIntent !== null || (nextStatus === "resolved" && resolutionSummary.trim().length === 0)} key={nextStatus} onClick={() => void transition(nextStatus)} type="button">
                   {pendingIntent === `transition:${selectedCall._id}:${nextStatus}` ? `${transitionLabel(nextStatus)}ing…` : `${transitionLabel(nextStatus)} ${selectedCall.title}`}
                 </button>
               ))}
             </section>
           ) : null}
+
+          {selectedCall !== undefined ? <section aria-label={`Response history for ${selectedCall.title}`} className="call-response-history">
+            <div className="call-response-history__header"><strong>Response history</strong><span>{responseHistory === undefined ? "Loading" : `${responseHistory.length} revision${responseHistory.length === 1 ? "" : "s"}`}</span></div>
+            {responseHistory === undefined ? <p>Loading response history…</p> : responseHistory.length === 0 ? <p>No responses have been recorded yet.</p> : <ol>{responseHistory.map((entry, index) => <li key={entry._id}><span>{entry.isCurrentUser ? "You" : entry.displayName ?? entry.role ?? `Collaborator ${index + 1}`}</span><small>Revision {entry.revision} · {new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(entry.createdAt)}</small><p>{entry.response}</p></li>)}</ol>}
+          </section> : null}
 
           {selectedCall !== undefined ? (
             <section aria-label={`Call participants for ${selectedCall.title}`} className="call-participants">

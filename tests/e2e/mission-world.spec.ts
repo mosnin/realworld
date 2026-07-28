@@ -355,6 +355,7 @@ test("an owner can issue, edit, advance, and reload a durable room Call", async 
   const initialDetail = "Bring one concrete interaction concern from the Workshop.";
   const updatedDetail = "Bring one concrete interaction concern and a suggested repair from the Workshop.";
   const linkedMove = "Set the sprint outcome";
+  const resolutionSummary = "The owner reviewed the room signal and recorded the agreed repair.";
 
   await page.goto("/");
   await page.getByRole("button", { name: /Issue Call/ }).click();
@@ -402,9 +403,11 @@ test("an owner can issue, edit, advance, and reload a durable room Call", async 
   await expect(callDialog.getByText(`${updatedTitle} is now accepted.`)).toBeVisible();
 
   const resolve = callDialog.getByRole("button", { name: `Resolve ${updatedTitle}` });
+  await callDialog.getByLabel("Resolution summary").fill(resolutionSummary);
   await resolve.focus();
   await page.keyboard.press("Enter");
   await expect(callDialog.getByText(`${updatedTitle} is now resolved.`)).toBeVisible();
+  await expect(callDialog.getByLabel(`Call details for ${updatedTitle}`).getByText(resolutionSummary, { exact: true })).toBeVisible();
   const callList = callDialog.getByRole("list", { name: "Mission Calls" });
   await expect(callList.getByText(updatedTitle, { exact: true })).toBeVisible();
   await expect(callList.getByText(updatedDetail, { exact: true })).toBeVisible();
@@ -670,6 +673,8 @@ test("an owner and contributor reactively coordinate a capacity-limited Call", a
   const title = `Pair on the live Call ${Date.now()}`;
   const firstResponse = "I can review the current permission behavior.";
   const updatedResponse = "I can review the current permission behavior and verify the recovery path.";
+  const resolutionSummary = "The owner accepted the contributor's review and completed the Workshop access repair.";
+  const deadline = new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 16);
 
   await page.goto("/");
   await page.getByRole("button", { name: "Invite collaborators" }).click();
@@ -704,6 +709,7 @@ test("an owner and contributor reactively coordinate a capacity-limited Call", a
     await ownerDialog.getByRole("textbox", { name: "Detail" }).fill("Pair with one contributor on the Workshop access review.");
     await ownerDialog.getByLabel("Room").selectOption({ label: "Workshop" });
     await ownerDialog.getByLabel("Participant limit (1–50)").fill("1");
+    await ownerDialog.getByLabel("Deadline (optional)").fill(deadline);
     await ownerDialog.getByRole("button", { name: "Issue Call", exact: true }).click();
     await expect(ownerDialog.getByText("Call issued.")).toBeVisible();
     await ownerDialog.getByRole("button", { name: "Close Calls" }).click();
@@ -725,9 +731,18 @@ test("an owner and contributor reactively coordinate a capacity-limited Call", a
     await contributorDialog.getByLabel(`Response to ${title}`).fill(firstResponse);
     await contributorDialog.getByRole("button", { name: `Respond to ${title}` }).click();
     await expect(contributorParticipants.getByText(firstResponse, { exact: true })).toBeVisible();
+    const contributorHistory = contributorDialog.getByLabel(`Response history for ${title}`);
+    await expect(contributorHistory.getByText(firstResponse, { exact: true })).toBeVisible();
+    await expect(contributorHistory.getByText(/Revision 1/)).toBeVisible();
     await contributorDialog.getByLabel(`Response to ${title}`).fill(updatedResponse);
     await contributorDialog.getByRole("button", { name: `Respond to ${title}` }).click();
     await expect(ownerParticipants.getByText(updatedResponse, { exact: true })).toBeVisible({ timeout: 15_000 });
+    const ownerHistory = ownerDialog.getByLabel(`Response history for ${title}`);
+    await expect(ownerHistory.getByText(firstResponse, { exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(ownerHistory.getByText(updatedResponse, { exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(ownerHistory.getByText(/Revision 2/)).toBeVisible();
+    const ownerDetails = ownerDialog.getByLabel(`Call details for ${title}`);
+    await expect(ownerDetails.getByText(/^Due /)).toBeVisible();
 
     await contributorDialog.getByRole("button", { name: `Withdraw ${title}` }).click();
     await expect(contributorParticipants).toContainText(/0\s*\/\s*1/);
@@ -749,15 +764,52 @@ test("an owner and contributor reactively coordinate a capacity-limited Call", a
 
     await ownerDialog.getByRole("button", { name: `Accept ${title}` }).click();
     await expect(ownerDialog.getByText(`${title} is now accepted.`)).toBeVisible();
-    await ownerDialog.getByRole("button", { name: `Resolve ${title}` }).click();
+    const resolve = ownerDialog.getByRole("button", { name: `Resolve ${title}` });
+    await expect(resolve).toBeDisabled();
+    await ownerDialog.getByLabel("Resolution summary").fill(resolutionSummary);
+    await resolve.focus();
+    await expect(resolve).toBeFocused();
+    await page.keyboard.press("Enter");
     await expect(ownerDialog.getByText(`${title} is now resolved.`)).toBeVisible();
+    await expect(ownerDetails.getByText(resolutionSummary, { exact: true })).toBeVisible();
+    await expect(ownerHistory.getByText(firstResponse, { exact: true })).toBeVisible();
+    await expect(ownerHistory.getByText(updatedResponse, { exact: true })).toHaveCount(2);
+    await expect(ownerHistory.getByText(/Revision 3/)).toBeVisible();
 
     await expect(contributorDialog.getByRole("button", { name: `Join ${title}` })).toHaveCount(0, { timeout: 15_000 });
     await expect(contributorDialog.getByRole("button", { name: `Withdraw ${title}` })).toHaveCount(0);
     await expect(contributorDialog.getByLabel(`Response to ${title}`)).toHaveCount(0);
     await expect(contributorDialog.getByRole("button", { name: `Respond to ${title}` })).toHaveCount(0);
     await expect(contributorDialog.getByLabel(`Call participants for ${title}`)).toContainText(/1\s*\/\s*1/);
-    await expect(contributorDialog.getByText(updatedResponse, { exact: true })).toBeVisible();
+    await expect(contributorDialog.getByLabel(`Response history for ${title}`).getByText(updatedResponse, { exact: true })).toHaveCount(2);
+
+    await ownerDialog.getByRole("button", { name: "Close Calls" }).click();
+    await page.reload();
+    const resolvedBeacon = page.getByRole("button", { name: new RegExp(`Open Call: ${title}, resolved`) });
+    await expect(resolvedBeacon).toBeVisible();
+    await resolvedBeacon.focus();
+    await page.keyboard.press("Enter");
+    const reloadedOwnerDialog = page.getByRole("dialog", { name: "Ask for a hand, in context" });
+    const reloadedDetails = reloadedOwnerDialog.getByLabel(`Call details for ${title}`);
+    const reloadedHistory = reloadedOwnerDialog.getByLabel(`Response history for ${title}`);
+    await expect(reloadedDetails.getByText(/^Due /)).toBeVisible();
+    await expect(reloadedDetails.getByText(resolutionSummary, { exact: true })).toBeVisible();
+    await expect(reloadedHistory.getByText(firstResponse, { exact: true })).toBeVisible();
+    await expect(reloadedHistory.getByText(updatedResponse, { exact: true })).toHaveCount(2);
+    await expect(reloadedHistory.getByText(/Revision 3/)).toBeVisible();
+
+    await reloadedOwnerDialog.getByRole("button", { name: "Close Calls" }).click();
+    await page.getByRole("button", { name: "Manage Mission" }).click();
+    await page.getByRole("button", { name: "Archive Mission" }).click();
+    await expect(page.getByRole("status", { name: "Archived Mission read-only" })).toBeVisible();
+    await page.getByRole("button", { name: /View Calls/ }).click();
+    const archivedCallList = page.getByRole("dialog", { name: "Ask for a hand, in context" }).getByRole("list", { name: "Mission Calls" });
+    await archivedCallList.getByRole("button", { name: new RegExp(title) }).click();
+    const archivedDialog = page.getByRole("dialog", { name: "Ask for a hand, in context" });
+    await expect(archivedDialog.getByLabel("Mission Calls read-only")).toBeVisible();
+    await expect(archivedDialog.getByLabel(`Call details for ${title}`).getByText(resolutionSummary, { exact: true })).toBeVisible();
+    await expect(archivedDialog.getByLabel(`Response history for ${title}`).getByText(firstResponse, { exact: true })).toBeVisible();
+    await expect(archivedDialog.getByLabel(`Response history for ${title}`).getByText(updatedResponse, { exact: true })).toHaveCount(2);
   } finally {
     await contributorContext.close();
   }

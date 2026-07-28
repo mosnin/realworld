@@ -14,6 +14,7 @@ const callStatus = v.union(
 const transitionStatus = v.union(v.literal("open"), v.literal("accepted"), v.literal("resolved"), v.literal("cancelled"));
 const receiptMs = 30 * 86400000;
 const maxListSize = 100;
+const maxHistorySize = 50;
 
 const callView = v.object({
   _id: v.id("calls"),
@@ -25,11 +26,32 @@ const callView = v.object({
   detail: v.string(),
   maxParticipants: v.number(),
   joinedCount: v.number(),
+  deadlineAt: v.optional(v.number()),
+  resolutionSummary: v.optional(v.string()),
+  resolvedAt: v.optional(v.number()),
   canAdminister: v.boolean(),
   status: callStatus,
   currentVersion: v.number(),
   createdAt: v.number(),
   updatedAt: v.number(),
+});
+const responseHistoryView = v.object({
+  _id: v.id("callResponseRevisions"),
+  callId: v.id("calls"),
+  displayName: v.optional(v.string()),
+  role: v.optional(v.union(
+    v.literal("owner"),
+    v.literal("steward"),
+    v.literal("builder"),
+    v.literal("reviewer"),
+    v.literal("contributor"),
+    v.literal("observer"),
+    v.literal("agent"),
+  )),
+  isCurrentUser: v.boolean(),
+  revision: v.number(),
+  response: v.string(),
+  createdAt: v.number(),
 });
 const participantView = v.object({
   _id: v.id("callParticipants"),
@@ -83,6 +105,12 @@ function normalizedMaxParticipants(value: number | undefined) {
   const maxParticipants = value ?? 50;
   if (!Number.isInteger(maxParticipants) || maxParticipants < 1 || maxParticipants > 50) throw new Error("Invalid Call participant limit");
   return maxParticipants;
+}
+
+function normalizedDeadlineAt(value: number | null | undefined) {
+  if (value === undefined || value === null) return undefined;
+  if (!Number.isSafeInteger(value) || value <= Date.now()) throw new Error("Invalid Call deadline");
+  return value;
 }
 
 function canReadCall(
@@ -265,12 +293,53 @@ export const listMissionCalls = query({
         detail: call.detail,
         maxParticipants: normalizedMaxParticipants(call.maxParticipants),
         joinedCount: call.joinedCount ?? 0,
+        deadlineAt: call.deadlineAt,
+        resolutionSummary: call.resolutionSummary,
+        resolvedAt: call.resolvedAt,
         canAdminister: canAdministerCall(membership, call),
         status: call.status,
         currentVersion: call.currentVersion,
         createdAt: call.createdAt,
         updatedAt: call.updatedAt,
       }));
+  },
+});
+
+export const listCallResponseHistory = query({
+  args: { callId: v.id("calls"), limit: v.optional(v.number()) },
+  returns: v.array(responseHistoryView),
+  handler: async (ctx, args) => {
+    const call = await ctx.db.get(args.callId);
+    if (!call) throw new Error("Not found");
+    const membership = await requireActiveMembership(ctx, call.missionId);
+    if (!canReadCall(membership, call)) throw new Error("Not found");
+    const limit = args.limit ?? 20;
+    if (!Number.isInteger(limit) || limit < 1 || limit > maxHistorySize) throw new Error("Invalid Call response history limit");
+    const revisions = await ctx.db
+      .query("callResponseRevisions")
+      .withIndex("by_call", (index) => index.eq("callId", call._id))
+      .order("desc")
+      .take(limit);
+    return await Promise.all(revisions.map(async (revision) => {
+      const [principal, revisionMembership] = await Promise.all([
+        ctx.db.get(revision.principalId),
+        ctx.db
+          .query("missionMembers")
+          .withIndex("by_mission_and_principal", (index) =>
+            index.eq("missionId", call.missionId).eq("principalId", revision.principalId))
+          .unique(),
+      ]);
+      return {
+        _id: revision._id,
+        callId: revision.callId,
+        displayName: principal?.displayName,
+        role: revisionMembership?.role,
+        isCurrentUser: revision.principalId === membership.principalId,
+        revision: revision.revision,
+        response: revision.response,
+        createdAt: revision.createdAt,
+      };
+    }));
   },
 });
 
@@ -318,6 +387,7 @@ export const createCall = mutation({
     title: v.string(),
     detail: v.string(),
     maxParticipants: v.optional(v.number()),
+    deadlineAt: v.optional(v.union(v.number(), v.null())),
     idempotencyKey: v.string(),
     correlationId: v.string(),
   },
@@ -330,12 +400,13 @@ export const createCall = mutation({
     const detail = requiredText(args.detail, "Call detail", 2_000);
     const maxParticipants = normalizedMaxParticipants(args.maxParticipants);
     const scope = `mission:${args.missionId}:principal:${membership.principalId}:createCall`;
-    const commandFingerprint = JSON.stringify({ command: "createCall", roomId: args.roomId, linkedMoveId: args.linkedMoveId, title, detail, maxParticipants });
+    const commandFingerprint = JSON.stringify({ command: "createCall", roomId: args.roomId, linkedMoveId: args.linkedMoveId, title, detail, maxParticipants, deadlineAt: args.deadlineAt });
     const prior = await operationReceipt(ctx, scope, idempotencyKey);
     if (prior) {
       if (prior.commandFingerprint !== commandFingerprint || prior.callId === undefined) throw new Error("Idempotency key reuse with a different command");
       return { callId: prior.callId, eventId: prior.eventId, operationReceiptId: prior._id, currentVersion: prior.resultVersion };
     }
+    const deadlineAt = normalizedDeadlineAt(args.deadlineAt);
     await requireWritableMission(ctx, args.missionId);
     await requireCallRoom(ctx, args.missionId, args.roomId);
     await requireVisibleLinkedMove(ctx, args.missionId, membership, args.roomId, args.linkedMoveId);
@@ -349,6 +420,7 @@ export const createCall = mutation({
       detail,
       maxParticipants,
       joinedCount: 0,
+      deadlineAt,
       status: "open",
       currentVersion: 1,
       createdAt: now,
@@ -370,6 +442,7 @@ export const updateCall = mutation({
     title: v.string(),
     detail: v.string(),
     maxParticipants: v.optional(v.number()),
+    deadlineAt: v.optional(v.union(v.number(), v.null())),
     idempotencyKey: v.string(),
     correlationId: v.string(),
   },
@@ -385,12 +458,13 @@ export const updateCall = mutation({
     const linkedMoveId = args.linkedMoveId ?? undefined;
     const maxParticipants = normalizedMaxParticipants(args.maxParticipants ?? call.maxParticipants);
     const scope = `call:${call._id}:principal:${membership.principalId}:update`;
-    const commandFingerprint = JSON.stringify({ command: "updateCall", expectedVersion: args.expectedVersion, roomId: args.roomId, linkedMoveId: args.linkedMoveId, title, detail, maxParticipants });
+    const commandFingerprint = JSON.stringify({ command: "updateCall", expectedVersion: args.expectedVersion, roomId: args.roomId, linkedMoveId: args.linkedMoveId, title, detail, maxParticipants, deadlineAt: args.deadlineAt });
     const prior = await operationReceipt(ctx, scope, idempotencyKey);
     if (prior) {
       if (prior.commandFingerprint !== commandFingerprint || prior.callId === undefined) throw new Error("Idempotency key reuse with a different command");
       return { callId: prior.callId, eventId: prior.eventId, operationReceiptId: prior._id, currentVersion: prior.resultVersion };
     }
+    const deadlineAt = args.deadlineAt === undefined ? call.deadlineAt : normalizedDeadlineAt(args.deadlineAt);
     if (call.status === "resolved" || call.status === "cancelled") throw new Error("Terminal Calls cannot be updated");
     await requireWritableMission(ctx, call.missionId);
     if (call.currentVersion !== args.expectedVersion) throw new Error("Call version conflict");
@@ -407,14 +481,14 @@ export const updateCall = mutation({
     await requireVisibleLinkedMove(ctx, call.missionId, membership, args.roomId, linkedMoveId);
     const nextVersion = call.currentVersion + 1;
     const event = await recordCallEvent(ctx, { ...call, roomId: args.roomId }, membership, "call.updated", idempotencyKey, correlationId, "Call details updated", call.currentVersion, nextVersion);
-    await ctx.db.patch(call._id, { roomId: args.roomId, linkedMoveId, title, detail, maxParticipants, currentVersion: nextVersion, updatedAt: event.now });
+    await ctx.db.patch(call._id, { roomId: args.roomId, linkedMoveId, title, detail, maxParticipants, deadlineAt, currentVersion: nextVersion, updatedAt: event.now });
     const operationReceiptId = await saveReceipt(ctx, { scope, idempotencyKey, commandFingerprint, missionId: call.missionId, callId: call._id, eventId: event.eventId, currentVersion: nextVersion, correlationId, now: event.now });
     return { callId: call._id, eventId: event.eventId, operationReceiptId, currentVersion: nextVersion };
   },
 });
 
 export const transitionCall = mutation({
-  args: { callId: v.id("calls"), expectedVersion: v.number(), nextStatus: transitionStatus, idempotencyKey: v.string(), correlationId: v.string() },
+  args: { callId: v.id("calls"), expectedVersion: v.number(), nextStatus: transitionStatus, resolutionSummary: v.optional(v.union(v.string(), v.null())), idempotencyKey: v.string(), correlationId: v.string() },
   returns: callResult,
   handler: async (ctx, args) => {
     const call = await ctx.db.get(args.callId);
@@ -423,7 +497,7 @@ export const transitionCall = mutation({
     requireCallAdmin(membership, call);
     const { idempotencyKey, correlationId } = commandIds(args.idempotencyKey, args.correlationId);
     const scope = `call:${call._id}:principal:${membership.principalId}:transition`;
-    const commandFingerprint = JSON.stringify({ command: "transitionCall", expectedVersion: args.expectedVersion, nextStatus: args.nextStatus });
+    const commandFingerprint = JSON.stringify({ command: "transitionCall", expectedVersion: args.expectedVersion, nextStatus: args.nextStatus, resolutionSummary: args.resolutionSummary });
     const prior = await operationReceipt(ctx, scope, idempotencyKey);
     if (prior) {
       if (prior.commandFingerprint !== commandFingerprint || prior.callId === undefined) throw new Error("Idempotency key reuse with a different command");
@@ -432,9 +506,18 @@ export const transitionCall = mutation({
     await requireWritableMission(ctx, call.missionId);
     if (call.currentVersion !== args.expectedVersion) throw new Error("Call version conflict");
     if (!isTransitionAllowed(call.status, args.nextStatus)) throw new Error("Invalid Call transition");
+    if (args.nextStatus !== "resolved" && args.resolutionSummary !== undefined && args.resolutionSummary !== null) throw new Error("Only resolved Calls may include a resolution summary");
+    const resolutionSummary = args.nextStatus === "resolved"
+      ? requiredText(args.resolutionSummary ?? "", "Call resolution summary", 2_000)
+      : undefined;
     const nextVersion = call.currentVersion + 1;
     const event = await recordCallEvent(ctx, call, membership, "call.transitioned", idempotencyKey, correlationId, `Call transitioned to ${args.nextStatus}`, call.currentVersion, nextVersion);
-    await ctx.db.patch(call._id, { status: args.nextStatus, currentVersion: nextVersion, updatedAt: event.now });
+    await ctx.db.patch(call._id, {
+      status: args.nextStatus,
+      ...(resolutionSummary === undefined ? {} : { resolutionSummary, resolvedAt: event.now }),
+      currentVersion: nextVersion,
+      updatedAt: event.now,
+    });
     const operationReceiptId = await saveReceipt(ctx, { scope, idempotencyKey, commandFingerprint, missionId: call.missionId, callId: call._id, eventId: event.eventId, currentVersion: nextVersion, correlationId, now: event.now });
     return { callId: call._id, eventId: event.eventId, operationReceiptId, currentVersion: nextVersion };
   },
@@ -591,9 +674,26 @@ export const respondToCall = mutation({
     const nextCallVersion = call.currentVersion + 1;
     const event = await recordCallEvent(ctx, call, membership, "call.responseUpdated", idempotencyKey, correlationId, "Call response updated", call.currentVersion, nextCallVersion);
     const nextParticipantVersion = participant.currentVersion + 1;
+    const latestResponseRevision = await ctx.db
+      .query("callResponseRevisions")
+      .withIndex("by_participant", (index) => index.eq("participantId", participant._id))
+      .order("desc")
+      .first();
+    const nextResponseRevision = (latestResponseRevision?.revision ?? 0) + 1;
     const nextCall = { ...call, currentVersion: nextCallVersion, updatedAt: event.now };
     await ctx.db.patch(call._id, { currentVersion: nextCallVersion, updatedAt: event.now });
     await ctx.db.patch(participant._id, { response, currentVersion: nextParticipantVersion, updatedAt: event.now, responseEventId: event.eventId });
+    await ctx.db.insert("callResponseRevisions", {
+      callId: call._id,
+      missionId: call.missionId,
+      participantId: participant._id,
+      principalId: membership.principalId,
+      revision: nextResponseRevision,
+      response,
+      eventId: event.eventId,
+      createdAt: event.now,
+      schemaVersion: 1,
+    });
     const operationReceiptId = await saveReceipt(ctx, { scope, idempotencyKey, commandFingerprint, missionId: call.missionId, callId: call._id, participantId: participant._id, eventId: event.eventId, currentVersion: nextParticipantVersion, resultJoinedCount: call.joinedCount ?? 0, resultMaxParticipants: normalizedMaxParticipants(call.maxParticipants), correlationId, now: event.now });
     return participantResponse(nextCall, { ...participant, response, currentVersion: nextParticipantVersion, updatedAt: event.now, responseEventId: event.eventId }, event.eventId, operationReceiptId);
   },

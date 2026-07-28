@@ -121,6 +121,18 @@ describe("Call participants", () => {
     await expect(t.withIdentity(contributor).mutation(api.calls.joinCall, { callId: call.callId, idempotencyKey: "over-capacity", correlationId: "over-capacity" })).rejects.toThrow("capacity");
     const response = await t.withIdentity(reviewer).mutation(api.calls.respondToCall, { callId: call.callId, expectedParticipantVersion: reviewerJoin.currentVersion, response: "I can validate the permission matrix.", idempotencyKey: "reviewer-response", correlationId: "reviewer-response" });
     expect(await t.withIdentity(reviewer).mutation(api.calls.respondToCall, { callId: call.callId, expectedParticipantVersion: reviewerJoin.currentVersion, response: "I can validate the permission matrix.", idempotencyKey: "reviewer-response", correlationId: "reviewer-response" })).toEqual(response);
+    const history = await asOwner.query(api.calls.listCallResponseHistory, { callId: call.callId });
+    expect(history).toEqual([expect.objectContaining({
+      callId: call.callId,
+      role: "reviewer",
+      isCurrentUser: false,
+      revision: 1,
+      response: "I can validate the permission matrix.",
+    })]);
+    expect(history[0]).not.toHaveProperty("principalId");
+    expect(await t.withIdentity(reviewer).query(api.calls.listCallResponseHistory, { callId: call.callId })).toEqual([
+      expect.objectContaining({ isCurrentUser: true }),
+    ]);
     const projection = await asOwner.query(api.calls.listMissionCalls, { missionId });
     expect(projection).toEqual([expect.objectContaining({ _id: call.callId, joinedCount: 2, maxParticipants: 2, canAdminister: true })]);
     const participants = await asOwner.query(api.calls.listCallParticipants, { callId: call.callId });
@@ -149,6 +161,7 @@ describe("Call participants", () => {
     await expect(t.withIdentity(reviewer).mutation(api.calls.transitionCall, { callId: ownerCall.callId, expectedVersion: 1, nextStatus: "accepted", idempotencyKey: "reviewer-transition", correlationId: "reviewer-transition" })).rejects.toThrow("Not found");
     await expect(t.withIdentity(observer).mutation(api.calls.joinCall, { callId: ownerCall.callId, idempotencyKey: "observer-join", correlationId: "observer-join" })).rejects.toThrow("Not found");
     await expect(t.withIdentity(observer).mutation(api.calls.respondToCall, { callId: ownerCall.callId, expectedParticipantVersion: 1, response: "No access", idempotencyKey: "observer-response", correlationId: "observer-response" })).rejects.toThrow("Not found");
+    await expect(t.withIdentity(observer).query(api.calls.listCallResponseHistory, { callId: ownerCall.callId })).resolves.toEqual([]);
     const contributorCall = await t.withIdentity(contributor).mutation(api.calls.createCall, callArgs(missionId, roomId, "creator-call"));
     await expect(t.withIdentity(contributor).mutation(api.calls.updateCall, { callId: contributorCall.callId, expectedVersion: 1, roomId, linkedMoveId: null, title: "Creator can update", detail: "A contributor who created this Call can administer it in scope.", idempotencyKey: "creator-edit", correlationId: "creator-edit" })).resolves.toMatchObject({ currentVersion: 2 });
     expect(await t.withIdentity(contributor).query(api.calls.listMissionCalls, { missionId })).toEqual(expect.arrayContaining([
@@ -201,9 +214,36 @@ describe("Call participants", () => {
     expect(rejoinedParticipant).not.toHaveProperty("response");
     const latest = (await asOwner.query(api.calls.listMissionCalls, { missionId }))[0]!;
     const accepted = await asOwner.mutation(api.calls.transitionCall, { callId: call.callId, expectedVersion: latest.currentVersion, nextStatus: "accepted", idempotencyKey: "accept-terminal", correlationId: "accept-terminal" });
-    await asOwner.mutation(api.calls.transitionCall, { callId: call.callId, expectedVersion: accepted.currentVersion, nextStatus: "resolved", idempotencyKey: "resolve-terminal", correlationId: "resolve-terminal" });
+    await asOwner.mutation(api.calls.transitionCall, { callId: call.callId, expectedVersion: accepted.currentVersion, nextStatus: "resolved", resolutionSummary: "The participant plan is resolved.", idempotencyKey: "resolve-terminal", correlationId: "resolve-terminal" });
     await expect(t.withIdentity(builder).mutation(api.calls.joinCall, { callId: call.callId, idempotencyKey: "terminal-join", correlationId: "terminal-join" })).rejects.toThrow("not accepting");
     await expect(t.withIdentity(builder).mutation(api.calls.respondToCall, { callId: call.callId, expectedParticipantVersion: rejoin.currentVersion, response: "Terminal response", idempotencyKey: "terminal-response", correlationId: "terminal-response" })).rejects.toThrow("read-only");
     await expect(t.withIdentity(builder).mutation(api.calls.withdrawCall, { callId: call.callId, expectedParticipantVersion: rejoin.currentVersion, idempotencyKey: "terminal-withdraw", correlationId: "terminal-withdraw" })).rejects.toThrow("read-only");
+  });
+
+  it("keeps response history append-only, newest-first, bounded, and room-scoped", async () => {
+    const { t, asOwner, missionId, roomId } = await setup();
+    const hiddenRoomId = await addRoom(t, missionId, "History restricted", "observatory");
+    await grant(t, missionId, builder, "builder", [`room:${roomId}`]);
+    await grant(t, missionId, observer, "observer", [`room:${roomId}`]);
+    const call = await asOwner.mutation(api.calls.createCall, callArgs(missionId, roomId, "history-call"));
+    const join = await t.withIdentity(builder).mutation(api.calls.joinCall, { callId: call.callId, idempotencyKey: "history-join", correlationId: "history-join" });
+    const firstArgs = { callId: call.callId, expectedParticipantVersion: join.currentVersion, response: "First response", idempotencyKey: "history-first", correlationId: "history-first" };
+    const first = await t.withIdentity(builder).mutation(api.calls.respondToCall, firstArgs);
+    expect(await t.withIdentity(builder).mutation(api.calls.respondToCall, firstArgs)).toEqual(first);
+    await expect(t.withIdentity(builder).mutation(api.calls.respondToCall, { ...firstArgs, idempotencyKey: "history-stale", response: "Stale response" })).rejects.toThrow("version conflict");
+    const second = await t.withIdentity(builder).mutation(api.calls.respondToCall, { callId: call.callId, expectedParticipantVersion: first.currentVersion, response: "Second response", idempotencyKey: "history-second", correlationId: "history-second" });
+    expect(second.currentVersion).toBeGreaterThan(first.currentVersion);
+    expect(await asOwner.query(api.calls.listCallResponseHistory, { callId: call.callId, limit: 1 })).toEqual([
+      expect.objectContaining({ response: "Second response", revision: 2 }),
+    ]);
+    expect(await asOwner.query(api.calls.listCallResponseHistory, { callId: call.callId })).toEqual([
+      expect.objectContaining({ response: "Second response", revision: 2 }),
+      expect.objectContaining({ response: "First response", revision: 1 }),
+    ]);
+    await expect(asOwner.query(api.calls.listCallResponseHistory, { callId: call.callId, limit: 0 })).rejects.toThrow("history limit");
+    await expect(asOwner.query(api.calls.listCallResponseHistory, { callId: call.callId, limit: 51 })).rejects.toThrow("history limit");
+    const hiddenCall = await asOwner.mutation(api.calls.createCall, callArgs(missionId, hiddenRoomId, "hidden-history-call"));
+    await expect(t.withIdentity(builder).query(api.calls.listCallResponseHistory, { callId: hiddenCall.callId })).rejects.toThrow("Not found");
+    await expect(t.withIdentity(observer).mutation(api.calls.respondToCall, { callId: call.callId, expectedParticipantVersion: 1, response: "Observer probe", idempotencyKey: "history-observer", correlationId: "history-observer" })).rejects.toThrow("Not found");
   });
 });

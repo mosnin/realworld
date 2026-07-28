@@ -135,6 +135,10 @@ export default defineSchema({
     // Optional for a safe rollout over existing Calls; callers treat omission as 50.
     maxParticipants: v.optional(v.number()),
     joinedCount: v.optional(v.number()),
+    // Optional during rollout; `resolved` Calls always persist both resolution fields.
+    deadlineAt: v.optional(v.number()),
+    resolutionSummary: v.optional(v.string()),
+    resolvedAt: v.optional(v.number()),
     status: v.union(
       v.literal("open"),
       v.literal("accepted"),
@@ -168,6 +172,22 @@ export default defineSchema({
     .index("by_call_and_principal", ["callId", "principalId"])
     .index("by_call_and_state", ["callId", "state"])
     .index("by_principal_and_state", ["principalId", "state"]),
+
+  // Deliberately append-only. The current response on callParticipants is a
+  // convenience projection; this table is the durable, attributable history.
+  callResponseRevisions: defineTable({
+    callId: v.id("calls"),
+    missionId: v.id("missions"),
+    participantId: v.id("callParticipants"),
+    principalId: v.id("principals"),
+    revision: v.number(),
+    response: v.string(),
+    eventId: v.id("missionEvents"),
+    createdAt: v.number(),
+    schemaVersion: v.number(),
+  })
+    .index("by_call", ["callId"])
+    .index("by_participant", ["participantId"]),
 
   fractures: defineTable({
     missionId: v.id("missions"),
