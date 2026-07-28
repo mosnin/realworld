@@ -522,6 +522,106 @@ test("an owner can investigate, resolve, reopen, and reload a durable room Fract
   await expect(fractureDialog.getByRole("button", { name: `Reopen ${updatedTitle}` })).toHaveCount(0);
 });
 
+test("an owner can reject, resubmit, verify, and reload a durable room Proof", async ({ page }) => {
+  const initialTitle = "Verify the shared handoff";
+  const updatedTitle = "Verify the durable shared handoff";
+  const initialClaim = "The Workshop handoff contains a usable review path.";
+  const updatedClaim = "The Workshop handoff retains a usable review path after a reload.";
+  const initialEvidence = "A reviewer completed the handoff from the Workshop.";
+  const updatedEvidence = "A reviewer completed the handoff from the Workshop after reloading the Mission.";
+  const linkedMove = "Prepare the Proof handoff";
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /Open Moves/ }).click();
+  const moveDialog = page.getByRole("dialog", { name: "Turn intent into progress" });
+  await moveDialog.getByLabel("Move title").fill(linkedMove);
+  await moveDialog.getByLabel("Move intent").fill("Prepare the Workshop evidence for review.");
+  await moveDialog.getByLabel("Room").selectOption({ label: "Workshop" });
+  await moveDialog.getByRole("button", { name: "Create Move" }).click();
+  await expect(moveDialog.getByText("Move created.")).toBeVisible();
+  await moveDialog.getByRole("button", { name: "Close Moves" }).click();
+
+  await page.getByRole("button", { name: /Open Proofs/ }).click();
+  const proofDialog = page.getByRole("dialog", { name: "Make the work verifiable" });
+  await expect(proofDialog).toBeVisible();
+
+  await proofDialog.getByLabel("Proof title").fill(initialTitle);
+  await proofDialog.getByLabel("Claim").fill(initialClaim);
+  await proofDialog.getByLabel("Evidence note").fill(initialEvidence);
+  await proofDialog.getByLabel("Room").selectOption({ label: "Workshop" });
+  await proofDialog.getByLabel("Linked Move (optional)").selectOption({ label: linkedMove });
+  await proofDialog.getByRole("button", { name: "Submit Proof" }).click();
+  await expect(proofDialog.getByText("Proof submitted.")).toBeVisible();
+
+  await proofDialog.getByRole("button", { name: "Close Proofs" }).click();
+  const submittedBeacon = page.getByRole("button", { name: `Open Proof: ${initialTitle}, submitted` });
+  await expect(submittedBeacon).toBeVisible();
+  await submittedBeacon.click();
+
+  await proofDialog.getByLabel("Proof title").fill(updatedTitle);
+  await proofDialog.getByLabel("Claim").fill(updatedClaim);
+  await proofDialog.getByLabel("Evidence note").fill(updatedEvidence);
+  await proofDialog.getByRole("button", { name: "Save Proof" }).click();
+  await expect(proofDialog.getByText("Proof details saved.")).toBeVisible();
+  await proofDialog.getByRole("button", { name: "Close Proofs" }).click();
+
+  const updatedBeacon = page.getByRole("button", { name: `Open Proof: ${updatedTitle}, submitted` });
+  await expect(updatedBeacon).toBeVisible();
+  await updatedBeacon.focus();
+  await expect(updatedBeacon).toBeFocused();
+  await page.keyboard.press("Enter");
+  const proofDetails = proofDialog.getByLabel(`Proof details for ${updatedTitle}`);
+  await expect(proofDetails.getByText(updatedClaim, { exact: true })).toBeVisible();
+  await expect(proofDetails.getByText(updatedEvidence, { exact: true })).toBeVisible();
+  await expect(proofDetails.getByText("Room: Workshop", { exact: true })).toBeVisible();
+  await expect(proofDetails.getByText(`Linked Move: ${linkedMove}`, { exact: true })).toBeVisible();
+
+  const reject = proofDialog.getByRole("button", { name: `Reject ${updatedTitle}` });
+  await reject.focus();
+  await expect(reject).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(proofDetails.getByText("rejected", { exact: true })).toBeVisible();
+
+  const resubmit = proofDialog.getByRole("button", { name: `Resubmit ${updatedTitle}` });
+  await resubmit.focus();
+  await expect(resubmit).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(proofDetails.getByText("submitted", { exact: true })).toBeVisible();
+
+  const verify = proofDialog.getByRole("button", { name: `Verify ${updatedTitle}` });
+  await verify.focus();
+  await expect(verify).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(proofDetails.getByText("verified", { exact: true })).toBeVisible();
+  await expect(proofDialog.getByLabel("Proof title")).toHaveCount(0);
+  await expect(proofDialog.getByRole("button", { name: `Verify ${updatedTitle}` })).toHaveCount(0);
+  await expect(proofDialog.getByRole("button", { name: `Reject ${updatedTitle}` })).toHaveCount(0);
+
+  await proofDialog.getByRole("button", { name: "Close Proofs" }).click();
+  await page.reload();
+  const verifiedBeacon = page.getByRole("button", { name: `Open Proof: ${updatedTitle}, verified` });
+  await expect(verifiedBeacon).toBeVisible();
+  await verifiedBeacon.focus();
+  await page.keyboard.press("Enter");
+  await expect(proofDetails.getByText(updatedClaim, { exact: true })).toBeVisible();
+  await expect(proofDetails.getByText(updatedEvidence, { exact: true })).toBeVisible();
+  await expect(proofDialog.getByLabel("Proof title")).toHaveCount(0);
+
+  await proofDialog.getByRole("button", { name: "Close Proofs" }).click();
+  await page.getByRole("button", { name: "Manage Mission" }).click();
+  await page.getByRole("button", { name: "Archive Mission" }).click();
+  await expect(page.getByRole("status", { name: "Archived Mission read-only" })).toBeVisible();
+  await page.getByRole("button", { name: /View Proofs/ }).click();
+  const proofList = proofDialog.getByRole("list", { name: "Mission Proofs" });
+  await proofList.getByRole("button", { name: new RegExp(updatedTitle) }).click();
+  await expect(proofDialog.getByLabel("Mission Proofs read-only")).toBeVisible();
+  await expect(proofDetails.getByText(updatedClaim, { exact: true })).toBeVisible();
+  await expect(proofDetails.getByText(updatedEvidence, { exact: true })).toBeVisible();
+  await expect(proofDialog.getByLabel("Proof title")).toHaveCount(0);
+  await expect(proofDialog.getByRole("button", { name: `Verify ${updatedTitle}` })).toHaveCount(0);
+  await expect(proofDialog.getByRole("button", { name: `Reject ${updatedTitle}` })).toHaveCount(0);
+});
+
 test("an owner and contributor reactively coordinate a capacity-limited Call", async ({ browser, page }) => {
   const title = `Pair on the live Call ${Date.now()}`;
   const firstResponse = "I can review the current permission behavior.";

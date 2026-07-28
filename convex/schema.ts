@@ -187,10 +187,30 @@ export default defineSchema({
     .index("by_room_and_status", ["roomId", "status"])
     .index("by_reporter_and_status", ["reporterPrincipalId", "status"]),
 
+  proofs: defineTable({
+    missionId: v.id("missions"),
+    roomId: v.id("rooms"),
+    linkedMoveId: v.optional(v.id("moves")),
+    submitterPrincipalId: v.id("principals"),
+    title: v.string(),
+    claim: v.string(),
+    evidenceNote: v.string(),
+    status: v.union(v.literal("submitted"), v.literal("verified"), v.literal("rejected")),
+    verifierPrincipalId: v.optional(v.id("principals")),
+    verifiedAt: v.optional(v.number()),
+    currentVersion: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    schemaVersion: v.number(),
+  })
+    .index("by_mission_and_status", ["missionId", "status"])
+    .index("by_room_and_status", ["roomId", "status"])
+    .index("by_submitter_and_status", ["submitterPrincipalId", "status"]),
+
   missionEvents: defineTable({
     missionId: v.id("missions"),
     missionSequence: v.number(),
-    type: v.union(v.literal("mission.created"), v.literal("mission.updated"), v.literal("mission.constitutionUpdated"), v.literal("mission.archived"), v.literal("mission.restored"), v.literal("membership.invited"), v.literal("membership.joined"), v.literal("invite.revoked"), v.literal("room.created"), v.literal("room.renamed"), v.literal("room.archived"), v.literal("room.layoutUpdated"), v.literal("move.created"), v.literal("move.updated"), v.literal("move.transitioned"), v.literal("call.created"), v.literal("call.updated"), v.literal("call.transitioned"), v.literal("call.participantJoined"), v.literal("call.participantWithdrawn"), v.literal("call.responseUpdated"), v.literal("fracture.created"), v.literal("fracture.updated"), v.literal("fracture.transitioned")),
+    type: v.union(v.literal("mission.created"), v.literal("mission.updated"), v.literal("mission.constitutionUpdated"), v.literal("mission.archived"), v.literal("mission.restored"), v.literal("membership.invited"), v.literal("membership.joined"), v.literal("invite.revoked"), v.literal("room.created"), v.literal("room.renamed"), v.literal("room.archived"), v.literal("room.layoutUpdated"), v.literal("move.created"), v.literal("move.updated"), v.literal("move.transitioned"), v.literal("call.created"), v.literal("call.updated"), v.literal("call.transitioned"), v.literal("call.participantJoined"), v.literal("call.participantWithdrawn"), v.literal("call.responseUpdated"), v.literal("fracture.created"), v.literal("fracture.updated"), v.literal("fracture.transitioned"), v.literal("proof.submitted"), v.literal("proof.updated"), v.literal("proof.verified"), v.literal("proof.rejected"), v.literal("proof.resubmitted")),
     aggregateType: v.literal("mission"),
     aggregateId: v.id("missions"),
     actorPrincipalId: v.id("principals"),
@@ -219,6 +239,7 @@ export default defineSchema({
     moveId: v.optional(v.id("moves")),
     callId: v.optional(v.id("calls")),
     fractureId: v.optional(v.id("fractures")),
+    proofId: v.optional(v.id("proofs")),
     participantId: v.optional(v.id("callParticipants")),
     resultVersion: v.number(),
     resultJoinedCount: v.optional(v.number()),

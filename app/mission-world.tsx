@@ -12,6 +12,7 @@ import { ConstitutionControls } from "@/app/missions/constitution-controls";
 import { MoveBoard } from "@/app/moves/move-board";
 import { CallSurface } from "@/app/calls/call-surface";
 import { FractureSurface } from "@/app/fractures/fracture-surface";
+import { ProofSurface } from "@/app/proofs/proof-surface";
 import { Icon, type IconName } from "@/app/ui/icons";
 
 type RoomId = string;
@@ -727,7 +728,12 @@ export function MissionWorld() {
                 moves={(missionMoves ?? []).map((move) => ({ _id: move._id, title: move.title, roomId: move.roomId }))}
                 rooms={canvasRooms.map((room) => ({ _id: room.id as Id<"rooms">, title: room.name, x: room.x, y: room.y }))}
               />
-              <div className="map-event map-event--proof"><span>✓</span><strong>Proof complete</strong><small>Mission authorization contract verified</small></div>
+              <ProofSurface
+                key={`proofs-${activeMission._id}`}
+                mission={activeMission}
+                moves={(missionMoves ?? []).map((move) => ({ _id: move._id, title: move.title, roomId: move.roomId }))}
+                rooms={canvasRooms.map((room) => ({ _id: room.id as Id<"rooms">, title: room.name, x: room.x, y: room.y }))}
+              />
             </div>
           </div>
         )}
