@@ -5,7 +5,7 @@
   "currentPhase": 1,
   "phaseName": "Production foundation",
   "startedAt": "2026-07-27T00:00:00-04:00",
-  "lastUpdatedAt": "2026-07-27T22:16:04-04:00",
+  "lastUpdatedAt": "2026-07-27T22:19:30-04:00",
   "exactNextActions": [
     "Create or connect a cloud Convex development deployment and verify the current preview creates and reloads a durable Mission",
     "Add an authenticated Constitution editor and first durable Move lifecycle with replayable events",
@@ -21,7 +21,7 @@
     "artifactStudio": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"artifact domain and surfaces","exactNextAction":"Wait for client, realtime, and agent contracts"},
     "discoverySocial": {"status":"waiting","model":"gpt-5.6-terra","writeScope":"discovery and contribution surfaces","exactNextAction":"Wait for Artifact Studio and reputation contracts"},
     "trustGovernance": {"status":"review","model":"gpt-5.6-terra","writeScope":"docs/program/trust-quality-release.md","lastMeaningfulHeartbeatAt":"2026-07-27T22:15:00-04:00","evidence":"commits c1f156b, e90d1ee, 44d944b, 5f49c17, d21d37a, 90f4d11, 6792212, and 2c1d1f8; deny-by-default room scope, all currently exposed room-write role variants, Constitution ownership, membership expiry, archived mutation freeze, and replay authorization have automated coverage","exactNextAction":"Define and test the Move authorization and transition matrix"},
-    "qualityOperations": {"status":"review","model":"gpt-5.6-terra","writeScope":"CI and verification infrastructure","lastMeaningfulHeartbeatAt":"2026-07-27T22:15:00-04:00","evidence":"Local gate passes lint, typecheck, 27 automated tests, Convex validation, production build, and thirteen authenticated Chromium journeys including real multi-Mission creation/selection/reload/archive, lifecycle recovery, mobile entry, concurrent OCC recovery, and offline reconnect convergence; hosted CI confirmation is pending","exactNextAction":"Confirm the multi-Mission and Constitution slice in hosted CI, then add bounded load and failure-recovery evidence"}
+    "qualityOperations": {"status":"review","model":"gpt-5.6-terra","writeScope":"CI and verification infrastructure","lastMeaningfulHeartbeatAt":"2026-07-27T22:19:00-04:00","evidence":"GitHub Actions run 30322672825 passes install, lint, typecheck, 27 automated tests, Convex validation, production build, thirteen authenticated Chromium journeys including real multi-Mission creation/selection/reload/archive, lifecycle recovery, mobile entry, concurrent OCC recovery, and offline reconnect convergence, plus foundation evidence","exactNextAction":"Add bounded load and failure-recovery evidence"}
   },
   "orchestration": {
     "preferredRuntime": "orca",
