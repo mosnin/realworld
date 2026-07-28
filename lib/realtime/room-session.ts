@@ -263,6 +263,7 @@ function snapshotMessageAcceptanceLimits(options: RoomSessionOptions) {
   return {
     maxMessageTtl: snapshotPositive(() => options.maxMessageTtlMs, defaultMaxMessageTtlMs),
     maxFutureIssuedAt: snapshotNonNegative(() => options.maxFutureIssuedAtMs, defaultMaxFutureIssuedAtMs),
+    maxSerializedPayloadBytes: snapshotPositive(() => options.maxSerializedPayloadBytes, defaultMaxSerializedPayloadBytes),
   };
 }
 
@@ -721,7 +722,7 @@ export class RealtimeRoomSession {
     this.maxReconnectAttempts = snapshotAttemptLimit(() => options.maxReconnectAttempts, defaultMaxReconnectAttempts);
     this.maxMessageTtlMs = messageAcceptanceLimits.maxMessageTtl;
     this.maxFutureIssuedAtMs = messageAcceptanceLimits.maxFutureIssuedAt;
-    this.maxSerializedPayloadBytes = normalizedPositive(options.maxSerializedPayloadBytes, defaultMaxSerializedPayloadBytes);
+    this.maxSerializedPayloadBytes = messageAcceptanceLimits.maxSerializedPayloadBytes;
     this.maxTrackedMessageIds = normalizedBoundedPositive(options.maxTrackedMessageIds, defaultMaxTrackedMessageIds, maximumMaxTrackedMessageIds);
     this.maxTrackedSenderStreams = normalizedBoundedPositive(options.maxTrackedSenderStreams, defaultMaxTrackedSenderStreams, maximumMaxTrackedSenderStreams);
     this.isUnauthorizedError = snapshotUnauthorizedClassifier(options, () => options.isUnauthorizedError);

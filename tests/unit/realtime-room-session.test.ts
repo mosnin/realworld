@@ -3158,6 +3158,143 @@ describe("RealtimeRoomSession", () => {
     }
   });
 
+  it("captures maxSerializedPayloadBytes once and enforces UTF-8 inbound and outbound boundaries after mutation", async () => {
+    const providerSecret = "payload-byte-mutation-secret";
+    const clock = new FakeClock();
+    const { transport, connections } = createTransport();
+    const received: RealtimeEnvelope[] = [];
+    const acceptedPayload = {
+      runId: "run-1",
+      state: "queued",
+      safeSummary: "é",
+      durableVersion: 1,
+    };
+    const overPayload = { ...acceptedPayload, safeSummary: "éé" };
+    const acceptedBytes = new TextEncoder().encode(JSON.stringify(acceptedPayload)).byteLength;
+    expect(acceptedBytes).toBeGreaterThan(JSON.stringify(acceptedPayload).length);
+    let reads = 0;
+    let maxSerializedPayloadBytes: unknown = acceptedBytes;
+    const options = {
+      tokenProvider: async () => token(clock.now() + 300_000),
+      transport,
+      clock,
+      onMessage: (value: RealtimeEnvelope) => received.push(value),
+    } as unknown as RoomSessionOptions;
+    Object.defineProperty(options, "maxSerializedPayloadBytes", {
+      get: () => {
+        reads += 1;
+        return maxSerializedPayloadBytes;
+      },
+    });
+    const session = new RealtimeRoomSession(options);
+    maxSerializedPayloadBytes = providerSecret;
+    await session.start({ missionId: "mission-a", roomId: "room-a" });
+    const accepted = message(clock, {
+      kind: "agent.public-status",
+      messageId: "utf8-accepted",
+      clientSeq: 1,
+      payload: acceptedPayload,
+    });
+    const over = message(clock, {
+      kind: "agent.public-status",
+      messageId: "utf8-over",
+      clientSeq: 2,
+      payload: overPayload,
+    });
+    connections[0]!.input.onMessage(accepted);
+    connections[0]!.input.onMessage(over);
+    await expect(session.publish(accepted)).resolves.toBe(true);
+    await expect(session.publish(over)).resolves.toBe(false);
+
+    expect(reads).toBe(1);
+    expect(received.map((value) => value.messageId)).toEqual([accepted.messageId]);
+    expect(connections[0]!.publish).toHaveBeenCalledTimes(1);
+    await session.stop();
+  });
+
+  it("contains malformed, hostile, async, and bounded payload-byte getters without leaking provider detail", async () => {
+    const providerSecret = "hostile-payload-byte-secret";
+    const acceptedPayload = {
+      runId: "run-1",
+      state: "queued",
+      safeSummary: "é",
+      durableVersion: 1,
+    };
+    const acceptedBytes = new TextEncoder().encode(JSON.stringify(acceptedPayload)).byteLength;
+    const cases: Array<{ label: string; value?: unknown; acceptsProtocolPayload: boolean }> = [
+      { label: "missing", acceptsProtocolPayload: true },
+      { label: "malformed", value: providerSecret, acceptsProtocolPayload: true },
+      { label: "nan", value: Number.NaN, acceptsProtocolPayload: true },
+      { label: "infinite", value: Number.POSITIVE_INFINITY, acceptsProtocolPayload: true },
+      { label: "negative", value: -1, acceptsProtocolPayload: false },
+      { label: "zero", value: 0, acceptsProtocolPayload: false },
+      { label: "fractional", value: 2.5, acceptsProtocolPayload: false },
+      { label: "throwing-getter", acceptsProtocolPayload: true },
+      { label: "rejected-promise", acceptsProtocolPayload: true },
+      { label: "hostile-then", acceptsProtocolPayload: true },
+    ];
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      for (const { label, value, acceptsProtocolPayload } of cases) {
+        const clock = new FakeClock();
+        const { transport, connections } = createTransport();
+        const received: RealtimeEnvelope[] = [];
+        const failures: unknown[] = [];
+        let reads = 0;
+        let thenReads = 0;
+        const options = {
+          tokenProvider: async () => token(clock.now() + 300_000),
+          transport,
+          clock,
+          onMessage: (envelope: RealtimeEnvelope) => received.push(envelope),
+          onTransportFailure: (error: unknown) => failures.push(error),
+        } as unknown as RoomSessionOptions;
+        Object.defineProperty(options, "maxSerializedPayloadBytes", {
+          get: () => {
+            reads += 1;
+            if (label === "throwing-getter") throw new Error(providerSecret);
+            if (label === "rejected-promise") return Promise.reject(new Error(providerSecret));
+            if (label === "hostile-then") {
+              const hostileThenable = {};
+              Object.defineProperty(hostileThenable, "then", {
+                get: () => {
+                  thenReads += 1;
+                  throw new Error(providerSecret);
+                },
+              });
+              return hostileThenable;
+            }
+            return value;
+          },
+        });
+        let session: RealtimeRoomSession | undefined;
+        expect(() => { session = new RealtimeRoomSession(options); }).not.toThrow();
+        await session!.start({ missionId: "mission-a", roomId: "room-a" });
+        const envelope = message(clock, {
+          kind: "agent.public-status",
+          messageId: `${label}-payload`,
+          payload: acceptedPayload,
+        });
+        connections[0]!.input.onMessage(envelope);
+        await expect(session!.publish(envelope)).resolves.toBe(acceptsProtocolPayload);
+
+        expect(reads).toBe(1);
+        if (label === "hostile-then") expect(thenReads).toBe(1);
+        expect(received).toHaveLength(acceptsProtocolPayload ? 1 : 0);
+        expect(connections[0]!.publish).toHaveBeenCalledTimes(acceptsProtocolPayload ? 1 : 0);
+        expect(failures).toEqual([]);
+        await session!.stop();
+      }
+      expect(acceptedBytes).toBeGreaterThan(2.5);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
   it("snapshots recovery policy getters and receivers once, ignoring later replacements", async () => {
     const providerSecret = "recovery-policy-replacement-secret";
     for (const policy of ["random", "reconnect"] as const) {
