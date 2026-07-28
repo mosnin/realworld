@@ -293,6 +293,65 @@ test("an owner can save, archive, restore, and persist governing intent", async 
 // The following invitation journey handles a bearer URL. Do not retain it in Playwright traces.
 test.use({ trace: "off" });
 
+test("an owner can create, link, advance, and reload durable Moves", async ({ page }) => {
+  const initialTitle = "Prepare release evidence";
+  const updatedTitle = "Prepare verified release evidence";
+  const updatedIntent = "Collect attributable evidence before publishing the release proof.";
+  const prerequisite = "Set the sprint outcome";
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /Open Moves/ }).click();
+  const board = page.getByRole("dialog", { name: "Turn intent into progress" });
+  await expect(board.getByRole("article", { name: `Move ${prerequisite}` })).toBeVisible();
+
+  await board.getByLabel("Move title").fill(initialTitle);
+  await board.getByLabel("Move intent").fill("Collect release evidence.");
+  await board.getByLabel("Room").selectOption({ label: "Workshop" });
+  await board.getByRole("button", { name: "Create Move" }).click();
+  await expect(board.getByText("Move created.")).toBeVisible();
+
+  const createdMove = board.getByRole("article", { name: `Move ${initialTitle}` });
+  const editCreatedMove = createdMove.getByRole("button", { name: `Edit Move ${initialTitle}` });
+  await editCreatedMove.focus();
+  await expect(editCreatedMove).toBeFocused();
+  await page.keyboard.press("Enter");
+  await createdMove.getByLabel("Move title").fill(updatedTitle);
+  await createdMove.getByLabel("Move intent").fill(updatedIntent);
+  const dependency = createdMove.getByLabel(prerequisite);
+  await dependency.focus();
+  await page.keyboard.press("Space");
+  const saveMove = createdMove.getByRole("button", { name: "Save Move" });
+  await saveMove.focus();
+  await page.keyboard.press("Enter");
+  await expect(board.getByText("Move details saved.")).toBeVisible();
+  await expect(board.getByRole("article", { name: `Move ${updatedTitle}` }).getByText(`Depends on ${prerequisite}`)).toBeVisible();
+
+  for (const state of ["ready", "in progress", "review", "completed"] as const) {
+    const transition = board.getByRole("button", { name: `Mark ${prerequisite} ${state}` });
+    await transition.focus();
+    await page.keyboard.press("Enter");
+    await expect(board.getByText(`${prerequisite} is now ${state}.`)).toBeVisible();
+  }
+
+  const readyMove = board.getByRole("button", { name: `Mark ${updatedTitle} ready` });
+  await readyMove.focus();
+  await expect(readyMove).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(board.getByText(`${updatedTitle} is now ready.`)).toBeVisible();
+  for (const state of ["in progress", "review", "completed"] as const) {
+    const transition = board.getByRole("button", { name: `Mark ${updatedTitle} ${state}` });
+    await transition.focus();
+    await page.keyboard.press("Enter");
+    await expect(board.getByText(`${updatedTitle} is now ${state}.`)).toBeVisible();
+  }
+
+  await board.getByRole("button", { name: "Close Moves" }).click();
+  await page.reload();
+  await page.getByRole("button", { name: /Open Moves/ }).click();
+  await expect(board.getByRole("article", { name: `Move ${updatedTitle}` }).getByText("completed", { exact: true })).toBeVisible();
+  await expect(board.getByRole("article", { name: `Move ${updatedTitle}` }).getByText(`Depends on ${prerequisite}`)).toBeVisible();
+});
+
 test.describe("a reactive scoped Mission canvas", () => {
   test("an owner can invite a participant and their Workshop map reacts without a reload", async ({ browser, page }) => {
   await page.goto("/");
