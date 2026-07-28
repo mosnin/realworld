@@ -11,6 +11,7 @@ import { MissionControls } from "@/app/missions/mission-controls";
 import { ConstitutionControls } from "@/app/missions/constitution-controls";
 import { MoveBoard } from "@/app/moves/move-board";
 import { CallSurface } from "@/app/calls/call-surface";
+import { FractureSurface } from "@/app/fractures/fracture-surface";
 import { Icon, type IconName } from "@/app/ui/icons";
 
 type RoomId = string;
@@ -401,6 +402,7 @@ export function MissionWorld() {
   const activeMission = selectedMissionId === null ? undefined : missions?.find((mission) => mission._id === selectedMissionId);
   const roomRecords = useQuery(api.canvas.roomLayouts, activeMission === undefined ? "skip" : { missionId: activeMission._id });
   const missionMoves = useQuery(api.moves.listMissionMoves, activeMission === undefined ? "skip" : { missionId: activeMission._id });
+  const missionFractures = useQuery(api.fractures.listMissionFractures, activeMission === undefined ? "skip" : { missionId: activeMission._id });
   const launch = useMutation(api.launch.createMissionFromTemplate);
   const createRoomMutation = useMutation(api.canvas.createRoom);
   const updateRoomLayout = useMutation(api.canvas.updateRoomLayout);
@@ -423,12 +425,16 @@ export function MissionWorld() {
   const selectedRoom = canvasRooms.find((room) => room.id === selectedRoomId) ?? canvasRooms[0];
   const selectedRoomHash = selectedRoom?.id;
   const visibleRooms = canvasRooms;
+  const activeFractureCount = missionFractures?.filter((fracture) => fracture.status === "open" || fracture.status === "investigating").length ?? 0;
 
   useEffect(() => {
     if (missions === undefined || selectionReady) return;
     const frame = window.requestAnimationFrame(() => {
       const storedMissionId = window.localStorage.getItem(selectedMissionStorageKey) as Id<"missions"> | null;
-      setSelectedMissionId(storedMissionId ?? missions[0]?._id ?? null);
+      const accessibleStoredMissionId = storedMissionId !== null && missions.some((mission) => mission._id === storedMissionId)
+        ? storedMissionId
+        : null;
+      setSelectedMissionId(accessibleStoredMissionId ?? missions[0]?._id ?? null);
       setSelectionReady(true);
     });
     return () => window.cancelAnimationFrame(frame);
@@ -622,8 +628,8 @@ export function MissionWorld() {
             {missions.map((mission) => <option key={mission._id} value={mission._id}>{mission.title}{mission.lifecycle === "archived" ? " (archived)" : ""}</option>)}
           </select>
         </label>
-        <div className="momentum" aria-label="Mission Momentum: strong. One fracture. Surge opening in one minute and twenty-four seconds.">
-          <span className="momentum__mark"><Icon name="spark" /></span><strong>Mission Momentum</strong><span className="momentum__bars" aria-hidden="true"><i /><i /><i /><i /><i /></span><b>Strong</b><span>Fractures <em>1</em></span><span>Surge opening <time>01:24</time></span>
+        <div className="momentum" aria-label={`Mission Momentum: strong. ${activeFractureCount} active ${activeFractureCount === 1 ? "fracture" : "fractures"}. Surge opening in one minute and twenty-four seconds.`}>
+          <span className="momentum__mark"><Icon name="spark" /></span><strong>Mission Momentum</strong><span className="momentum__bars" aria-hidden="true"><i /><i /><i /><i /><i /></span><b>Strong</b><span>Fractures <em>{activeFractureCount}</em></span><span>Surge opening <time>01:24</time></span>
         </div>
         <button className="create-button" onClick={() => setNewMissionOpen(true)} type="button">
           <Icon name="plus" /> New Mission
@@ -715,7 +721,12 @@ export function MissionWorld() {
                 moves={(missionMoves ?? []).map((move) => ({ _id: move._id, title: move.title, roomId: move.roomId }))}
                 rooms={canvasRooms.map((room) => ({ _id: room.id as Id<"rooms">, title: room.name, x: room.x, y: room.y }))}
               />
-              <div className="map-event map-event--fracture"><span><Icon name="branch" /></span><strong>Fracture</strong><small>Auth session restoration stalls</small><button type="button">Review</button></div>
+              <FractureSurface
+                key={`fractures-${activeMission._id}`}
+                mission={activeMission}
+                moves={(missionMoves ?? []).map((move) => ({ _id: move._id, title: move.title, roomId: move.roomId }))}
+                rooms={canvasRooms.map((room) => ({ _id: room.id as Id<"rooms">, title: room.name, x: room.x, y: room.y }))}
+              />
               <div className="map-event map-event--proof"><span>✓</span><strong>Proof complete</strong><small>Mission authorization contract verified</small></div>
             </div>
           </div>

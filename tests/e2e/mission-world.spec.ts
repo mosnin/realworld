@@ -437,6 +437,91 @@ test("an owner can issue, edit, advance, and reload a durable room Call", async 
   await expect(callDialog.getByLabel(`Call actions for ${updatedTitle}`)).toHaveCount(0);
 });
 
+test("an owner can investigate, resolve, reopen, and reload a durable room Fracture", async ({ page }) => {
+  const initialTitle = "Repair the handoff signal";
+  const updatedTitle = "Repair the durable handoff signal";
+  const initialDetail = "The Workshop handoff does not preserve the active contribution context.";
+  const updatedDetail = "The Workshop handoff must preserve the active contribution context after a reload.";
+  const linkedMove = "Set the sprint outcome";
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /Open Fractures/ }).click();
+  const fractureDialog = page.getByRole("dialog", { name: "Name the break, hold the line" });
+  await expect(fractureDialog).toBeVisible();
+
+  await fractureDialog.getByLabel("Fracture title").fill(initialTitle);
+  await fractureDialog.getByRole("textbox", { name: "Detail" }).fill(initialDetail);
+  await fractureDialog.getByLabel("Severity").selectOption("high");
+  await fractureDialog.getByLabel("Room").selectOption({ label: "Workshop" });
+  await fractureDialog.getByLabel("Linked Move (optional)").selectOption({ label: linkedMove });
+  await fractureDialog.getByRole("button", { name: "Create Fracture" }).click();
+
+  await fractureDialog.getByRole("button", { name: "Close Fractures" }).click();
+  const fractureBeacon = page.getByRole("button", { name: `Open Fracture: ${initialTitle}, open` });
+  await expect(fractureBeacon).toBeVisible();
+  await fractureBeacon.click();
+
+  await fractureDialog.getByLabel("Fracture title").fill(updatedTitle);
+  await fractureDialog.getByRole("textbox", { name: "Detail" }).fill(updatedDetail);
+  await fractureDialog.getByLabel("Severity").selectOption("critical");
+  await fractureDialog.getByRole("button", { name: "Save Fracture" }).click();
+  await fractureDialog.getByRole("button", { name: "Close Fractures" }).click();
+
+  const updatedBeacon = page.getByRole("button", { name: `Open Fracture: ${updatedTitle}, open` });
+  await expect(updatedBeacon).toBeVisible();
+  await updatedBeacon.focus();
+  await expect(updatedBeacon).toBeFocused();
+  await page.keyboard.press("Enter");
+  const fractureDetails = fractureDialog.getByLabel(`Fracture details for ${updatedTitle}`);
+  await expect(fractureDetails.getByText(updatedDetail, { exact: true })).toBeVisible();
+  await expect(fractureDetails.getByText("Severity: critical", { exact: true })).toBeVisible();
+
+  const investigate = fractureDialog.getByRole("button", { name: `Investigate ${updatedTitle}` });
+  await investigate.focus();
+  await expect(investigate).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(fractureDetails.getByText("investigating", { exact: true })).toBeVisible();
+
+  const resolve = fractureDialog.getByRole("button", { name: `Resolve ${updatedTitle}` });
+  await resolve.focus();
+  await page.keyboard.press("Enter");
+  await expect(fractureDetails.getByText("resolved", { exact: true })).toBeVisible();
+
+  const reopen = fractureDialog.getByRole("button", { name: `Reopen ${updatedTitle}` });
+  await reopen.focus();
+  await page.keyboard.press("Enter");
+  await expect(fractureDetails.getByText("open", { exact: true })).toBeVisible();
+
+  const investigateAgain = fractureDialog.getByRole("button", { name: `Investigate ${updatedTitle}` });
+  await investigateAgain.focus();
+  await page.keyboard.press("Enter");
+  await expect(fractureDetails.getByText("investigating", { exact: true })).toBeVisible();
+  const resolveAgain = fractureDialog.getByRole("button", { name: `Resolve ${updatedTitle}` });
+  await resolveAgain.focus();
+  await page.keyboard.press("Enter");
+  await expect(fractureDetails.getByText("resolved", { exact: true })).toBeVisible();
+
+  await fractureDialog.getByRole("button", { name: "Close Fractures" }).click();
+  await page.reload();
+  const resolvedBeacon = page.getByRole("button", { name: `Open Fracture: ${updatedTitle}, resolved` });
+  await expect(resolvedBeacon).toBeVisible();
+  await resolvedBeacon.focus();
+  await page.keyboard.press("Enter");
+  await expect(fractureDetails.getByText(updatedDetail, { exact: true })).toBeVisible();
+  await expect(fractureDetails.getByText("Severity: critical", { exact: true })).toBeVisible();
+  await expect(fractureDialog.getByLabel("Fracture title")).toHaveCount(0);
+  await expect(fractureDialog.getByRole("button", { name: `Resolve ${updatedTitle}` })).toHaveCount(0);
+
+  await fractureDialog.getByRole("button", { name: "Close Fractures" }).click();
+  await page.getByRole("button", { name: "Manage Mission" }).click();
+  await page.getByRole("button", { name: "Archive Mission" }).click();
+  await expect(page.getByRole("status", { name: "Archived Mission read-only" })).toBeVisible();
+  await page.getByRole("button", { name: /View Fractures/ }).click();
+  await expect(fractureDialog.getByRole("list", { name: "Mission Fractures" }).getByText(updatedDetail, { exact: true })).toBeVisible();
+  await expect(fractureDialog.getByLabel("Fracture title")).toHaveCount(0);
+  await expect(fractureDialog.getByRole("button", { name: `Reopen ${updatedTitle}` })).toHaveCount(0);
+});
+
 test("an owner and contributor reactively coordinate a capacity-limited Call", async ({ browser, page }) => {
   const title = `Pair on the live Call ${Date.now()}`;
   const firstResponse = "I can review the current permission behavior.";
