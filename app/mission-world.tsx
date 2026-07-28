@@ -46,6 +46,7 @@ type Preferences = {
 function missionWorldStorageKey(missionId: Id<"missions">) {
   return `realworld:mission-world-preferences:v3:${missionId}`;
 }
+const selectedMissionStorageKey = "realworld:mission-world:selected-mission:v1";
 const defaultPreferences: Preferences = {
   density: "standard",
   accent: "blue",
@@ -392,7 +393,9 @@ function PreferencePanel({
 export function MissionWorld() {
   const templateOptions = [{ key: "companySprint", label: "Company sprint" }, { key: "classroomProject", label: "Classroom project" }, { key: "contentProduction", label: "Content production" }, { key: "openChallenge", label: "Open challenge" }];
   const missions = useQuery(api.missions.listMyMissions, {});
-  const activeMission = missions?.[0];
+  const [selectedMissionId, setSelectedMissionId] = useState<Id<"missions"> | null>(null);
+  const [selectionReady, setSelectionReady] = useState(false);
+  const activeMission = selectedMissionId === null ? undefined : missions?.find((mission) => mission._id === selectedMissionId);
   const roomRecords = useQuery(api.canvas.roomLayouts, activeMission === undefined ? "skip" : { missionId: activeMission._id });
   const launch = useMutation(api.launch.createMissionFromTemplate);
   const createRoomMutation = useMutation(api.canvas.createRoom);
@@ -415,6 +418,27 @@ export function MissionWorld() {
   const selectedRoom = canvasRooms.find((room) => room.id === selectedRoomId) ?? canvasRooms[0];
   const selectedRoomHash = selectedRoom?.id;
   const visibleRooms = canvasRooms;
+
+  useEffect(() => {
+    if (missions === undefined || selectionReady) return;
+    const frame = window.requestAnimationFrame(() => {
+      const storedMissionId = window.localStorage.getItem(selectedMissionStorageKey) as Id<"missions"> | null;
+      setSelectedMissionId(storedMissionId ?? missions[0]?._id ?? null);
+      setSelectionReady(true);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [missions, selectionReady]);
+
+  useEffect(() => {
+    if (!selectionReady || missions === undefined || selectedMissionId !== null || missions.length === 0) return;
+    const frame = window.requestAnimationFrame(() => setSelectedMissionId(missions[0]!._id));
+    return () => window.cancelAnimationFrame(frame);
+  }, [missions, selectedMissionId, selectionReady]);
+
+  useEffect(() => {
+    if (!selectionReady || selectedMissionId === null) return;
+    window.localStorage.setItem(selectedMissionStorageKey, selectedMissionId);
+  }, [selectedMissionId, selectionReady]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -464,6 +488,14 @@ export function MissionWorld() {
     }
   }
 
+  function selectMission(missionId: Id<"missions">) {
+    setSelectedMissionId(missionId);
+    setSelectedRoomId("");
+    setView("world");
+    setInvitePanelOpen(false);
+    setRoomError(null);
+  }
+
   async function repositionRoom(roomId: RoomId, x: number, y: number) {
     const room = canvasRooms.find((candidate) => candidate.id === roomId);
     if (!room?.layout || room.layoutVersion === undefined) return;
@@ -504,6 +536,21 @@ export function MissionWorld() {
     return <main id="main-content" className="foundation">Loading your Mission World…</main>;
   }
 
+  if (!selectionReady) {
+    return <main id="main-content" className="foundation">Opening your selected Mission…</main>;
+  }
+
+  if (selectedMissionId !== null && activeMission === undefined) {
+    return (
+      <main id="main-content" className="foundation">
+        <p className="wordmark">Realworld</p>
+        <h1>This Mission is no longer available to you.</h1>
+        <p>Your previous selection is preserved, but your access may have expired or been removed.</p>
+        {missions.length > 0 ? <label className="mission-switcher mission-switcher--fallback">Choose another Mission<select aria-label="Choose another Mission" onChange={(event) => selectMission(event.target.value as Id<"missions">)} value=""><option disabled value="">Select a Mission</option>{missions.map((mission) => <option key={mission._id} value={mission._id}>{mission.title}{mission.lifecycle === "archived" ? " (archived)" : ""}</option>)}</select></label> : <p aria-live="polite">You do not currently have access to another Mission.</p>}
+      </main>
+    );
+  }
+
   if (missions.length === 0) {
     return (
       <main id="main-content" className="foundation">
@@ -519,13 +566,14 @@ export function MissionWorld() {
               setLaunching(key);
               setLaunchError(null);
               try {
-                await launch({
+                const created = await launch({
                   templateKey: key,
                   slug: `${key.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase()}-${crypto.randomUUID().slice(0, 8)}`,
                   title: label,
                   idempotencyKey: crypto.randomUUID(),
                   correlationId: crypto.randomUUID(),
                 });
+                selectMission(created.missionId);
               } catch {
                 setLaunchError("The Mission could not launch. Try again.");
               } finally {
@@ -559,6 +607,12 @@ export function MissionWorld() {
           <a href="#missions">Missions</a>
           <a href="#surge">Surge</a>
         </nav>
+        <label className="mission-switcher">
+          <span>Mission</span>
+          <select aria-label="Selected Mission" onChange={(event) => selectMission(event.target.value as Id<"missions">)} value={activeMission._id}>
+            {missions.map((mission) => <option key={mission._id} value={mission._id}>{mission.title}{mission.lifecycle === "archived" ? " (archived)" : ""}</option>)}
+          </select>
+        </label>
         <div className="momentum" aria-label="Mission Momentum: strong. One fracture. Surge opening in one minute and twenty-four seconds.">
           <span className="momentum__mark"><Icon name="spark" /></span><strong>Mission Momentum</strong><span className="momentum__bars" aria-hidden="true"><i /><i /><i /><i /><i /></span><b>Strong</b><span>Fractures <em>1</em></span><span>Surge opening <time>01:24</time></span>
         </div>
