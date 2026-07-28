@@ -172,6 +172,25 @@ function snapshotRealtimeToken(value: unknown): RealtimeToken | undefined {
   }
 }
 
+function snapshotObserver<Arguments extends unknown[]>(
+  receiver: object,
+  read: () => unknown,
+): ((...args: Arguments) => void) | undefined {
+  try {
+    const callback = read();
+    if (typeof callback !== "function") return undefined;
+    return (...args) => {
+      try {
+        void Promise.resolve(Reflect.apply(callback, receiver, args)).catch(() => undefined);
+      } catch {
+        // Observers are optional side effects and never control session state.
+      }
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 type TransportSubscriptionSnapshot = Readonly<{
   subscription?: RealtimeTransportSubscription;
   disposable?: RealtimeTransportSubscription;
@@ -348,6 +367,11 @@ export class RealtimeRoomSession {
   private readonly maxTrackedMessageIds: number;
   private readonly maxTrackedSenderStreams: number;
   private readonly isUnauthorizedError: (error: unknown) => boolean;
+  private readonly onStateChange: ((state: RoomSessionState) => void) | undefined;
+  private readonly onMessage: ((message: RealtimeEnvelope) => void) | undefined;
+  private readonly onTransientMessageExpired: ((message: RealtimeEnvelope) => void) | undefined;
+  private readonly onTransientStateCleared: ((reason: "authorization-changed" | "reconnect" | "scope-changed" | "stopped") => void) | undefined;
+  private readonly onTransportFailure: ((error: unknown) => void) | undefined;
   private stateValue: RoomSessionState = "idle";
   private scopeValue: RealtimeRoomScope | undefined;
   private subscription: RealtimeTransportSubscription | undefined;
@@ -357,6 +381,7 @@ export class RealtimeRoomSession {
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private connectInFlight: Promise<void> | undefined;
+  private connectRequestSerial = 0;
   private cancelTokenAcquisition: (() => void) | undefined;
   private cancelTransportConnection: (() => void) | undefined;
   private readonly cancelPublications = new Set<() => void>();
@@ -365,8 +390,14 @@ export class RealtimeRoomSession {
   private readonly messageExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly senderEpoch = new Map<string, number>();
   private readonly senderSequence = new Map<string, number>();
+  private isNotifyingTransientClear = false;
 
   constructor(private readonly options: RoomSessionOptions) {
+    this.onStateChange = snapshotObserver(options, () => options.onStateChange);
+    this.onMessage = snapshotObserver(options, () => options.onMessage);
+    this.onTransientMessageExpired = snapshotObserver(options, () => options.onTransientMessageExpired);
+    this.onTransientStateCleared = snapshotObserver(options, () => options.onTransientStateCleared);
+    this.onTransportFailure = snapshotObserver(options, () => options.onTransportFailure);
     this.clock = options.clock ?? defaultClock;
     this.tokenAcquisitionTimeoutMs = normalizedBoundedPositive(
       options.tokenAcquisitionTimeoutMs,
@@ -411,7 +442,8 @@ export class RealtimeRoomSession {
 
   async start(scope: RealtimeRoomScope): Promise<void> {
     if (this.scopeValue && (this.scopeValue.missionId !== scope.missionId || this.scopeValue.roomId !== scope.roomId)) {
-      await this.stopInternal("scope-changed", "idle");
+      const handoffCompleted = await this.stopInternal("scope-changed", "idle");
+      if (!handoffCompleted) return;
     }
     if (this.scopeValue && this.stateValue === "live") return;
     this.scopeValue = scope;
@@ -458,7 +490,7 @@ export class RealtimeRoomSession {
   private setState(next: RoomSessionState) {
     if (this.stateValue === next) return;
     this.stateValue = next;
-    this.options.onStateChange?.(next);
+    this.onStateChange?.(next);
   }
 
   private clearTimers() {
@@ -478,7 +510,13 @@ export class RealtimeRoomSession {
     this.messageExpiryTimers.clear();
     this.senderEpoch.clear();
     this.senderSequence.clear();
-    this.options.onTransientStateCleared?.(reason);
+    if (this.isNotifyingTransientClear) return;
+    this.isNotifyingTransientClear = true;
+    try {
+      this.onTransientStateCleared?.(reason);
+    } finally {
+      this.isNotifyingTransientClear = false;
+    }
   }
 
   private detachSubscription(subscription = this.subscription) {
@@ -495,11 +533,14 @@ export class RealtimeRoomSession {
     return observation;
   }
 
-  private async stopInternal(reason: "scope-changed" | "stopped", nextState: RoomSessionState) {
+  private async stopInternal(reason: "scope-changed" | "stopped", nextState: RoomSessionState): Promise<boolean> {
     this.cancelTokenAcquisition?.();
     this.cancelTransportConnection?.();
     this.cancelPendingPublications();
     this.generation += 1;
+    this.connectRequestSerial += 1;
+    const lifecycleGeneration = this.generation;
+    const lifecycleRequestSerial = this.connectRequestSerial;
     // A prior token/connect promise may still settle, but its generation is
     // invalid. Do not let it monopolize the next room's connection slot.
     this.connectInFlight = undefined;
@@ -509,16 +550,20 @@ export class RealtimeRoomSession {
     this.scopeValue = undefined;
     this.reconnectAttempt = 0;
     this.clearTransient(reason);
-    this.setState(nextState);
+    if (lifecycleGeneration !== this.generation || lifecycleRequestSerial !== this.connectRequestSerial) return false;
     this.detachSubscription(previous);
+    this.setState(nextState);
+    return true;
   }
 
   private requestConnect(nextState: "connecting" | "reconnecting") {
     if (this.connectInFlight) return this.connectInFlight;
+    const requestSerial = ++this.connectRequestSerial;
     const attempt = this.connect(nextState);
+    if (requestSerial !== this.connectRequestSerial) return attempt;
     this.connectInFlight = attempt;
     void attempt.finally(() => {
-      if (this.connectInFlight === attempt) this.connectInFlight = undefined;
+      if (requestSerial === this.connectRequestSerial && this.connectInFlight === attempt) this.connectInFlight = undefined;
     });
     return attempt;
   }
@@ -654,7 +699,9 @@ export class RealtimeRoomSession {
       this.clearTransient("reconnect");
       this.detachSubscription(previous);
     }
+    if (generation !== this.generation || this.scopeValue !== scope) return;
     this.setState(nextState);
+    if (generation !== this.generation || this.scopeValue !== scope || this.stateValue !== nextState) return;
     try {
       const token = await this.acquireToken(scope);
       if (generation !== this.generation || this.scopeValue !== scope) return;
@@ -662,6 +709,7 @@ export class RealtimeRoomSession {
       const authorizationChanged = this.token !== undefined && this.token.authorizationVersion !== token.authorizationVersion;
       this.token = token;
       if (authorizationChanged) this.clearTransient("authorization-changed");
+      if (generation !== this.generation || this.scopeValue !== scope || this.stateValue !== nextState) return;
       const subscription = await this.acquireTransportSubscription({
         scope,
         token,
@@ -669,7 +717,7 @@ export class RealtimeRoomSession {
         onMessage: (message) => {
           if (generation !== this.generation) return;
           const accepted = this.acceptMessage(message);
-          if (typeof accepted !== "string") this.options.onMessage?.(accepted);
+          if (typeof accepted !== "string") this.onMessage?.(accepted);
         },
         onFailure: (error) => this.handleFailure(error, generation),
       });
@@ -679,8 +727,8 @@ export class RealtimeRoomSession {
       }
       this.subscription = subscription;
       this.reconnectAttempt = 0;
-      this.setState("live");
       this.scheduleRefresh(token, generation);
+      this.setState("live");
     } catch (error) {
       this.handleFailure(error, generation);
     }
@@ -697,7 +745,6 @@ export class RealtimeRoomSession {
   private handleFailure(error: unknown, generation: number) {
     if (generation !== this.generation || this.stateValue === "stopped") return;
     this.cancelPendingPublications();
-    this.options.onTransportFailure?.(error);
     const failureGeneration = ++this.generation;
     this.detachSubscription();
     this.clearTimers();
@@ -705,10 +752,14 @@ export class RealtimeRoomSession {
       this.token = undefined;
       this.clearTransient("authorization-changed");
       this.setState("unauthorized");
+      if (failureGeneration === this.generation) this.onTransportFailure?.(error);
       return;
     }
-    this.setState("degraded");
-    if (this.reconnectAttempt >= this.maxReconnectAttempts) return;
+    if (this.reconnectAttempt >= this.maxReconnectAttempts) {
+      this.setState("degraded");
+      if (failureGeneration === this.generation) this.onTransportFailure?.(error);
+      return;
+    }
     let requestedDelay: number;
     try {
       requestedDelay = this.reconnectDelayMs(this.reconnectAttempt);
@@ -720,8 +771,11 @@ export class RealtimeRoomSession {
     this.reconnectTimer = this.clock.setTimeout(() => {
       if (failureGeneration !== this.generation || !this.scopeValue || this.stateValue === "stopped") return;
       this.setState("reconnecting");
+      if (failureGeneration !== this.generation || !this.scopeValue || this.stateValue !== "reconnecting") return;
       void this.requestConnect("reconnecting");
     }, delay);
+    this.setState("degraded");
+    if (failureGeneration === this.generation) this.onTransportFailure?.(error);
   }
 
   private acceptMessage(value: unknown): RealtimeEnvelope | Exclude<RealtimeMessageDecision, "accepted"> {
@@ -776,7 +830,7 @@ export class RealtimeRoomSession {
       if (this.seenMessageExpiry.get(message.messageId) !== message.expiresAtMs) return;
       this.seenMessageExpiry.delete(message.messageId);
       this.messageExpiryTimers.delete(message.messageId);
-      this.options.onTransientMessageExpired?.(message);
+      this.onTransientMessageExpired?.(message);
     }, delay);
     this.messageExpiryTimers.set(message.messageId, timer);
   }
