@@ -38,9 +38,11 @@ export const roomLayouts = query({
   args: { missionId: v.id("missions") },
   returns: v.array(v.object({ _id: v.id("rooms"), title: v.string(), kind: roomKind, mapType: v.union(v.literal("field"), v.literal("canvas")), layout, layoutVersion: v.number(), currentVersion: v.number(), accessPolicy: v.union(v.literal("mission"), v.literal("members"), v.literal("restricted")) })),
   handler: async (ctx, args) => {
-    await requireActiveMembership(ctx, args.missionId);
+    const membership = await requireActiveMembership(ctx, args.missionId);
     const rooms = await ctx.db.query("rooms").withIndex("by_mission_and_state", (index) => index.eq("missionId", args.missionId).eq("state", "active")).take(100);
-    return rooms.map((room) => ({ _id: room._id, title: room.title, kind: room.kind, mapType: room.mapType, layout: room.layout, layoutVersion: room.layoutVersion, currentVersion: room.currentVersion, accessPolicy: room.accessPolicy }));
+    const hasMissionScope = ["owner", "steward", "builder"].includes(membership.role) && membership.scope.includes("mission:*");
+    const allowedRoomIds = new Set(membership.scope.filter((scope) => scope.startsWith("room:")).map((scope) => scope.slice("room:".length)));
+    return rooms.filter((room) => hasMissionScope || allowedRoomIds.has(room._id)).map((room) => ({ _id: room._id, title: room.title, kind: room.kind, mapType: room.mapType, layout: room.layout, layoutVersion: room.layoutVersion, currentVersion: room.currentVersion, accessPolicy: room.accessPolicy }));
   },
 });
 

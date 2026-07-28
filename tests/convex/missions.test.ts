@@ -312,6 +312,19 @@ describe("invites and durable canvas", () => {
     });
   });
 
+  it("returns only explicitly scoped rooms to a contributor invite membership", async () => {
+    const { t, asOwner, result } = await createMission();
+    const allowedRoomId = await roomFor(t, result.missionId);
+    const hiddenRoomId = await t.run(async (ctx) => ctx.db.insert("rooms", { missionId: result.missionId, kind: "observatory", title: "Hidden Observatory", accessPolicy: "mission", mapType: "field", layout: { x: 300, y: 180, width: 220, height: 140 }, layoutVersion: 1, state: "active", currentVersion: 1, createdAt: Date.now(), updatedAt: Date.now(), schemaVersion: 1 }));
+    await t.run(async (ctx) => {
+      const now = Date.now();
+      const contributorPrincipalId = await ctx.db.insert("principals", { type: "human", state: "active", tokenIdentifier: contributorIdentity.tokenIdentifier, createdAt: now, updatedAt: now, schemaVersion: 1 });
+      await ctx.db.insert("missionMembers", { missionId: result.missionId, principalId: contributorPrincipalId, role: "contributor", state: "active", scope: [`room:${allowedRoomId}`], grantVersion: 1, createdAt: now, updatedAt: now, schemaVersion: 1 });
+    });
+    expect((await asOwner.query(api.canvas.roomLayouts, { missionId: result.missionId })).map((room) => room._id).sort()).toEqual([allowedRoomId, hiddenRoomId].sort());
+    expect((await t.withIdentity(contributorIdentity).query(api.canvas.roomLayouts, { missionId: result.missionId })).map((room) => room._id)).toEqual([allowedRoomId]);
+  });
+
   it("creates, renames, and archives rooms with role checks and room-version OCC", async () => {
     const { t, asOwner, result } = await createMission();
     await t.run(async (ctx) => {

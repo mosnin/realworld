@@ -9,6 +9,7 @@ export type ActiveMembership = {
   principalId: Id<"principals">;
   role: "owner" | "steward" | "builder" | "reviewer" | "contributor" | "observer" | "agent";
   state: "active" | "revoked" | "expired";
+  scope: string[];
   grantVersion: number;
 };
 
