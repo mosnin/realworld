@@ -193,6 +193,51 @@ test("an owner can archive a Mission into a read-only world, restore it, and kee
   await expect(page.getByLabel("New room")).toBeVisible();
 });
 
+test("an owner can create, switch, archive, and recover separate Mission worlds", async ({ page }) => {
+  await page.goto("/");
+
+  const missionSelector = page.getByLabel("Selected Mission");
+  await expect(missionSelector).toHaveValue(await missionSelector.inputValue());
+  const firstMissionId = await missionSelector.inputValue();
+  await expect(page.getByRole("heading", { name: "Company sprint" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Surge Hall\. 12 active people/i })).toBeVisible();
+
+  await page.getByRole("button", { name: "New Mission" }).click();
+  const launcher = page.getByRole("dialog", { name: "Choose a work shape" });
+  await expect(launcher).toBeVisible();
+  await launcher.getByRole("button", { name: "Launch Classroom project" }).click();
+
+  await expect(page.getByRole("heading", { name: "Classroom project" })).toBeVisible();
+  const secondMissionId = await missionSelector.inputValue();
+  expect(secondMissionId).not.toBe(firstMissionId);
+  await expect(page.getByRole("button", { name: /Observatory\. 3 active people/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Surge Hall\. 12 active people/i })).toHaveCount(0);
+
+  await missionSelector.selectOption(firstMissionId);
+  await expect(page.getByRole("heading", { name: "Company sprint" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Surge Hall\. 12 active people/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Observatory\. 3 active people/i })).toHaveCount(0);
+
+  await missionSelector.selectOption(secondMissionId);
+  await expect(page.getByRole("heading", { name: "Classroom project" })).toBeVisible();
+  await page.reload();
+  await expect(missionSelector).toHaveValue(secondMissionId);
+  await expect(page.getByRole("heading", { name: "Classroom project" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Manage Mission" }).click();
+  await page.getByRole("button", { name: "Archive Mission" }).click();
+  await expect(page.getByRole("status", { name: "Archived Mission read-only" })).toBeVisible();
+  await expect(missionSelector).toHaveValue(secondMissionId);
+  await expect(page.getByRole("button", { name: "Layout unlocked" })).toBeDisabled();
+
+  await missionSelector.selectOption(firstMissionId);
+  await expect(missionSelector).toHaveValue(firstMissionId);
+  await expect(page.getByRole("heading", { name: "Company sprint" })).toBeVisible();
+  await expect(page.getByRole("status", { name: "Archived Mission read-only" })).toHaveCount(0);
+  await expect(page.getByLabel("New room")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Layout unlocked" })).toBeEnabled();
+});
+
 // The following invitation journey handles a bearer URL. Do not retain it in Playwright traces.
 test.use({ trace: "off" });
 
