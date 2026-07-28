@@ -847,6 +847,7 @@ export class RealtimeRoomSession {
   private generation = 0;
   private reconnectAttempt = 0;
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
+  private refreshSchedule: object | undefined;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private connectInFlight: Promise<void> | undefined;
   private connectRequestSerial = 0;
@@ -958,6 +959,7 @@ export class RealtimeRoomSession {
     if (this.refreshTimer) this.clock.clearTimeout(this.refreshTimer);
     if (this.reconnectTimer) this.clock.clearTimeout(this.reconnectTimer);
     this.refreshTimer = undefined;
+    this.refreshSchedule = undefined;
     this.reconnectTimer = undefined;
   }
 
@@ -1213,10 +1215,21 @@ export class RealtimeRoomSession {
 
   private scheduleRefresh(token: RealtimeToken, generation: number) {
     const delay = Math.max(this.minimumRefreshDelayMs, token.expiresAt - this.clock.now() - this.refreshSkewMs);
-    this.refreshTimer = this.clock.setTimeout(() => {
+    const schedule = {};
+    this.refreshSchedule = schedule;
+    let refreshEntered = false;
+    const refreshTimer = this.clock.setTimeout(() => {
+      if (this.refreshSchedule !== schedule) return;
+      this.refreshSchedule = undefined;
+      refreshEntered = true;
       if (generation !== this.generation || this.stateValue !== "live") return;
       void this.refresh();
     }, delay);
+    if (refreshEntered || this.refreshSchedule !== schedule) {
+      this.clock.clearTimeout(refreshTimer);
+      return;
+    }
+    this.refreshTimer = refreshTimer;
   }
 
   private handleFailure(error: unknown, generation: number) {

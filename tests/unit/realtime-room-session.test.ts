@@ -4140,6 +4140,58 @@ describe("RealtimeRoomSession", () => {
     } finally { process.off("unhandledRejection", observeUnhandled); }
   });
 
+  it("contains a synchronous retained refresh timer while allowing one bounded future refresh", async () => {
+    const baseClock = new FakeClock();
+    let synchronousRefresh = true;
+    let heldRefreshCallback: (() => void) | undefined;
+    const clearedHandles: number[] = [];
+    const clock = {
+      now: () => baseClock.now(),
+      setTimeout: (callback: () => void, delayMs: number) => {
+        if (synchronousRefresh && delayMs === 7) {
+          synchronousRefresh = false;
+          callback();
+          heldRefreshCallback = callback;
+          return 3_333 as unknown as ReturnType<typeof setTimeout>;
+        }
+        return baseClock.setTimeout(callback, delayMs);
+      },
+      clearTimeout: (timer: ReturnType<typeof setTimeout>) => {
+        if (timer === (3_333 as unknown as ReturnType<typeof setTimeout>)) { clearedHandles.push(3_333); return; }
+        baseClock.clearTimeout(timer);
+      },
+    };
+    const { transport, connect } = createTransport();
+    const tokenProvider = vi.fn(async () => token(baseClock.now() + 90_000));
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      const session = new RealtimeRoomSession({ tokenProvider, transport, clock, refreshSkewMs: 89_993, minimumRefreshDelayMs: 7 });
+      await session.start({ missionId: "mission-a", roomId: "room-a" });
+      expect(connect).toHaveBeenCalledTimes(1);
+      expect(session.state).toBe("live");
+      expect(clearedHandles).toEqual([3_333]);
+      expect(heldRefreshCallback).toBeTypeOf("function");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(connect).toHaveBeenCalledTimes(1);
+      heldRefreshCallback?.();
+      expect(session.state).toBe("live");
+      await flush();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await flush();
+      expect(connect).toHaveBeenCalledTimes(1);
+      await session.refresh();
+      expect(connect).toHaveBeenCalledTimes(2);
+      baseClock.advance(7);
+      await vi.waitFor(() => expect(connect).toHaveBeenCalledTimes(3));
+      expect(session.state).toBe("live");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+      await session.stop();
+    } finally { process.off("unhandledRejection", observeUnhandled); }
+  });
+
   it("snapshots recovery policy getters and receivers once, ignoring later replacements", async () => {
     const providerSecret = "recovery-policy-replacement-secret";
     for (const policy of ["random", "reconnect"] as const) {
