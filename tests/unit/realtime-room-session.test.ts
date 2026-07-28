@@ -2766,6 +2766,115 @@ describe("RealtimeRoomSession", () => {
     }
   });
 
+  it("captures refresh timing controls once, ignores mutation, and refreshes on the captured fake-clock deadline", async () => {
+    const providerSecret = "refresh-timing-mutation-secret";
+    const clock = new FakeClock();
+    const { transport, connect } = createTransport();
+    const tokenProvider = vi.fn(async () => token(clock.now() + 10_000));
+    const reads = { refreshSkewMs: 0, minimumRefreshDelayMs: 0 };
+    let refreshSkewMs: unknown = 3_000;
+    let minimumRefreshDelayMs: unknown = 400;
+    const options = { tokenProvider, transport, clock } as unknown as RoomSessionOptions;
+    Object.defineProperties(options, {
+      refreshSkewMs: {
+        get: () => {
+          reads.refreshSkewMs += 1;
+          return refreshSkewMs;
+        },
+      },
+      minimumRefreshDelayMs: {
+        get: () => {
+          reads.minimumRefreshDelayMs += 1;
+          return minimumRefreshDelayMs;
+        },
+      },
+    });
+    const session = new RealtimeRoomSession(options);
+    refreshSkewMs = providerSecret;
+    minimumRefreshDelayMs = providerSecret;
+
+    await session.start({ missionId: "mission-a", roomId: "room-a" });
+    expect(clock.delays.at(-1)).toBe(7_000);
+    clock.advance(7_000);
+    await vi.waitFor(() => expect(tokenProvider).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(connect).toHaveBeenCalledTimes(2));
+
+    expect(reads).toEqual({ refreshSkewMs: 1, minimumRefreshDelayMs: 1 });
+    await session.stop();
+  });
+
+  it("contains malformed, hostile, async, and bounded refresh timing options while preserving actual scheduling semantics", async () => {
+    const providerSecret = "hostile-refresh-timing-secret";
+    const cases: Array<{
+      label: string;
+      refreshSkewMs?: unknown;
+      minimumRefreshDelayMs?: unknown;
+      expected: number;
+    }> = [
+      { label: "default", expected: 1_000 },
+      { label: "malformed", refreshSkewMs: providerSecret, minimumRefreshDelayMs: providerSecret, expected: 1_000 },
+      { label: "nan", refreshSkewMs: Number.NaN, minimumRefreshDelayMs: Number.NaN, expected: 1_000 },
+      { label: "infinite", refreshSkewMs: Number.POSITIVE_INFINITY, minimumRefreshDelayMs: Number.POSITIVE_INFINITY, expected: 1_000 },
+      { label: "negative-skew", refreshSkewMs: -1, minimumRefreshDelayMs: 400, expected: 10_000 },
+      { label: "zero-minimum", refreshSkewMs: 9_999, minimumRefreshDelayMs: 0, expected: 1 },
+      { label: "fractional", refreshSkewMs: 2_500.5, minimumRefreshDelayMs: 10.5, expected: 7_499.5 },
+      { label: "throwing-getter", expected: 1_000 },
+      { label: "rejected-promise", expected: 1_000 },
+      { label: "hostile-then", expected: 1_000 },
+    ];
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      for (const { label, refreshSkewMs, minimumRefreshDelayMs, expected } of cases) {
+        const clock = new FakeClock();
+        const { transport } = createTransport();
+        const reads = { refreshSkewMs: 0, minimumRefreshDelayMs: 0 };
+        const failures: unknown[] = [];
+        let thenReads = 0;
+        const options = {
+          tokenProvider: async () => token(clock.now() + 10_000),
+          transport,
+          clock,
+          onTransportFailure: (error: unknown) => failures.push(error),
+        } as unknown as RoomSessionOptions;
+        for (const property of ["refreshSkewMs", "minimumRefreshDelayMs"] as const) {
+          Object.defineProperty(options, property, {
+            get: () => {
+              reads[property] += 1;
+              if (label === "throwing-getter") throw new Error(providerSecret);
+              if (label === "rejected-promise") return Promise.reject(new Error(providerSecret));
+              if (label === "hostile-then") {
+                const hostileThenable = {};
+                Object.defineProperty(hostileThenable, "then", {
+                  get: () => {
+                    thenReads += 1;
+                    throw new Error(providerSecret);
+                  },
+                });
+                return hostileThenable;
+              }
+              return property === "refreshSkewMs" ? refreshSkewMs : minimumRefreshDelayMs;
+            },
+          });
+        }
+        let session: RealtimeRoomSession | undefined;
+        expect(() => { session = new RealtimeRoomSession(options); }).not.toThrow();
+
+        await session!.start({ missionId: "mission-a", roomId: "room-a" });
+        expect(clock.delays.at(-1)).toBe(expected);
+        expect(reads).toEqual({ refreshSkewMs: 1, minimumRefreshDelayMs: 1 });
+        if (label === "hostile-then") expect(thenReads).toBe(2);
+        expect(failures).toEqual([]);
+        await session!.stop();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
   it("snapshots recovery policy getters and receivers once, ignoring later replacements", async () => {
     const providerSecret = "recovery-policy-replacement-secret";
     for (const policy of ["random", "reconnect"] as const) {

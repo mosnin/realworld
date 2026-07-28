@@ -219,6 +219,35 @@ function snapshotBoundedPositive(read: () => unknown, fallback: number, maximum:
   }
 }
 
+function snapshotNonNegative(read: () => unknown, fallback: number) {
+  try {
+    const value = read();
+    if (typeof value === "number") return normalizedNonNegative(value, fallback);
+    observeAsyncResult(value);
+    return fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function snapshotPositive(read: () => unknown, fallback: number) {
+  try {
+    const value = read();
+    if (typeof value === "number") return normalizedPositive(value, fallback);
+    observeAsyncResult(value);
+    return fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function snapshotRefreshTiming(options: RoomSessionOptions) {
+  return {
+    refreshSkew: snapshotNonNegative(() => options.refreshSkewMs, defaultRefreshSkewMs),
+    minimumRefreshDelay: snapshotPositive(() => options.minimumRefreshDelayMs, defaultMinimumRefreshDelayMs),
+  };
+}
+
 function snapshotOperationTimeouts(options: RoomSessionOptions) {
   return {
     tokenAcquisition: snapshotBoundedPositive(
@@ -655,6 +684,7 @@ export class RealtimeRoomSession {
     this.tokenProvider = snapshotTokenProvider(options);
     this.transportConnect = snapshotTransportConnect(options);
     const operationTimeouts = snapshotOperationTimeouts(options);
+    const refreshTiming = snapshotRefreshTiming(options);
     this.onStateChange = snapshotObserver(options, () => options.onStateChange);
     this.onMessage = snapshotObserver(options, () => options.onMessage);
     this.onTransientMessageExpired = snapshotObserver(options, () => options.onTransientMessageExpired);
@@ -665,8 +695,8 @@ export class RealtimeRoomSession {
     this.transportConnectionTimeoutMs = operationTimeouts.transportConnection;
     this.transportDisposalTimeoutMs = operationTimeouts.transportDisposal;
     this.transportPublishTimeoutMs = operationTimeouts.transportPublish;
-    this.refreshSkewMs = normalizedNonNegative(options.refreshSkewMs, defaultRefreshSkewMs);
-    this.minimumRefreshDelayMs = normalizedPositive(options.minimumRefreshDelayMs, defaultMinimumRefreshDelayMs);
+    this.refreshSkewMs = refreshTiming.refreshSkew;
+    this.minimumRefreshDelayMs = refreshTiming.minimumRefreshDelay;
     const random = snapshotRandom(options);
     this.reconnectDelayMs = snapshotReconnectDelay(options, random);
     this.maxReconnectAttempts = normalizedAttemptLimit(options.maxReconnectAttempts, defaultMaxReconnectAttempts);
