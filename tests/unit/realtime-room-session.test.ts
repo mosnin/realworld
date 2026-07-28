@@ -3758,6 +3758,71 @@ describe("RealtimeRoomSession", () => {
     }
   });
 
+  it("recaptures each acquired subscription once with original receivers despite raw mutation and refresh cleanup", async () => {
+    const clock = new FakeClock();
+    const publishReceivers: unknown[] = [];
+    const unsubscribeReceivers: unknown[] = [];
+    const refreshedPublishReceivers: unknown[] = [];
+    const refreshedUnsubscribeReceivers: unknown[] = [];
+    const originalPublish = function (this: unknown) { publishReceivers.push(this); };
+    const originalUnsubscribe = function (this: unknown) { unsubscribeReceivers.push(this); };
+    const refreshedPublish = function (this: unknown) { refreshedPublishReceivers.push(this); };
+    const refreshedUnsubscribe = function (this: unknown) { refreshedUnsubscribeReceivers.push(this); };
+    let publish: unknown = originalPublish;
+    let unsubscribe: unknown = originalUnsubscribe;
+    const raw = {} as Record<string, unknown>;
+    const reads = { publish: 0, unsubscribe: 0 };
+    Object.defineProperties(raw, {
+      publish: { get: () => { reads.publish += 1; return publish; } },
+      unsubscribe: { get: () => { reads.unsubscribe += 1; return unsubscribe; } },
+    });
+    const connect = vi.fn(async () => raw as RealtimeTransportSubscription);
+    const session = new RealtimeRoomSession({ tokenProvider: async () => token(clock.now() + 300_000), transport: { connect }, clock });
+    await session.start({ missionId: "mission-a", roomId: "room-a" });
+    await expect(session.publish(message(clock))).resolves.toBe(true);
+    publish = refreshedPublish;
+    unsubscribe = refreshedUnsubscribe;
+    await session.refresh();
+
+    expect(reads).toEqual({ publish: 2, unsubscribe: 2 });
+    expect(publishReceivers).toEqual([raw]);
+    expect(unsubscribeReceivers).toEqual([raw]);
+    await expect(session.publish(message(clock, { messageId: "refreshed-subscription", clientSeq: 2 }))).resolves.toBe(true);
+    expect(refreshedPublishReceivers).toEqual([raw]);
+    await session.stop();
+    expect(unsubscribeReceivers).toEqual([raw]);
+    expect(refreshedUnsubscribeReceivers).toEqual([raw]);
+  });
+
+  it("fails closed for hostile subscription fields while disposing captured cleanup once without unhandled leakage", async () => {
+    const providerSecret = "hostile-subscription-secret";
+    const modes = ["throw", "rejected", "hostile-then"] as const;
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      for (const mode of modes) {
+        const clock = new FakeClock();
+        const dispose = vi.fn(() => undefined);
+        const raw = { unsubscribe: dispose } as Record<string, unknown>;
+        Object.defineProperty(raw, "publish", { get: () => {
+          if (mode === "throw") throw new Error(providerSecret);
+          if (mode === "rejected") return Promise.reject(new Error(providerSecret));
+          const thenable = {}; Object.defineProperty(thenable, "then", { get: () => { throw new Error(providerSecret); } }); return thenable;
+        } });
+        const connect = vi.fn(async () => raw as RealtimeTransportSubscription);
+        const failures: unknown[] = [];
+        const session = new RealtimeRoomSession({ tokenProvider: async () => token(clock.now() + 300_000), transport: { connect }, clock, maxReconnectAttempts: 0, onTransportFailure: (error) => failures.push(error) });
+        await session.start({ missionId: "mission-a", roomId: "room-a" });
+        expect(session.state).toBe("degraded");
+        expect(dispose).toHaveBeenCalledTimes(1);
+        expect(String(failures[0])).not.toContain(providerSecret);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally { process.off("unhandledRejection", observeUnhandled); }
+  });
+
   it("snapshots recovery policy getters and receivers once, ignoring later replacements", async () => {
     const providerSecret = "recovery-policy-replacement-secret";
     for (const policy of ["random", "reconnect"] as const) {

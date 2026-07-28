@@ -582,14 +582,30 @@ type TransportSubscriptionSnapshot = Readonly<{
 
 function snapshotTransportSubscription(value: unknown): TransportSubscriptionSnapshot | undefined {
   try {
-    if (!isRecord(value)) return undefined;
-    const unsubscribe = value.unsubscribe;
-    if (typeof unsubscribe !== "function") return undefined;
+    if (!isRecord(value)) {
+      observeAsyncResult(value);
+      return undefined;
+    }
+    const unsubscribe = captureProperty(value, "unsubscribe");
+    const publish = captureProperty(value, "publish");
+    observeAsyncResult(value);
+    const unsubscribeCallback = unsubscribe.value;
+    const publishCallback = publish.value;
+    if (!unsubscribe.read || typeof unsubscribeCallback !== "function") {
+      observeAsyncResult(unsubscribe.value);
+      observeAsyncResult(publish.value);
+      return undefined;
+    }
+    const capturedUnsubscribe = unsubscribeCallback as () => void | Promise<void>;
+    const publishIsUsable = publish.read && (publishCallback === undefined || typeof publishCallback === "function");
+    const capturedPublish = typeof publishCallback === "function"
+      ? publishCallback as (message: RealtimeEnvelope) => void | Promise<void>
+      : undefined;
     let disposal: Promise<void> | undefined;
     const dispose = () => {
       if (disposal) return disposal;
       try {
-        disposal = Promise.resolve(Reflect.apply(unsubscribe, value, [])).catch(() => {
+        disposal = Promise.resolve(Reflect.apply(capturedUnsubscribe, value, [])).catch(() => {
           throw new Error("Realtime transport disposal failed");
         });
       } catch {
@@ -597,22 +613,18 @@ function snapshotTransportSubscription(value: unknown): TransportSubscriptionSna
       }
       return disposal;
     };
-    let publish: unknown;
-    try {
-      publish = value.publish;
-    } catch {
-      return { disposable: { unsubscribe: dispose } };
+    const disposable = Object.freeze({ unsubscribe: dispose });
+    if (!publishIsUsable) {
+      observeAsyncResult(publish.value);
+      return Object.freeze({ disposable });
     }
-    if (publish !== undefined && typeof publish !== "function") {
-      return { disposable: { unsubscribe: dispose } };
-    }
-    const subscription: RealtimeTransportSubscription = {
+    const subscription: RealtimeTransportSubscription = Object.freeze({
       unsubscribe: dispose,
-      publish: publish === undefined
+      publish: capturedPublish === undefined
         ? undefined
         : (message) => {
           try {
-            return Promise.resolve(Reflect.apply(publish, value, [message])).catch((error: unknown) => {
+            return Promise.resolve(Reflect.apply(capturedPublish, value, [message])).catch((error: unknown) => {
               if (error instanceof RealtimePublishRateLimitError) throw error;
               throw new Error("Realtime transport publish failed");
             });
@@ -621,9 +633,10 @@ function snapshotTransportSubscription(value: unknown): TransportSubscriptionSna
             return Promise.reject(new Error("Realtime transport publish failed"));
           }
         },
-    };
-    return { subscription, disposable: subscription };
+    });
+    return Object.freeze({ subscription, disposable: subscription });
   } catch {
+    observeAsyncResult(value);
     return undefined;
   }
 }
