@@ -817,8 +817,7 @@ test("an owner and scoped reviewer complete a reactive Proof handoff", async ({ 
 
     const pulse = page.getByLabel("Mission activity Pulse");
     const openPulse = pulse.getByRole("button", { name: /Open Mission Pulse/ });
-    await openPulse.focus();
-    await page.keyboard.press("Enter");
+    await openPulse.click();
     const activity = pulse.getByLabel("Recent durable Mission activity");
     const verifiedEvent = activity.getByRole("button", { name: /Proof verified/ }).first();
     await expect(verifiedEvent).toBeVisible();
