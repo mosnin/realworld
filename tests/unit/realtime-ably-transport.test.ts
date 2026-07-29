@@ -185,6 +185,119 @@ describe("development Ably room transport", () => {
     await subscription.unsubscribe();
   });
 
+  it("starts listener attachment before connect without awaiting it, then requires both readiness and attachment", async () => {
+    const fake = fakeClient(false);
+    const world = fake.get(names().world);
+    const presence = fake.get(names().presence);
+    const mutableWorld = world as unknown as { subscribe: (listener: (message: unknown) => void) => Promise<unknown> };
+    const mutablePresence = presence.presence as unknown as { subscribe: (listener: (message: unknown) => void) => Promise<void> };
+    const mutableClient = fake.client as unknown as { connect: () => void };
+    const subscriptionGate = deferred<void>();
+    const worldSubscribe = world.subscribe;
+    const presenceSubscribe = presence.presence.subscribe;
+    mutableWorld.subscribe = vi.fn(async (listener) => {
+      await subscriptionGate.promise;
+      await worldSubscribe(listener);
+    });
+    mutablePresence.subscribe = vi.fn(async (listener) => {
+      await presenceSubscribe(listener);
+    });
+    mutableClient.connect = vi.fn(() => {
+      expect(world.subscribe).toHaveBeenCalledTimes(1);
+      expect(presence.presence.subscribe).toHaveBeenCalledTimes(1);
+      expect(fake.connectionListeners.some((entry) => (Array.isArray(entry.events) ? entry.events : [entry.events]).includes("failed"))).toBe(true);
+      fake.emit("connected");
+      subscriptionGate.resolve();
+    });
+    const adapter = createDevelopmentAblyRoomTransport({
+      environment: "preview",
+      clientFactory: async () => fake.client,
+      now: () => 1_000_000,
+    });
+
+    const pending = adapter.connect({
+      scope,
+      token: tokenRequest({ [names().world]: ["subscribe"], [names().presence]: ["subscribe"] }),
+      connectionEpoch: 1,
+      onMessage: vi.fn(),
+      onFailure: vi.fn(),
+    });
+
+    await vi.waitFor(() => expect(fake.client.connect).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(world.subscribe).toHaveBeenCalledTimes(1));
+    expect(presence.presence.subscribe).toHaveBeenCalledTimes(1);
+    const subscription = await pending;
+    expect(presence.presence.subscribe).toHaveBeenCalledTimes(1);
+    await subscription.unsubscribe();
+  });
+
+  it("delivers an exact early signal registered before connection while attachment remains pending", async () => {
+    const fake = fakeClient(false);
+    const world = fake.get(names().world);
+    const mutableWorld = world as unknown as { subscribe: (listener: (message: unknown) => void) => Promise<unknown> };
+    const attachment = deferred<void>();
+    const originalSubscribe = world.subscribe;
+    mutableWorld.subscribe = vi.fn(async (listener) => {
+      await originalSubscribe(listener as never);
+      await attachment.promise;
+    });
+    const received = vi.fn();
+    const mutableClient = fake.client as unknown as { connect: () => void };
+    mutableClient.connect = vi.fn(() => {
+      fake.emit("connected");
+      for (const listener of fake.listeners.get(names().world) ?? []) {
+        listener({ data: envelope("world.location", "early-before-attach"), clientId: "rw_test" });
+      }
+    });
+    const adapter = createDevelopmentAblyRoomTransport({ environment: "preview", clientFactory: async () => fake.client, now: () => 1_000_000 });
+
+    let settled = false;
+    const pending = adapter.connect({ scope, token: tokenRequest({ [names().world]: ["subscribe"] }), connectionEpoch: 1, onMessage: received, onFailure: vi.fn() }).then((value) => {
+      settled = true;
+      return value;
+    });
+    await vi.waitFor(() => expect(received).toHaveBeenCalledWith(envelope("world.location", "early-before-attach")));
+    expect(settled).toBe(false);
+    attachment.resolve();
+    const subscription = await pending;
+    expect(settled).toBe(true);
+    await subscription.unsubscribe();
+  });
+
+  it("cleans a synchronously registered pending attachment after connection failure without late delivery or rejection", async () => {
+    const fake = fakeClient(false);
+    const world = fake.get(names().world);
+    const mutableWorld = world as unknown as { subscribe: (listener: (message: unknown) => void) => Promise<unknown> };
+    const attachment = deferred<void>();
+    const originalSubscribe = world.subscribe;
+    mutableWorld.subscribe = vi.fn(async (listener) => {
+      await originalSubscribe(listener as never);
+      await attachment.promise;
+    });
+    const received = vi.fn();
+    const mutableClient = fake.client as unknown as { connect: () => void };
+    mutableClient.connect = vi.fn(() => fake.emit("failed", new Error("provider failure")));
+    const adapter = createDevelopmentAblyRoomTransport({ environment: "preview", clientFactory: async () => fake.client, now: () => 1_000_000 });
+    const unhandled: unknown[] = [];
+    const observeUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", observeUnhandled);
+    try {
+      await expect(adapter.connect({ scope, token: tokenRequest({ [names().world]: ["subscribe"] }), connectionEpoch: 1, onMessage: received, onFailure: vi.fn() })).rejects.toThrow("Realtime connection is unavailable");
+      expect((world.unsubscribe as ReturnType<typeof vi.fn>)).toHaveBeenCalled();
+      expect(world.detach as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(1);
+      expect(fake.client.close).toHaveBeenCalledTimes(1);
+      for (const listener of fake.listeners.get(names().world) ?? []) {
+        listener({ data: envelope("world.location", "after-close"), clientId: "rw_test" });
+      }
+      expect(received).not.toHaveBeenCalled();
+      attachment.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", observeUnhandled);
+    }
+  });
+
   it("rejects malformed or hostile injected clients before listeners, subscriptions, or presence work", async () => {
     const capability = {
       [names().world]: ["subscribe"],
@@ -598,14 +711,14 @@ describe("development Ably room transport", () => {
       expect(String(failure)).not.toContain(providerSecret);
       expect(fake.listeners.get(names().world) ?? []).toEqual([]);
       expect(fake.presenceListeners).toEqual(new Map());
-      expect((fake.channels.get(names().world)!.unsubscribe as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+      expect((fake.channels.get(names().world)!.unsubscribe as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(2);
       expect(fake.client.close).toHaveBeenCalledTimes(1);
 
       rawSubscription.resolve();
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(fake.listeners.get(names().world) ?? []).toEqual([]);
       expect(fake.presenceListeners).toEqual(new Map());
-      expect((fake.channels.get(names().world)!.unsubscribe as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(2);
+      expect((fake.channels.get(names().world)!.unsubscribe as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(3);
       expect(unhandled).toEqual([]);
     } finally {
       process.off("unhandledRejection", observeUnhandled);

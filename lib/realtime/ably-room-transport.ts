@@ -526,6 +526,26 @@ export class DevelopmentAblyRoomTransport implements RealtimeTransportAdapter {
       undoOnFailure: undoLateSuccess,
       undoLateSuccess: () => undoLateSuccess?.(),
     });
+    const startProviderOperation = <Return>(
+      operation: ProviderOperation,
+      callback: () => Return | Promise<Return>,
+      undoLateSuccess?: () => void | Promise<void>,
+    ) => {
+      let invoked: Return | Promise<Return>;
+      try {
+        // Invoke now so synchronous provider registration happens before the
+        // connection attempt; the bounded wrapper owns its eventual result.
+        invoked = callback();
+      } catch {
+        return Promise.reject(providerOperationError(operation));
+      }
+      return awaitBoundedProvider(operation, () => invoked, {
+        timer: this.timer,
+        timeoutMs: this.providerOperationTimeoutMs,
+        undoOnFailure: undoLateSuccess,
+        undoLateSuccess: () => undoLateSuccess?.(),
+      });
+    };
     const listeners: Array<Readonly<{ channel: AblyRoomChannel; listener: (message: AblyInboundMessage) => void; presence: boolean }>> = [];
     const enteredPresence = new Set<AblyRoomChannel>();
     let closed = false;
@@ -675,6 +695,10 @@ export class DevelopmentAblyRoomTransport implements RealtimeTransportAdapter {
         () => client.connection.on(connectionFailureEvents, connectionFailure),
         () => client.connection.off(connectionFailureEvents, connectionFailure),
       );
+      // Attach listeners before connecting so no early room signal is lost,
+      // but do not await attachment here: official providers may wait for the
+      // connection that this same startup sequence must establish.
+      const attachmentPromises: Array<Promise<unknown>> = [];
       for (const grant of granted) {
         const channel = getChannel(grant);
         if (!grant.operations.has("subscribe")) continue;
@@ -689,22 +713,23 @@ export class DevelopmentAblyRoomTransport implements RealtimeTransportAdapter {
           }
         };
         if (grant.kind === "presence") {
-          await awaitProviderOperation(
+          listeners.push({ channel, listener, presence: true });
+          attachmentPromises.push(startProviderOperation(
             "subscription",
             () => channel.presence.subscribe(listener),
             () => channel.presence.unsubscribe(listener),
-          );
-          listeners.push({ channel, listener, presence: true });
+          ));
         } else {
-          await awaitProviderOperation(
+          listeners.push({ channel, listener, presence: false });
+          attachmentPromises.push(startProviderOperation(
             "subscription",
             () => channel.subscribe(listener),
             () => channel.unsubscribe(listener),
-          );
-          listeners.push({ channel, listener, presence: false });
+          ));
         }
       }
-      await waitForConnectionReady();
+      const connectionReady = waitForConnectionReady();
+      await Promise.all([connectionReady, ...attachmentPromises]);
       ready = true;
       this.emitTelemetry({ event: "connect_ready", state: "live", subscriptions: listeners.length });
     } catch (error) {
