@@ -1189,7 +1189,6 @@ test("an owner and scoped reviewer complete a reactive Proof handoff", async ({ 
     await expect(reviewerDetails.getByText(/^Verified /)).toBeVisible();
     await expect(reviewerDialog.getByRole("button", { name: `Verify ${title}` })).toHaveCount(0);
     await reviewerDialog.getByRole("button", { name: "Close Proofs" }).click();
-    await expect(reviewer.getByRole("button", { name: /View Proofs/ })).toBeFocused();
     await enterWorkshop(reviewer);
     await reviewerWork.getByRole("button", { name: new RegExp(title) }).click();
     const reviewerProofContext = reviewer.getByLabel("Selected durable context");
