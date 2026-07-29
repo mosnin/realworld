@@ -30,12 +30,30 @@ export default defineSchema({
     state: principalState,
     tokenIdentifier: v.optional(v.string()),
     displayName: v.optional(v.string()),
+    // The authoritative server timestamp for the self-service callsign cooldown.
+    // Omission means this principal predates the profile kernel and may set once.
+    displayNameUpdatedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
     schemaVersion: v.number(),
   })
     .index("by_token_identifier", ["tokenIdentifier"])
     .index("by_type_and_state", ["type", "state"]),
+
+  // Profile writes intentionally have their own receipt surface. Mission
+  // operation receipts require Mission/event attribution and must never be
+  // manufactured by a self-profile update.
+  profileReceipts: defineTable({
+    principalId: v.id("principals"),
+    idempotencyKey: v.string(),
+    commandFingerprint: v.string(),
+    resultDisplayName: v.string(),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+    schemaVersion: v.number(),
+  })
+    .index("by_principal_and_idempotency_key", ["principalId", "idempotencyKey"])
+    .index("by_expiry", ["expiresAt"]),
 
   missions: defineTable({
     ownerPrincipalId: v.id("principals"),
