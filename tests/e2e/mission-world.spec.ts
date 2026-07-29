@@ -176,7 +176,23 @@ test("an authenticated owner can launch an honest empty Blank canvas Workshop", 
   await expect(inspectedMove).toContainText(firstMoveTitle);
   await expect(inspectedMove).toContainText(firstMoveIntent);
   await expect(inspectedMove).toContainText("proposed");
-  await page.getByRole("button", { name: "Mission World" }).click();
+  await workshopWork.getByRole("button", { name: new RegExp(firstCallTitle) }).click();
+  const selectedFirstCall = page.getByLabel("Selected durable context");
+  await expect(selectedFirstCall).toContainText(firstCallTitle);
+  await expect(selectedFirstCall).toContainText(firstCallDetail);
+  const openWorkshopCall = page.getByRole("button", { name: "Open Call" });
+  await openWorkshopCall.focus();
+  await expect(openWorkshopCall).toBeFocused();
+  await page.keyboard.press("Enter");
+  const firstCallDetails = callDialog.getByLabel(`Call details for ${firstCallTitle}`);
+  await expect(firstCallDetails).toContainText(firstCallTitle);
+  await expect(firstCallDetails).toContainText(firstCallDetail);
+  await expect(firstCallDetails).toContainText("Room: Workshop");
+  await expect(firstCallDetails).toContainText(`Linked Move: ${firstMoveTitle}`);
+  await expect(firstCallDetails).toContainText("open");
+  await expect(callDialog.getByLabel(`Call participants for ${firstCallTitle}`)).toContainText(/0\s*\/\s*50/);
+  await callDialog.getByRole("button", { name: "Close Calls" }).click();
+  await expect(page.getByRole("button", { name: /Issue Call/ })).toBeFocused();
 
   await page.getByRole("button", { name: "Room directory" }).click();
   const directory = page.getByRole("region", { name: "Mission rooms" });
@@ -204,6 +220,13 @@ test("an authenticated owner can launch an honest empty Blank canvas Workshop", 
   await expect(reloadedCallContext).toContainText(firstCallDetail);
   await expect(reloadedCallContext).toContainText("open");
   await expect(reloadedCallContext).toContainText("Joined participants");
+  const reloadedOpenWorkshopCall = page.getByRole("button", { name: "Open Call" });
+  await reloadedOpenWorkshopCall.focus();
+  await page.keyboard.press("Enter");
+  await expect(callDialog.getByLabel(`Call details for ${firstCallTitle}`)).toContainText(`Linked Move: ${firstMoveTitle}`);
+  await expect(callDialog.getByLabel(`Call participants for ${firstCallTitle}`)).toContainText(/0\s*\/\s*50/);
+  await callDialog.getByRole("button", { name: "Close Calls" }).click();
+  await enterWorkshop(page);
   await reloadedWorkshopWork.getByRole("button", { name: new RegExp(firstMoveTitle) }).click();
   await expect(page.getByLabel("Selected durable context")).toContainText(firstMoveIntent);
 });
@@ -602,6 +625,8 @@ test("an owner can issue, edit, advance, and reload a durable room Call", async 
   const updatedDetail = "Bring one concrete interaction concern and a suggested repair from the Workshop.";
   const linkedMove = "Set the sprint outcome";
   const resolutionSummary = "The owner reviewed the room signal and recorded the agreed repair.";
+  const archivedOpenTitle = "Keep the archived rendezvous actionable";
+  const archivedOpenDetail = "This open Call proves archived Workshop inspection remains read-only.";
 
   await page.goto("/");
   await page.getByRole("button", { name: /Issue Call/ }).click();
@@ -682,9 +707,33 @@ test("an owner can issue, edit, advance, and reload a durable room Call", async 
   await expect(page.getByLabel("Selected durable context")).toContainText("resolved");
   await expect(page.getByLabel("Selected durable context")).toContainText("Joined participants");
   await page.getByRole("button", { name: "Mission World" }).click();
+  await page.getByRole("button", { name: /Issue Call/ }).click();
+  await callDialog.getByLabel("Call title").fill(archivedOpenTitle);
+  await callDialog.getByRole("textbox", { name: "Detail" }).fill(archivedOpenDetail);
+  await callDialog.getByLabel("Room").selectOption({ label: "Workshop" });
+  await callDialog.getByLabel("Linked Move (optional)").selectOption({ label: linkedMove });
+  await callDialog.getByRole("button", { name: "Issue Call", exact: true }).click();
+  await expect(callDialog.getByText("Call issued.")).toBeVisible();
+  await callDialog.getByRole("button", { name: "Close Calls" }).click();
   await page.getByRole("button", { name: "Manage Mission" }).click();
   await page.getByRole("button", { name: "Archive Mission" }).click();
   await expect(page.getByRole("status", { name: "Archived Mission read-only" })).toBeVisible();
+
+  await enterWorkshop(page);
+  const archivedWorkshopWork = page.getByRole("list", { name: "Available durable work" });
+  await archivedWorkshopWork.getByRole("button", { name: new RegExp(archivedOpenTitle) }).click();
+  const archivedOpenCall = page.getByRole("button", { name: "Open Call" });
+  await archivedOpenCall.focus();
+  await page.keyboard.press("Enter");
+  await expect(callDialog.getByLabel("Mission Calls read-only")).toBeVisible();
+  await expect(callDialog.getByLabel(`Call details for ${archivedOpenTitle}`)).toContainText(`Linked Move: ${linkedMove}`);
+  await expect(callDialog.getByRole("button", { name: `Join ${archivedOpenTitle}` })).toHaveCount(0);
+  await expect(callDialog.getByRole("button", { name: `Withdraw ${archivedOpenTitle}` })).toHaveCount(0);
+  await expect(callDialog.getByLabel(`Response to ${archivedOpenTitle}`)).toHaveCount(0);
+  await expect(callDialog.getByLabel("Call title")).toHaveCount(0);
+  await expect(callDialog.getByRole("button", { name: "Issue another Call" })).toHaveCount(0);
+  await expect(callDialog.getByLabel(`Call actions for ${archivedOpenTitle}`)).toHaveCount(0);
+  await callDialog.getByRole("button", { name: "Close Calls" }).click();
 
   await resolvedBeacon.focus();
   await page.keyboard.press("Enter");
@@ -976,6 +1025,8 @@ test("an owner and scoped reviewer complete a reactive Proof handoff", async ({ 
 });
 
 test("a scoped observer receives a stable read-only Mission shell without private work feeds", async ({ browser, page }) => {
+  const observerCallTitle = `Observer-visible Workshop Call ${Date.now()}`;
+  const observerCallDetail = "A durable request the scoped observer may inspect but cannot join.";
   await page.goto("/");
   await page.getByRole("button", { name: "Invite collaborators" }).click();
   const invitations = page.getByRole("dialog", { name: "Invite collaborators" });
@@ -1031,12 +1082,33 @@ test("a scoped observer receives a stable read-only Mission shell without privat
     await expect(calls.getByLabel("Mission Calls read-only")).toBeVisible();
     await calls.getByRole("button", { name: "Close Calls" }).click();
 
+    await page.getByRole("button", { name: /Issue Call/ }).click();
+    const ownerCalls = page.getByRole("dialog", { name: "Ask for a hand, in context" });
+    await ownerCalls.getByLabel("Call title").fill(observerCallTitle);
+    await ownerCalls.getByRole("textbox", { name: "Detail" }).fill(observerCallDetail);
+    await ownerCalls.getByLabel("Room").selectOption({ label: "Workshop" });
+    await ownerCalls.getByRole("button", { name: "Issue Call", exact: true }).click();
+    await expect(ownerCalls.getByText("Call issued.")).toBeVisible();
+    await ownerCalls.getByRole("button", { name: "Close Calls" }).click();
+    await expect(observer.getByRole("button", { name: `Open Call: ${observerCallTitle}, open` })).toBeVisible({ timeout: 15_000 });
+
     await enterWorkshop(observer);
     const observerWork = await expectWorkshopContext(observer);
-    await expect(observerWork.getByRole("button")).toHaveCount(3);
+    await expect(observerWork.getByRole("button")).toHaveCount(4);
     await expect(observerWork.getByText("Mission Core", { exact: true })).toHaveCount(0);
     await expect(observer.getByRole("button", { name: "Ask for help" })).toHaveCount(0);
+    await observerWork.getByRole("button", { name: new RegExp(observerCallTitle) }).click();
+    const observerOpenCall = observer.getByRole("button", { name: "Open Call" });
+    await observerOpenCall.focus();
+    await observer.keyboard.press("Enter");
+    const observerCallDialog = observer.getByRole("dialog", { name: "Ask for a hand, in context" });
+    await expect(observerCallDialog.getByLabel("Mission Calls read-only")).toBeVisible();
+    await expect(observerCallDialog.getByLabel(`Call details for ${observerCallTitle}`)).toContainText(observerCallDetail);
+    await expect(observerCallDialog.getByRole("button", { name: `Join ${observerCallTitle}` })).toHaveCount(0);
+    await expect(observerCallDialog.getByLabel(`Response to ${observerCallTitle}`)).toHaveCount(0);
+    await observerCallDialog.getByRole("button", { name: "Close Calls" }).click();
     await expect(observer.getByLabel("Mission activity Pulse")).toHaveCount(0);
+    await enterWorkshop(observer);
     const ownerWorkshop = page.getByRole("button", { name: /^Workshop\./ });
     const conflictMessage = "That room changed elsewhere. The live map has been refreshed.";
     await ownerWorkshop.click();

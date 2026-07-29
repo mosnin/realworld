@@ -35,6 +35,12 @@ type CreateCallRequest = {
   nonce: string;
 };
 
+type InspectCallRequest = {
+  callId: Id<"calls">;
+  roomId: Id<"rooms">;
+  nonce: string;
+};
+
 const transitions: Partial<Record<CallStatus, CallStatus[]>> = {
   open: ["accepted", "cancelled"],
   accepted: ["open", "resolved", "cancelled"],
@@ -77,6 +83,9 @@ export function CallSurface({
   createCallRequest,
   onCreateCallRequestHandled,
   onCreateCallRequestUnavailable,
+  inspectCallRequest,
+  onInspectCallRequestHandled,
+  onInspectCallRequestUnavailable,
 }: Readonly<{
   mission: Mission;
   rooms: RoomOption[];
@@ -84,6 +93,9 @@ export function CallSurface({
   createCallRequest?: CreateCallRequest | null;
   onCreateCallRequestHandled?: () => void;
   onCreateCallRequestUnavailable?: () => void;
+  inspectCallRequest?: InspectCallRequest | null;
+  onInspectCallRequestHandled?: () => void;
+  onInspectCallRequestUnavailable?: () => void;
 }>) {
   const calls = useQuery(api.calls.listMissionCalls, { missionId: mission._id });
   const createCall = useMutation(api.calls.createCall);
@@ -213,6 +225,35 @@ export function CallSurface({
     firstFieldRef.current?.focus();
     pendingHandoffFocusRef.current = null;
   }, [handoffFocusNonce, open]);
+
+  useEffect(() => {
+    if (inspectCallRequest === undefined || inspectCallRequest === null || calls === undefined) return;
+    const requestedCall = rooms.some((room) => room._id === inspectCallRequest.roomId)
+      ? calls.find((call) => call._id === inspectCallRequest.callId && call.roomId === inspectCallRequest.roomId)
+      : undefined;
+    const frame = window.requestAnimationFrame(() => {
+      if (requestedCall !== undefined) {
+        openerRef.current = triggerRef.current;
+        setSelectedCallId(requestedCall._id);
+        setTitle(requestedCall.title);
+        setDetail(requestedCall.detail);
+        setRoomId(requestedCall.roomId ?? "");
+        setLinkedMoveId(requestedCall.linkedMoveId ?? "");
+        setMaxParticipants(String(requestedCall.maxParticipants));
+        setDeadlineInput(localDateTimeValue(requestedCall.deadlineAt));
+        setResolutionSummary(requestedCall.resolutionSummary ?? "");
+        setResponseDraft({ callId: null, participantVersion: -1, value: "" });
+        setStatus(null);
+        pendingHandoffFocusRef.current = inspectCallRequest.nonce;
+        setHandoffFocusNonce(inspectCallRequest.nonce);
+        setOpen(true);
+      } else {
+        onInspectCallRequestUnavailable?.();
+      }
+      onInspectCallRequestHandled?.();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [calls, inspectCallRequest, onInspectCallRequestHandled, onInspectCallRequestUnavailable, rooms]);
 
   function openComposer(event: React.MouseEvent<HTMLButtonElement>) {
     openerRef.current = event.currentTarget;
