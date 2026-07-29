@@ -7,6 +7,7 @@ This is the execution map for building Realworld as a production multiplayer wor
 - Model for delegated implementation and research: GPT-5.6 Terra.
 - Maximum active local workers: three plus the coordinator. Teams rotate through those slots by dependency priority.
 - Convex is authoritative for durable state. Ably carries disposable presence, cursor, selection, voice-adjacent signals, and other high-frequency room telemetry.
+- Human callsigns are privacy-safe presentation labels. Convex captures action-time attribution snapshots so a later rename cannot rewrite durable history; Ably presence never becomes the audit record.
 - Each team heartbeat records a state change, evidence, blocker, or exact next action. No-op heartbeats are stored silently and do not notify the founder.
 - A team may not edit outside its declared scope without a coordinator handoff.
 - “Done” requires the evidence named in `BUILD_LEDGER.md`; a commit or screenshot alone is not completion.
@@ -90,4 +91,3 @@ Every team record has:
 - `blocker`: the precise missing decision, access, dependency, or failure.
 
 The coordinator checks active teams every fifteen minutes, dispatches newly unblocked work, and reports only phase completion, decisions, new blockers, or release gates. When every Phase 8 exit gate passes, the coordinator disables its own heartbeat.
-
