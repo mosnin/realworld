@@ -25,13 +25,14 @@ Already complete:
 - [x] GitHub is connected and the authenticated release gate runs in Actions.
 - [x] Vercel is linked to the `realworld` project and has produced a preview build.
 
-The cloud-preview foundation gate has passed. Ably development setup may proceed; OpenAI and OpenRouter credentials remain gated until the bounded agent-runtime lane begins.
+The cloud-preview foundation and development Ably transport gates have passed. Participant-facing presence and live revocation remain gated; OpenAI and OpenRouter credentials remain gated until the bounded agent-runtime lane begins.
 
 ## Needed immediately after the cloud preview gate
 
 - [x] Created dedicated Ably development application `Realworld Preview Live Room` on the free account. Its revocable `preview-token-issuer` key is restricted to `rw:preview:*` channels and only publish, subscribe, and presence capabilities.
-- [x] In Convex development deployment `hallowed-snail-690`, set encrypted `REALWORLD_APP_ENV=preview` and `ABLY_API_KEY` by direct local clipboard transfer. The key was not placed in Vercel browser variables, source, chat, or Notion, and the clipboard was cleared after the successful transfer.
-- [ ] Run the first scoped connection and revocation/reconnect checks before any participant-facing presence UI. Production token issuance remains hard-disabled in code.
+- [x] In Convex development deployment `hallowed-snail-690`, set encrypted `REALWORLD_APP_ENV=preview` and a corrected `ABLY_API_KEY` through a secret-safe local transfer. The key was not placed in Vercel browser variables, source, chat, Notion, or campaign records, and temporary transfer state was removed.
+- [x] Ran the first live scoped connection, exact room-isolation, disconnect-cleanup, and reconnect checks against the protected preview. Two distinct pseudonymous owner/reviewer clients held Mission Core and Workshop capabilities respectively, teardown reached zero connections, and reconnect created a new connection. Production token issuance remains hard-disabled in code.
+- [ ] Run live membership revocation and token-expiry enforcement, including the already-issued-token boundary, before any participant-facing presence UI.
 - [ ] Choose the primary domain after naming is confirmed.
 - [ ] Create production Convex, Ably, and Vercel environments only when the production release phase begins.
 
