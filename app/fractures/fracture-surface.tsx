@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery } from "convex/react";
 
@@ -14,6 +14,7 @@ type Severity = "low" | "medium" | "high" | "critical";
 type Mission = { _id: Id<"missions">; lifecycle: string; role: string };
 type RoomOption = { _id: Id<"rooms">; title: string; x: number; y: number };
 type MoveOption = { _id: Id<"moves">; title: string; roomId?: Id<"rooms"> };
+type CreateFractureRequest = { roomId: Id<"rooms">; moveId: Id<"moves">; nonce: string };
 
 const transitions: Record<FractureStatus, FractureStatus[]> = {
   open: ["investigating", "resolved", "dismissed"],
@@ -34,7 +35,17 @@ export function FractureSurface({
   mission,
   rooms,
   moves,
-}: Readonly<{ mission: Mission; rooms: RoomOption[]; moves: MoveOption[] }>) {
+  createFractureRequest,
+  onCreateFractureRequestHandled,
+  onCreateFractureRequestUnavailable,
+}: Readonly<{
+  mission: Mission;
+  rooms: RoomOption[];
+  moves: MoveOption[];
+  createFractureRequest?: CreateFractureRequest | null;
+  onCreateFractureRequestHandled?: () => void;
+  onCreateFractureRequestUnavailable?: () => void;
+}>) {
   const fractures = useQuery(api.fractures.listMissionFractures, { missionId: mission._id });
   const createFracture = useMutation(api.fractures.createFracture);
   const updateFracture = useMutation(api.fractures.updateFracture);
@@ -42,8 +53,10 @@ export function FractureSurface({
   const commandKeys = useRef<Record<string, string>>({});
   const firstFieldRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const openerRef = useRef<HTMLButtonElement | null>(null);
   const pendingIntentRef = useRef<string | null>(null);
+  const pendingHandoffFocusRef = useRef<string | null>(null);
   const [open, setOpen] = useState(false);
   const [selectedFractureId, setSelectedFractureId] = useState<Id<"fractures"> | null>(null);
   const [title, setTitle] = useState("");
@@ -53,6 +66,7 @@ export function FractureSurface({
   const [linkedMoveId, setLinkedMoveId] = useState<Id<"moves"> | "">("");
   const [pendingIntent, setPendingIntent] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [handoffFocusNonce, setHandoffFocusNonce] = useState<string | null>(null);
   const canCreate = mission.lifecycle === "active" && ["owner", "steward", "builder", "contributor"].includes(mission.role);
   const selectedFracture = fractures?.find((fracture) => fracture._id === selectedFractureId);
   const selectedRoom = rooms.find((room) => room._id === selectedFracture?.roomId);
@@ -64,9 +78,20 @@ export function FractureSurface({
   const nextTransitions = selectedFracture === undefined || !canAdminister ? [] : transitions[selectedFracture.status];
 
   const closeSurface = useCallback(() => {
+    pendingHandoffFocusRef.current = null;
+    setHandoffFocusNonce(null);
     setOpen(false);
     window.requestAnimationFrame(() => openerRef.current?.focus());
   }, []);
+  const resetComposer = useCallback((clearStatus = true) => {
+    setSelectedFractureId(null);
+    setTitle("");
+    setDetail("");
+    setSeverity("medium");
+    setRoomId(rooms[0]?._id ?? "");
+    setLinkedMoveId("");
+    if (clearStatus) setStatus(null);
+  }, [rooms]);
 
   useEffect(() => {
     pendingIntentRef.current = pendingIntent;
@@ -100,15 +125,33 @@ export function FractureSurface({
     };
   }, [closeSurface, open]);
 
-  function resetComposer(clearStatus = true) {
-    setSelectedFractureId(null);
-    setTitle("");
-    setDetail("");
-    setSeverity("medium");
-    setRoomId(rooms[0]?._id ?? "");
-    setLinkedMoveId("");
-    if (clearStatus) setStatus(null);
-  }
+  useEffect(() => {
+    if (createFractureRequest === undefined || createFractureRequest === null) return;
+    const requestedMoveIsAvailable = canCreate
+      && rooms.some((room) => room._id === createFractureRequest.roomId)
+      && moves.some((move) => move._id === createFractureRequest.moveId && move.roomId === createFractureRequest.roomId);
+    const frame = window.requestAnimationFrame(() => {
+      if (requestedMoveIsAvailable) {
+        openerRef.current = triggerRef.current;
+        resetComposer();
+        setRoomId(createFractureRequest.roomId);
+        setLinkedMoveId(createFractureRequest.moveId);
+        pendingHandoffFocusRef.current = createFractureRequest.nonce;
+        setHandoffFocusNonce(createFractureRequest.nonce);
+        setOpen(true);
+      } else {
+        onCreateFractureRequestUnavailable?.();
+      }
+      onCreateFractureRequestHandled?.();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [canCreate, createFractureRequest, moves, onCreateFractureRequestHandled, onCreateFractureRequestUnavailable, resetComposer, rooms]);
+
+  useLayoutEffect(() => {
+    if (handoffFocusNonce === null || !open || pendingHandoffFocusRef.current !== handoffFocusNonce) return;
+    firstFieldRef.current?.focus();
+    pendingHandoffFocusRef.current = null;
+  }, [handoffFocusNonce, open]);
 
   function openComposer(event: React.MouseEvent<HTMLButtonElement>) {
     openerRef.current = event.currentTarget;
@@ -179,7 +222,7 @@ export function FractureSurface({
 
   return (
     <section className="fracture-surface" aria-label="Mission Fractures">
-      <button className="fracture-surface__trigger" onClick={openComposer} type="button"><Icon name="branch" /> {canCreate ? "Open Fractures" : "View Fractures"}{fractures === undefined ? "" : ` (${fractures.length})`}</button>
+      <button className="fracture-surface__trigger" onClick={openComposer} ref={triggerRef} type="button"><Icon name="branch" /> {canCreate ? "Open Fractures" : "View Fractures"}{fractures === undefined ? "" : ` (${fractures.length})`}</button>
       <div aria-label="Fractures anchored to Mission rooms" className="fracture-beacons" role="group">
         {fractures?.map((fracture, index) => {
           const room = rooms.find((candidate) => candidate._id === fracture.roomId);
