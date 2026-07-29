@@ -17,18 +17,20 @@ Do not paste secrets into issues, commits, Notion, or chat. Add credentials only
 - [x] Ran the Convex Auth setup flow for that stable preview origin. The development deployment received encrypted `SITE_URL`, `JWT_PRIVATE_KEY`, and `JWKS` values; no secret values were copied into source or campaign records.
 - [x] Set Vercel **Preview** environment variables `NEXT_PUBLIC_CONVEX_URL` and `NEXT_PUBLIC_APP_ENV=preview`; the Vercel-managed `CONVEX_DEPLOY_KEY` remains Preview-only.
 - [x] Built a protected preview and verified cloud account creation, callsign setup, Blank canvas Mission launch, owner reload persistence, one-use Workshop-scoped reviewer invitation acceptance in an isolated second browser session, reviewer reload persistence, room containment, and owner-side join history on 2026-07-29.
+- [x] Rebuilt the protected preview from clean cloud-preview commit `256ed7f`, preserved both cloud identities and exact room scope across redeploy, and passed the 390×844 responsive-shell gate with no document-level horizontal overflow.
+- [x] Added a fail-closed cloud-preview acceptance command that creates disposable accounts and a one-use invitation only in memory, applies Vercel automation-bypass headers to both browser contexts, and disables retained browser artifacts.
 
 Already complete:
 
 - [x] GitHub is connected and the authenticated release gate runs in Actions.
 - [x] Vercel is linked to the `realworld` project and has produced a preview build.
 
-Do not add Ably, OpenAI, or OpenRouter credentials before this cloud-preview gate passes.
+The cloud-preview foundation gate has passed. Ably development setup may proceed; OpenAI and OpenRouter credentials remain gated until the bounded agent-runtime lane begins.
 
 ## Needed immediately after the cloud preview gate
 
-- [ ] Create a dedicated Ably **development** application; keep Convex authoritative for durable state and Ably limited to ephemeral presence.
-- [ ] In the connected Convex development deployment, set encrypted `REALWORLD_APP_ENV=preview` and `ABLY_API_KEY` from that development-only Ably application. Never place the key in Vercel browser variables, source, chat, or Notion.
+- [x] Created dedicated Ably development application `Realworld Preview Live Room` on the free account. Its revocable `preview-token-issuer` key is restricted to `rw:preview:*` channels and only publish, subscribe, and presence capabilities.
+- [x] In Convex development deployment `hallowed-snail-690`, set encrypted `REALWORLD_APP_ENV=preview` and `ABLY_API_KEY` by direct local clipboard transfer. The key was not placed in Vercel browser variables, source, chat, or Notion, and the clipboard was cleared after the successful transfer.
 - [ ] Run the first scoped connection and revocation/reconnect checks before any participant-facing presence UI. Production token issuance remains hard-disabled in code.
 - [ ] Choose the primary domain after naming is confirmed.
 - [ ] Create production Convex, Ably, and Vercel environments only when the production release phase begins.
