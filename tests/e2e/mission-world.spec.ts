@@ -103,6 +103,7 @@ test("an authenticated owner can launch an honest empty Blank canvas Workshop", 
   await expect(page.getByRole("button", { name: "Ask for help" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Report a Fracture" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Submit Proof" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Open Move" })).toHaveCount(0);
 
   const createFirstMove = page.getByRole("button", { name: "Create first Move" });
   await createFirstMove.focus();
@@ -139,6 +140,22 @@ test("an authenticated owner can launch an honest empty Blank canvas Workshop", 
   await workshopWork.getByRole("button", { name: new RegExp(firstMoveTitle) }).click();
   await expect(page.getByLabel("Selected durable context")).toContainText(firstMoveTitle);
   await expect(page.getByLabel("Selected durable context")).toContainText(firstMoveIntent);
+
+  const openMove = page.getByRole("button", { name: "Open Move" });
+  await openMove.focus();
+  await expect(openMove).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Blank canvas" })).toBeVisible();
+  await expect(moveBoard).toBeVisible();
+  const openedMoveArticle = moveBoard.getByRole("article", { name: `Move ${firstMoveTitle}` });
+  await expect(openedMoveArticle).toBeFocused();
+  await expect(openedMoveArticle).toContainText(firstMoveTitle);
+  await expect(openedMoveArticle).toContainText(firstMoveIntent);
+  await expect(openedMoveArticle).toContainText("proposed");
+  await moveBoard.getByRole("button", { name: "Close Moves" }).click();
+  await expect(page.getByRole("button", { name: /Open Moves/ })).toBeFocused();
+  await enterWorkshop(page);
+  await workshopWork.getByRole("button", { name: new RegExp(firstMoveTitle) }).click();
 
   const askForHelp = page.getByRole("button", { name: "Ask for help" });
   await expect(askForHelp).toBeVisible();

@@ -370,6 +370,7 @@ function Workshop({
   fractures,
   proofs,
   onCreateFirstMove,
+  onOpenMove,
   onAskForHelp,
   onReportFracture,
   onSubmitProof,
@@ -387,6 +388,7 @@ function Workshop({
   fractures: WorkshopFracture[] | undefined;
   proofs: WorkshopProof[] | undefined;
   onCreateFirstMove: () => void;
+  onOpenMove: (moveId: Id<"moves">) => void;
   onAskForHelp: (moveId: Id<"moves">) => void;
   onReportFracture: (moveId: Id<"moves">) => void;
   onSubmitProof: (moveId: Id<"moves">) => void;
@@ -536,6 +538,7 @@ function Workshop({
                   </li>)}
                 </ul>}
               </section> : null}
+              {selectedContext.kind === "Move" ? <button className="secondary-button" onClick={() => onOpenMove(selectedContext.moveId)} type="button">Open Move</button> : null}
               {selectedContext.kind === "Move" && canAskForHelp ? <button className="secondary-button" onClick={() => onAskForHelp(selectedContext.moveId)} type="button">Ask for help</button> : null}
               {selectedContext.kind === "Move" && canReportFracture ? <button className="secondary-button" onClick={() => onReportFracture(selectedContext.moveId)} type="button">Report a Fracture</button> : null}
               {selectedContext.kind === "Move" && canSubmitProof ? <button className="secondary-button" onClick={() => onSubmitProof(selectedContext.moveId)} type="button">Submit Proof</button> : null}
@@ -647,6 +650,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   const [createCallRequest, setCreateCallRequest] = useState<{ roomId: Id<"rooms">; moveId: Id<"moves">; nonce: string } | null>(null);
   const [createFractureRequest, setCreateFractureRequest] = useState<{ roomId: Id<"rooms">; moveId: Id<"moves">; nonce: string } | null>(null);
   const [createProofRequest, setCreateProofRequest] = useState<{ roomId: Id<"rooms">; moveId: Id<"moves">; nonce: string } | null>(null);
+  const [inspectMoveRequest, setInspectMoveRequest] = useState<{ moveId: Id<"moves">; roomId: Id<"rooms">; nonce: string } | null>(null);
   const [inspectCallRequest, setInspectCallRequest] = useState<{ callId: Id<"calls">; roomId: Id<"rooms">; nonce: string } | null>(null);
   const [inspectFractureRequest, setInspectFractureRequest] = useState<{ fractureId: Id<"fractures">; roomId: Id<"rooms">; nonce: string } | null>(null);
   const [inspectProofRequest, setInspectProofRequest] = useState<{ proofId: Id<"proofs">; roomId: Id<"rooms">; nonce: string } | null>(null);
@@ -675,6 +679,12 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
     setRoomError("That work is no longer available.");
     requestAnimationFrame(() => document.getElementById("main-content")?.focus());
   }, [setCreateProofRequest, setRoomError]);
+  const handleInspectMoveRequestHandled = useCallback(() => setInspectMoveRequest(null), [setInspectMoveRequest]);
+  const handleInspectMoveRequestUnavailable = useCallback(() => {
+    setInspectMoveRequest(null);
+    setRoomError("That work is no longer available.");
+    requestAnimationFrame(() => document.getElementById("main-content")?.focus());
+  }, [setInspectMoveRequest, setRoomError]);
   const handleInspectCallRequestHandled = useCallback(() => setInspectCallRequest(null), [setInspectCallRequest]);
   const handleInspectCallRequestUnavailable = useCallback(() => {
     setInspectCallRequest(null);
@@ -808,6 +818,12 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
     setView("world");
   }
 
+  function openMoveFromWorkshop(moveId: Id<"moves">) {
+    if (selectedRoomRecord === undefined) return;
+    setInspectMoveRequest({ moveId, roomId: selectedRoomRecord.id as Id<"rooms">, nonce: crypto.randomUUID() });
+    setView("world");
+  }
+
   function askForHelpFromWorkshop(moveId: Id<"moves">) {
     if (selectedRoomRecord === undefined) return;
     setCreateCallRequest({ roomId: selectedRoomRecord.id as Id<"rooms">, moveId, nonce: crypto.randomUUID() });
@@ -873,6 +889,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
     setCreateCallRequest(null);
     setCreateFractureRequest(null);
     setCreateProofRequest(null);
+    setInspectMoveRequest(null);
     setInspectCallRequest(null);
     setInspectFractureRequest(null);
     setInspectProofRequest(null);
@@ -997,7 +1014,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   const missionWritable = activeMission.lifecycle === "active";
 
   if (view === "workshop" && selectedRoomRecord !== undefined) {
-    return <><AuthenticatedMissionRealtimeLifecycle authenticatedTokenRequester={requestAuthenticatedRealtimeToken} expectedMissionId={activeMission._id} expectedRoomId={selectedRoomRecord.id} membershipGrantVersion={activeMission.grantVersion} readiness={realtimeRoomReadiness} transportFactory={developmentRealtimeTransportFactory} /><Workshop calls={missionCalls} fractures={isObserver ? [] : missionFractures} initialSelectedContextKey={workshopContextRequest?.roomId === selectedRoomRecord.id ? workshopContextRequest.key : null} mission={activeMission} moves={missionMoves} onAskForHelp={askForHelpFromWorkshop} onCreateFirstMove={createFirstMoveFromWorkshop} onExit={() => setView("world")} onOpenCall={openCallFromWorkshop} onOpenFracture={openFractureFromWorkshop} onOpenProof={openProofFromWorkshop} onReportFracture={reportFractureFromWorkshop} onSubmitProof={submitProofFromWorkshop} proofs={isObserver ? [] : missionProofs} roomId={selectedRoomRecord.id as Id<"rooms">} roomTitle={selectedRoomRecord.name} /></>;
+    return <><AuthenticatedMissionRealtimeLifecycle authenticatedTokenRequester={requestAuthenticatedRealtimeToken} expectedMissionId={activeMission._id} expectedRoomId={selectedRoomRecord.id} membershipGrantVersion={activeMission.grantVersion} readiness={realtimeRoomReadiness} transportFactory={developmentRealtimeTransportFactory} /><Workshop calls={missionCalls} fractures={isObserver ? [] : missionFractures} initialSelectedContextKey={workshopContextRequest?.roomId === selectedRoomRecord.id ? workshopContextRequest.key : null} mission={activeMission} moves={missionMoves} onAskForHelp={askForHelpFromWorkshop} onCreateFirstMove={createFirstMoveFromWorkshop} onExit={() => setView("world")} onOpenCall={openCallFromWorkshop} onOpenFracture={openFractureFromWorkshop} onOpenMove={openMoveFromWorkshop} onOpenProof={openProofFromWorkshop} onReportFracture={reportFractureFromWorkshop} onSubmitProof={submitProofFromWorkshop} proofs={isObserver ? [] : missionProofs} roomId={selectedRoomRecord.id as Id<"rooms">} roomTitle={selectedRoomRecord.name} /></>;
   }
 
   return (
@@ -1058,10 +1075,13 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
         <ConstitutionControls mission={activeMission} />
         <MoveBoard
           createMoveRequest={createMoveRequest}
+          inspectMoveRequest={inspectMoveRequest}
           key={activeMission._id}
           mission={activeMission}
           onCreateMoveRequestHandled={handleCreateMoveRequestHandled}
           onCreateMoveRequestUnavailable={handleCreateMoveRequestUnavailable}
+          onInspectMoveRequestHandled={handleInspectMoveRequestHandled}
+          onInspectMoveRequestUnavailable={handleInspectMoveRequestUnavailable}
           onViewCreatedMove={viewCreatedMoveInWorkshop}
           rooms={roomRecords.map((room) => ({ _id: room._id, title: room.title }))}
         />

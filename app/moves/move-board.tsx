@@ -33,6 +33,12 @@ type CreateMoveRequest = {
   nonce: string;
 };
 
+type InspectMoveRequest = {
+  moveId: Id<"moves">;
+  roomId: Id<"rooms">;
+  nonce: string;
+};
+
 type CreatedMove = {
   roomId: Id<"rooms">;
   moveId: Id<"moves">;
@@ -57,6 +63,9 @@ export function MoveBoard({
   createMoveRequest,
   onCreateMoveRequestHandled,
   onCreateMoveRequestUnavailable,
+  inspectMoveRequest,
+  onInspectMoveRequestHandled,
+  onInspectMoveRequestUnavailable,
   onViewCreatedMove,
 }: Readonly<{
   mission: Mission;
@@ -64,6 +73,9 @@ export function MoveBoard({
   createMoveRequest?: CreateMoveRequest | null;
   onCreateMoveRequestHandled?: () => void;
   onCreateMoveRequestUnavailable?: () => void;
+  inspectMoveRequest?: InspectMoveRequest | null;
+  onInspectMoveRequestHandled?: () => void;
+  onInspectMoveRequestUnavailable?: () => void;
   onViewCreatedMove?: (createdMove: CreatedMove) => void;
 }>) {
   const moves = useQuery(api.moves.listMissionMoves, { missionId: mission._id });
@@ -73,7 +85,9 @@ export function MoveBoard({
   const commandKeys = useRef<Record<string, string>>({});
   const openerRef = useRef<HTMLButtonElement>(null);
   const createTitleRef = useRef<HTMLInputElement>(null);
+  const inspectedMoveRef = useRef<HTMLElement>(null);
   const pendingHandoffFocusRef = useRef<string | null>(null);
+  const pendingInspectionFocusRef = useRef<string | null>(null);
   const [open, setOpen] = useState(false);
   const [createTitle, setCreateTitle] = useState("");
   const [createIntent, setCreateIntent] = useState("");
@@ -86,6 +100,8 @@ export function MoveBoard({
   const [pendingIntent, setPendingIntent] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [handoffFocusNonce, setHandoffFocusNonce] = useState<string | null>(null);
+  const [inspectionFocusNonce, setInspectionFocusNonce] = useState<string | null>(null);
+  const [inspectionFocusMoveId, setInspectionFocusMoveId] = useState<Id<"moves"> | null>(null);
   const [firstMoveRoomId, setFirstMoveRoomId] = useState<Id<"rooms"> | null>(null);
   const [createdFirstMove, setCreatedFirstMove] = useState<CreatedMove | null>(null);
   const canWrite =
@@ -112,14 +128,53 @@ export function MoveBoard({
   }, [canWrite, createMoveRequest, onCreateMoveRequestHandled, onCreateMoveRequestUnavailable, rooms]);
 
   useLayoutEffect(() => {
-    if (handoffFocusNonce === null || !open || pendingHandoffFocusRef.current !== handoffFocusNonce) return;
-    createTitleRef.current?.focus();
+    if (!open) return;
+    if (handoffFocusNonce !== null && pendingHandoffFocusRef.current === handoffFocusNonce) {
+      createTitleRef.current?.focus();
+      pendingHandoffFocusRef.current = null;
+    }
+    if (inspectionFocusNonce !== null && pendingInspectionFocusRef.current === inspectionFocusNonce) {
+      inspectedMoveRef.current?.focus();
+      pendingInspectionFocusRef.current = null;
+    }
+  }, [handoffFocusNonce, inspectionFocusNonce, open]);
+
+  useEffect(() => {
+    if (inspectMoveRequest === undefined || inspectMoveRequest === null || moves === undefined) return;
+    const requestedMove = rooms.some((room) => room._id === inspectMoveRequest.roomId)
+      ? moves.find((move) => move._id === inspectMoveRequest.moveId && move.roomId === inspectMoveRequest.roomId)
+      : undefined;
+    const frame = window.requestAnimationFrame(() => {
+      if (requestedMove !== undefined) {
+        setEditingId(null);
+        setFirstMoveRoomId(null);
+        setCreatedFirstMove(null);
+        setStatus(null);
+        pendingHandoffFocusRef.current = null;
+        setHandoffFocusNonce(null);
+        setInspectionFocusMoveId(requestedMove._id);
+        pendingInspectionFocusRef.current = inspectMoveRequest.nonce;
+        setInspectionFocusNonce(inspectMoveRequest.nonce);
+        setOpen(true);
+      } else {
+        onInspectMoveRequestUnavailable?.();
+      }
+      onInspectMoveRequestHandled?.();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [inspectMoveRequest, moves, onInspectMoveRequestHandled, onInspectMoveRequestUnavailable, rooms]);
+
+  useEffect(() => () => {
     pendingHandoffFocusRef.current = null;
-  }, [handoffFocusNonce, open]);
+    pendingInspectionFocusRef.current = null;
+  }, []);
 
   function close() {
     pendingHandoffFocusRef.current = null;
+    pendingInspectionFocusRef.current = null;
     setHandoffFocusNonce(null);
+    setInspectionFocusNonce(null);
+    setInspectionFocusMoveId(null);
     setFirstMoveRoomId(null);
     setCreatedFirstMove(null);
     setOpen(false);
@@ -322,7 +377,11 @@ export function MoveBoard({
                   .map((dependency) => dependency.title);
                 return (
                   <li key={move._id}>
-                    <article aria-label={`Move ${move.title}`}>
+                    <article
+                      aria-label={`Move ${move.title}`}
+                      ref={inspectionFocusMoveId === move._id ? inspectedMoveRef : undefined}
+                      tabIndex={inspectionFocusMoveId === move._id ? -1 : undefined}
+                    >
                       <header>
                         <strong>{move.title}</strong>
                         <span>{stateLabel(move.state)}</span>
