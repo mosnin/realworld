@@ -546,6 +546,7 @@ test.describe("on a phone-sized Mission World", () => {
     await page.goto("/");
 
     await expect(page.getByRole("heading", { name: "Company sprint" })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     const mobileToolbar = page.getByLabel("Mission World view controls");
     await expect.poll(() => mobileToolbar.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
     const viewport = page.viewportSize();
