@@ -331,7 +331,7 @@ type WorkshopCall = {
 };
 
 type WorkshopContext =
-  | { key: string; kind: "Move"; title: string; detail: string; state: string; version: number; updatedAt: number }
+  | { key: string; kind: "Move"; moveId: Id<"moves">; title: string; detail: string; state: string; version: number; updatedAt: number }
   | { key: string; kind: "Call"; title: string; detail: string; state: string; joinedCount: number; maxParticipants: number; version: number; updatedAt: number };
 
 function Workshop({
@@ -341,6 +341,7 @@ function Workshop({
   moves,
   calls,
   onCreateFirstMove,
+  onAskForHelp,
   initialSelectedContextKey,
   onExit,
 }: Readonly<{
@@ -350,6 +351,7 @@ function Workshop({
   moves: WorkshopMove[] | undefined;
   calls: WorkshopCall[] | undefined;
   onCreateFirstMove: () => void;
+  onAskForHelp: (moveId: Id<"moves">) => void;
   initialSelectedContextKey: string | null;
   onExit: () => void;
 }>) {
@@ -359,6 +361,7 @@ function Workshop({
     ...(moves ?? []).filter((move) => move.roomId === roomId).map((move) => ({
       key: `move:${move._id}`,
       kind: "Move" as const,
+      moveId: move._id,
       title: move.title,
       detail: move.intent,
       state: move.state,
@@ -383,6 +386,7 @@ function Workshop({
     : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(selectedContext.updatedAt);
   const isArchived = mission.lifecycle === "archived";
   const canCreateFirstMove = mission.lifecycle === "active" && ["owner", "steward", "builder"].includes(mission.role);
+  const canAskForHelp = mission.lifecycle === "active" && ["owner", "steward", "builder", "contributor"].includes(mission.role);
 
   return (
     <div className="workshop-view" aria-labelledby="workshop-heading">
@@ -433,6 +437,7 @@ function Workshop({
                 <div><dt>Version</dt><dd>{selectedContext.version}</dd></div>
                 <div><dt>Updated</dt><dd>{selectedUpdatedAt}</dd></div>
               </dl>
+              {selectedContext.kind === "Move" && canAskForHelp ? <button className="secondary-button" onClick={() => onAskForHelp(selectedContext.moveId)} type="button">Ask for help</button> : null}
             </>}
           </article>
         </main>
@@ -532,6 +537,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   const [invitePanelOpen, setInvitePanelOpen] = useState(false);
   const [newMissionOpen, setNewMissionOpen] = useState(false);
   const [createMoveRequest, setCreateMoveRequest] = useState<{ roomId: Id<"rooms">; nonce: string } | null>(null);
+  const [createCallRequest, setCreateCallRequest] = useState<{ roomId: Id<"rooms">; moveId: Id<"moves">; nonce: string } | null>(null);
   const [workshopContextRequest, setWorkshopContextRequest] = useState<{ roomId: Id<"rooms">; key: string } | null>(null);
   const [loadedPreferencesMissionId, setLoadedPreferencesMissionId] = useState<Id<"missions"> | null>(null);
   const [canvas, setCanvas] = useState<CanvasState>(defaultCanvasState);
@@ -539,6 +545,12 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   const [roomError, setRoomError] = useState<string | null>(null);
   const handleCreateMoveRequestHandled = useCallback(() => setCreateMoveRequest(null), [setCreateMoveRequest]);
   const handleCreateMoveRequestUnavailable = useCallback(() => setRoomError("That room is no longer available."), [setRoomError]);
+  const handleCreateCallRequestHandled = useCallback(() => setCreateCallRequest(null), [setCreateCallRequest]);
+  const handleCreateCallRequestUnavailable = useCallback(() => {
+    setCreateCallRequest(null);
+    setRoomError("That work is no longer available.");
+    requestAnimationFrame(() => document.getElementById("main-content")?.focus());
+  }, [setCreateCallRequest, setRoomError]);
   const canvasRooms = roomRecords?.map((room) => canvasRoom(room, roomMoveSignal(room._id, missionMoves))) ?? [];
   const selectedRoomRecord = canvasRooms.find((room) => room.id === selectedRoomId);
   const selectedRoom = selectedRoomRecord ?? canvasRooms[0];
@@ -643,6 +655,12 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
     setView("world");
   }
 
+  function askForHelpFromWorkshop(moveId: Id<"moves">) {
+    if (selectedRoomRecord === undefined) return;
+    setCreateCallRequest({ roomId: selectedRoomRecord.id as Id<"rooms">, moveId, nonce: crypto.randomUUID() });
+    setView("world");
+  }
+
   function inspectWorkshopContext(roomId: Id<"rooms">, key: string) {
     if (!canvasRooms.some((room) => room.id === roomId)) {
       setWorkshopContextRequest(null);
@@ -669,6 +687,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
     setSelectedRoomId("");
     setView("world");
     setCreateMoveRequest(null);
+    setCreateCallRequest(null);
     setWorkshopContextRequest(null);
     setInvitePanelOpen(false);
     setRoomError(null);
@@ -790,7 +809,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   const missionWritable = activeMission.lifecycle === "active";
 
   if (view === "workshop" && selectedRoomRecord !== undefined) {
-    return <><AuthenticatedMissionRealtimeLifecycle authenticatedTokenRequester={requestAuthenticatedRealtimeToken} expectedMissionId={activeMission._id} expectedRoomId={selectedRoomRecord.id} membershipGrantVersion={activeMission.grantVersion} readiness={realtimeRoomReadiness} transportFactory={developmentRealtimeTransportFactory} /><Workshop calls={missionCalls} initialSelectedContextKey={workshopContextRequest?.roomId === selectedRoomRecord.id ? workshopContextRequest.key : null} mission={activeMission} moves={missionMoves} onCreateFirstMove={createFirstMoveFromWorkshop} onExit={() => setView("world")} roomId={selectedRoomRecord.id as Id<"rooms">} roomTitle={selectedRoomRecord.name} /></>;
+    return <><AuthenticatedMissionRealtimeLifecycle authenticatedTokenRequester={requestAuthenticatedRealtimeToken} expectedMissionId={activeMission._id} expectedRoomId={selectedRoomRecord.id} membershipGrantVersion={activeMission.grantVersion} readiness={realtimeRoomReadiness} transportFactory={developmentRealtimeTransportFactory} /><Workshop calls={missionCalls} initialSelectedContextKey={workshopContextRequest?.roomId === selectedRoomRecord.id ? workshopContextRequest.key : null} mission={activeMission} moves={missionMoves} onAskForHelp={askForHelpFromWorkshop} onCreateFirstMove={createFirstMoveFromWorkshop} onExit={() => setView("world")} roomId={selectedRoomRecord.id as Id<"rooms">} roomTitle={selectedRoomRecord.name} /></>;
   }
 
   return (
@@ -896,8 +915,11 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
               </svg>
               {visibleRooms.map((room) => <RoomLandmark key={room.id} locked={canvas.locked || !canManageCanvas} navigationRooms={visibleRooms} onReposition={repositionRoom} room={room} selected={selectedRoom.id === room.id} onSelect={setSelectedRoomId} onEnter={enterRoom} />)}
               <CallSurface
+                createCallRequest={createCallRequest}
                 key={activeMission._id}
                 mission={activeMission}
+                onCreateCallRequestHandled={handleCreateCallRequestHandled}
+                onCreateCallRequestUnavailable={handleCreateCallRequestUnavailable}
                 moves={(missionMoves ?? []).map((move) => ({ _id: move._id, title: move.title, roomId: move.roomId }))}
                 rooms={canvasRooms.map((room) => ({ _id: room.id as Id<"rooms">, title: room.name, x: room.x, y: room.y }))}
               />

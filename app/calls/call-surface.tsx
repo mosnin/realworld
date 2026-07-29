@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery } from "convex/react";
 
@@ -27,6 +27,12 @@ type MoveOption = {
   _id: Id<"moves">;
   title: string;
   roomId?: Id<"rooms">;
+};
+
+type CreateCallRequest = {
+  roomId: Id<"rooms">;
+  moveId: Id<"moves">;
+  nonce: string;
 };
 
 const transitions: Partial<Record<CallStatus, CallStatus[]>> = {
@@ -68,10 +74,16 @@ export function CallSurface({
   mission,
   rooms,
   moves,
+  createCallRequest,
+  onCreateCallRequestHandled,
+  onCreateCallRequestUnavailable,
 }: Readonly<{
   mission: Mission;
   rooms: RoomOption[];
   moves: MoveOption[];
+  createCallRequest?: CreateCallRequest | null;
+  onCreateCallRequestHandled?: () => void;
+  onCreateCallRequestUnavailable?: () => void;
 }>) {
   const calls = useQuery(api.calls.listMissionCalls, { missionId: mission._id });
   const createCall = useMutation(api.calls.createCall);
@@ -83,8 +95,10 @@ export function CallSurface({
   const commandKeys = useRef<Record<string, string>>({});
   const firstFieldRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const openerRef = useRef<HTMLButtonElement | null>(null);
   const pendingIntentRef = useRef<string | null>(null);
+  const pendingHandoffFocusRef = useRef<string | null>(null);
   const [open, setOpen] = useState(false);
   const [selectedCallId, setSelectedCallId] = useState<Id<"calls"> | null>(null);
   const [title, setTitle] = useState("");
@@ -97,6 +111,7 @@ export function CallSurface({
   const [responseDraft, setResponseDraft] = useState<{ callId: Id<"calls"> | null; participantVersion: number; value: string }>({ callId: null, participantVersion: -1, value: "" });
   const [pendingIntent, setPendingIntent] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [handoffFocusNonce, setHandoffFocusNonce] = useState<string | null>(null);
   const participants = useQuery(
     api.calls.listCallParticipants,
     selectedCallId === null ? "skip" : { callId: selectedCallId },
@@ -121,9 +136,23 @@ export function CallSurface({
     ? responseDraft.value
     : currentParticipant?.response ?? "";
   const closeSurface = useCallback(() => {
+    pendingHandoffFocusRef.current = null;
+    setHandoffFocusNonce(null);
     setOpen(false);
     window.requestAnimationFrame(() => openerRef.current?.focus());
   }, []);
+  const resetComposer = useCallback((clearStatus = true) => {
+    setSelectedCallId(null);
+    setTitle("");
+    setDetail("");
+    setRoomId(rooms[0]?._id ?? "");
+    setLinkedMoveId("");
+    setMaxParticipants("50");
+    setDeadlineInput("");
+    setResolutionSummary("");
+    setResponseDraft({ callId: null, participantVersion: -1, value: "" });
+    if (clearStatus) setStatus(null);
+  }, [rooms]);
 
   useEffect(() => {
     pendingIntentRef.current = pendingIntent;
@@ -157,18 +186,33 @@ export function CallSurface({
     };
   }, [closeSurface, open]);
 
-  function resetComposer(clearStatus = true) {
-    setSelectedCallId(null);
-    setTitle("");
-    setDetail("");
-    setRoomId(rooms[0]?._id ?? "");
-    setLinkedMoveId("");
-    setMaxParticipants("50");
-    setDeadlineInput("");
-    setResolutionSummary("");
-    setResponseDraft({ callId: null, participantVersion: -1, value: "" });
-    if (clearStatus) setStatus(null);
-  }
+  useEffect(() => {
+    if (createCallRequest === undefined || createCallRequest === null) return;
+    const requestedMoveIsAvailable = canCreate
+      && rooms.some((room) => room._id === createCallRequest.roomId)
+      && moves.some((move) => move._id === createCallRequest.moveId && move.roomId === createCallRequest.roomId);
+    const frame = window.requestAnimationFrame(() => {
+      if (requestedMoveIsAvailable) {
+        openerRef.current = triggerRef.current;
+        resetComposer();
+        setRoomId(createCallRequest.roomId);
+        setLinkedMoveId(createCallRequest.moveId);
+        pendingHandoffFocusRef.current = createCallRequest.nonce;
+        setHandoffFocusNonce(createCallRequest.nonce);
+        setOpen(true);
+      } else {
+        onCreateCallRequestUnavailable?.();
+      }
+      onCreateCallRequestHandled?.();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [canCreate, createCallRequest, moves, onCreateCallRequestHandled, onCreateCallRequestUnavailable, resetComposer, rooms]);
+
+  useLayoutEffect(() => {
+    if (handoffFocusNonce === null || !open || pendingHandoffFocusRef.current !== handoffFocusNonce) return;
+    firstFieldRef.current?.focus();
+    pendingHandoffFocusRef.current = null;
+  }, [handoffFocusNonce, open]);
 
   function openComposer(event: React.MouseEvent<HTMLButtonElement>) {
     openerRef.current = event.currentTarget;
@@ -311,7 +355,7 @@ export function CallSurface({
 
   return (
     <section className="call-surface" aria-label="Mission Calls">
-      <button className="call-surface__trigger" onClick={openComposer} type="button">
+      <button className="call-surface__trigger" onClick={openComposer} ref={triggerRef} type="button">
         <Icon name="spark" /> {canCreate ? "Issue Call" : "View Calls"}{calls === undefined ? "" : ` (${calls.length})`}
       </button>
 
