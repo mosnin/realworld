@@ -1039,6 +1039,7 @@ test("a scoped observer receives a stable read-only Mission shell without privat
     await expect(observer.getByLabel("Mission activity Pulse")).toHaveCount(0);
     await page.getByRole("button", { name: /^Workshop\./ }).click();
     await page.getByRole("button", { name: "Archive room" }).click();
+    await expect(page.getByRole("button", { name: /^Workshop\./ })).toHaveCount(0);
     await expect(observer.getByRole("heading", { name: "This room is no longer available." })).toBeVisible({ timeout: 15_000 });
     await expect(observer.getByRole("list", { name: "Available durable work" })).toHaveCount(0);
     expect(runtimeErrors).toEqual([]);
