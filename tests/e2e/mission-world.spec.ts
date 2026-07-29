@@ -432,7 +432,8 @@ test("a participant can inspect and enter Workshop from the Mission World", asyn
   await expectWorkshopContext(page);
   await expect.poll(() => new URL(page.url()).hash).toBe(`${workshopWorldHash}/work`);
   await page.reload();
-  await expectWorkshopContext(page);
+  await expect(page.getByRole("heading", { name: "Durable work in Workshop." })).toBeVisible();
+  await expect(page.getByRole("article", { name: "Durable room context" })).toBeVisible();
   await expect.poll(() => new URL(page.url()).hash).toBe(`${workshopWorldHash}/work`);
   await expect(page.locator("#main-content")).toBeFocused();
   const exitWorkshop = page.getByRole("button", { name: "Mission World" });
