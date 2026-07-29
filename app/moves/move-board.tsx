@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery } from "convex/react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
@@ -28,6 +28,11 @@ type RoomOption = {
   title: string;
 };
 
+type CreateMoveRequest = {
+  roomId: Id<"rooms">;
+  nonce: string;
+};
+
 const transitions: Partial<Record<MoveState, MoveState[]>> = {
   proposed: ["ready", "cancelled"],
   ready: ["inProgress", "blocked", "cancelled"],
@@ -44,12 +49,23 @@ function stateLabel(state: MoveState) {
 export function MoveBoard({
   mission,
   rooms,
-}: Readonly<{ mission: Mission; rooms: RoomOption[] }>) {
+  createMoveRequest,
+  onCreateMoveRequestHandled,
+  onCreateMoveRequestUnavailable,
+}: Readonly<{
+  mission: Mission;
+  rooms: RoomOption[];
+  createMoveRequest?: CreateMoveRequest | null;
+  onCreateMoveRequestHandled?: () => void;
+  onCreateMoveRequestUnavailable?: () => void;
+}>) {
   const moves = useQuery(api.moves.listMissionMoves, { missionId: mission._id });
   const createMove = useMutation(api.moves.createMove);
   const updateMove = useMutation(api.moves.updateMove);
   const transitionMove = useMutation(api.moves.transitionMove);
   const commandKeys = useRef<Record<string, string>>({});
+  const openerRef = useRef<HTMLButtonElement>(null);
+  const createTitleRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [createTitle, setCreateTitle] = useState("");
   const [createIntent, setCreateIntent] = useState("");
@@ -64,6 +80,27 @@ export function MoveBoard({
   const canWrite =
     mission.lifecycle === "active" &&
     ["owner", "steward", "builder"].includes(mission.role);
+
+  useEffect(() => {
+    if (createMoveRequest === undefined || createMoveRequest === null) return;
+    const requestedRoomIsAvailable = canWrite && rooms.some((room) => room._id === createMoveRequest.roomId);
+    const frame = window.requestAnimationFrame(() => {
+      if (requestedRoomIsAvailable) {
+        setCreateRoomId(createMoveRequest.roomId);
+        setOpen(true);
+        window.requestAnimationFrame(() => createTitleRef.current?.focus());
+      } else {
+        onCreateMoveRequestUnavailable?.();
+      }
+      onCreateMoveRequestHandled?.();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [canWrite, createMoveRequest, onCreateMoveRequestHandled, onCreateMoveRequestUnavailable, rooms]);
+
+  function close() {
+    setOpen(false);
+    window.requestAnimationFrame(() => openerRef.current?.focus());
+  }
 
   async function runCommand(
     intent: string,
@@ -150,7 +187,7 @@ export function MoveBoard({
 
   return (
     <section className="move-board" aria-label="Mission Moves">
-      <button onClick={() => setOpen(true)} type="button">
+      <button onClick={() => setOpen(true)} ref={openerRef} type="button">
         Open Moves{moves === undefined ? "" : ` (${moves.length})`}
       </button>
       {open ? (
@@ -169,7 +206,7 @@ export function MoveBoard({
               aria-label="Close Moves"
               className="icon-button"
               disabled={pendingIntent !== null}
-              onClick={() => setOpen(false)}
+              onClick={close}
               type="button"
             >
               ×
@@ -195,6 +232,7 @@ export function MoveBoard({
                 <input
                   disabled={pendingIntent !== null}
                   onChange={(event) => setCreateTitle(event.target.value)}
+                  ref={createTitleRef}
                   required
                   value={createTitle}
                 />

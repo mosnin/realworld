@@ -69,6 +69,9 @@ test("a new participant must complete and retains the callsign setup gate before
 });
 
 test("an authenticated owner can launch an honest empty Blank canvas Workshop", async ({ page }) => {
+  const firstMoveTitle = "Frame the first Blank canvas outcome";
+  const firstMoveIntent = "Turn the empty Workshop into accountable durable work.";
+
   await page.getByRole("button", { name: "New Mission" }).click();
   const launcher = page.getByRole("dialog", { name: "Choose a work shape" });
   await launcher.getByRole("button", { name: "Launch Blank canvas" }).click();
@@ -85,11 +88,42 @@ test("an authenticated owner can launch an honest empty Blank canvas Workshop", 
   await expect(page.getByRole("list", { name: "Available durable work" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Select a Move or Call." })).toBeVisible();
 
+  const createFirstMove = page.getByRole("button", { name: "Create first Move" });
+  await createFirstMove.focus();
+  await expect(createFirstMove).toBeFocused();
+  await page.keyboard.press("Enter");
+
+  await expect(page.getByRole("heading", { name: "Blank canvas" })).toBeVisible();
+  const moveBoard = page.getByRole("dialog", { name: "Turn intent into progress" });
+  await expect(moveBoard).toBeVisible();
+  await expect(moveBoard.getByLabel("Room").locator("option:checked")).toHaveText("Workshop");
+  const moveTitle = moveBoard.getByLabel("Move title");
+  await expect(moveTitle).toBeFocused();
+  await moveTitle.fill(firstMoveTitle);
+  await moveBoard.getByLabel("Move intent").fill(firstMoveIntent);
+  await moveBoard.getByRole("button", { name: "Create Move" }).click();
+  await expect(moveBoard.getByText("Move created.")).toBeVisible();
+  await moveBoard.getByRole("button", { name: "Close Moves" }).click();
+  await expect(page.getByRole("button", { name: /Open Moves \(1\)/ })).toBeFocused();
+
+  await enterWorkshop(page);
+  const workshopWork = page.getByRole("list", { name: "Available durable work" });
+  await expect(page.getByText("No durable Moves or Calls are scoped to this room yet.")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Create first Move" })).toHaveCount(0);
+  await expect(workshopWork.getByRole("button")).toHaveCount(1);
+  await workshopWork.getByRole("button", { name: new RegExp(firstMoveTitle) }).click();
+  await expect(page.getByLabel("Selected durable context")).toContainText(firstMoveTitle);
+  await expect(page.getByLabel("Selected durable context")).toContainText(firstMoveIntent);
+
   await page.reload();
   await expect(page.getByRole("heading", { name: "Blank canvas" })).toBeVisible();
   await enterWorkshop(page);
-  await expect(page.getByText("No durable Moves or Calls are scoped to this room yet.")).toBeVisible();
-  await expect(page.getByRole("list", { name: "Available durable work" })).toHaveCount(0);
+  const reloadedWorkshopWork = page.getByRole("list", { name: "Available durable work" });
+  await expect(page.getByText("No durable Moves or Calls are scoped to this room yet.")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Create first Move" })).toHaveCount(0);
+  await expect(reloadedWorkshopWork.getByRole("button")).toHaveCount(1);
+  await reloadedWorkshopWork.getByRole("button", { name: new RegExp(firstMoveTitle) }).click();
+  await expect(page.getByLabel("Selected durable context")).toContainText(firstMoveIntent);
 });
 
 test("a participant can inspect and enter Workshop from the Mission World", async ({ page }) => {
