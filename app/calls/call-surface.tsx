@@ -140,7 +140,7 @@ export function CallSurface({
   const selectedCallMove = moves.find((move) => move._id === selectedCall?.linkedMoveId);
   const selectedTransitions = selectedCall === undefined ? [] : transitions[selectedCall.status] ?? [];
   const isTerminalCall = selectedCall?.status === "resolved" || selectedCall?.status === "cancelled";
-  const isEditableCall = selectedCall === undefined ? canCreate : Boolean(selectedCall?.canAdminister) && !isTerminalCall;
+  const isEditableCall = selectedCall === undefined ? canCreate : canCreate && Boolean(selectedCall?.canAdminister) && !isTerminalCall;
   const currentParticipant = participants?.find((participant) => participant.isCurrentUser);
   const canChangeParticipation = canParticipate && !isTerminalCall && selectedCall !== undefined;
   const remainingSlots = selectedCall === undefined ? 0 : Math.max(0, selectedCall.maxParticipants - selectedCall.joinedCount);
@@ -483,7 +483,7 @@ export function CallSurface({
             </form>
           ) : isEditableCall ? <p>No writable Room is available for a Call.</p> : null}
 
-          {selectedCall !== undefined && selectedCall.canAdminister && selectedTransitions.length > 0 ? (
+          {selectedCall !== undefined && canCreate && selectedCall.canAdminister && selectedTransitions.length > 0 ? (
             <section aria-label={`Call actions for ${selectedCall.title}`} className="call-actions">
               <p><strong>{selectedCall.title}</strong> <span>{statusLabel(selectedCall.status)}</span></p>
               {selectedTransitions.includes("resolved") ? <label className="call-actions__resolution">Resolution summary<textarea disabled={pendingIntent !== null} onChange={(event) => setResolutionSummary(event.target.value)} required value={resolutionSummary} /></label> : null}
