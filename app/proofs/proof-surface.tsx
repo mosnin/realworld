@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery } from "convex/react";
 
@@ -11,6 +11,7 @@ type ProofStatus = "submitted" | "verified" | "rejected";
 type Mission = { _id: Id<"missions">; lifecycle: string; role: string };
 type RoomOption = { _id: Id<"rooms">; title: string; x: number; y: number };
 type MoveOption = { _id: Id<"moves">; title: string; roomId?: Id<"rooms"> };
+type CreateProofRequest = { roomId: Id<"rooms">; moveId: Id<"moves">; nonce: string };
 
 type ProofCapabilities = {
   canEdit?: boolean;
@@ -24,7 +25,21 @@ function statusLabel(status: ProofStatus) {
   return status;
 }
 
-export function ProofSurface({ mission, rooms, moves }: Readonly<{ mission: Mission; rooms: RoomOption[]; moves: MoveOption[] }>) {
+export function ProofSurface({
+  mission,
+  rooms,
+  moves,
+  createProofRequest,
+  onCreateProofRequestHandled,
+  onCreateProofRequestUnavailable,
+}: Readonly<{
+  mission: Mission;
+  rooms: RoomOption[];
+  moves: MoveOption[];
+  createProofRequest?: CreateProofRequest | null;
+  onCreateProofRequestHandled?: () => void;
+  onCreateProofRequestUnavailable?: () => void;
+}>) {
   const proofs = useQuery(api.proofs.listMissionProofs, { missionId: mission._id });
   const createProof = useMutation(api.proofs.createProof);
   const updateProof = useMutation(api.proofs.updateProof);
@@ -32,8 +47,10 @@ export function ProofSurface({ mission, rooms, moves }: Readonly<{ mission: Miss
   const commandKeys = useRef<Record<string, string>>({});
   const firstFieldRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const openerRef = useRef<HTMLButtonElement | null>(null);
   const pendingIntentRef = useRef<string | null>(null);
+  const pendingHandoffFocusRef = useRef<string | null>(null);
   const [open, setOpen] = useState(false);
   const [selectedProofId, setSelectedProofId] = useState<Id<"proofs"> | null>(null);
   const [title, setTitle] = useState("");
@@ -43,6 +60,7 @@ export function ProofSurface({ mission, rooms, moves }: Readonly<{ mission: Miss
   const [linkedMoveId, setLinkedMoveId] = useState<Id<"moves"> | "">("");
   const [pendingIntent, setPendingIntent] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [handoffFocusNonce, setHandoffFocusNonce] = useState<string | null>(null);
   const canCreate = mission.lifecycle === "active" && ["owner", "steward", "builder", "contributor"].includes(mission.role);
   const selectedProof = proofs?.find((proof) => proof._id === selectedProofId);
   const capabilities = selectedProof as (typeof selectedProof & ProofCapabilities) | undefined;
@@ -54,9 +72,20 @@ export function ProofSurface({ mission, rooms, moves }: Readonly<{ mission: Miss
   const canResubmit = mission.lifecycle === "active" && (capabilities?.canResubmit === true || capabilities?.canTransition === true);
 
   const closeSurface = useCallback(() => {
+    pendingHandoffFocusRef.current = null;
+    setHandoffFocusNonce(null);
     setOpen(false);
     window.requestAnimationFrame(() => openerRef.current?.focus());
   }, []);
+  const resetComposer = useCallback((clearStatus = true) => {
+    setSelectedProofId(null);
+    setTitle("");
+    setClaim("");
+    setEvidenceNote("");
+    setRoomId(rooms[0]?._id ?? "");
+    setLinkedMoveId("");
+    if (clearStatus) setStatus(null);
+  }, [rooms]);
 
   useEffect(() => {
     pendingIntentRef.current = pendingIntent;
@@ -90,15 +119,33 @@ export function ProofSurface({ mission, rooms, moves }: Readonly<{ mission: Miss
     };
   }, [closeSurface, open]);
 
-  function resetComposer(clearStatus = true) {
-    setSelectedProofId(null);
-    setTitle("");
-    setClaim("");
-    setEvidenceNote("");
-    setRoomId(rooms[0]?._id ?? "");
-    setLinkedMoveId("");
-    if (clearStatus) setStatus(null);
-  }
+  useEffect(() => {
+    if (createProofRequest === undefined || createProofRequest === null) return;
+    const requestedMoveIsAvailable = canCreate
+      && rooms.some((room) => room._id === createProofRequest.roomId)
+      && moves.some((move) => move._id === createProofRequest.moveId && move.roomId === createProofRequest.roomId);
+    const frame = window.requestAnimationFrame(() => {
+      if (requestedMoveIsAvailable) {
+        openerRef.current = triggerRef.current;
+        resetComposer();
+        setRoomId(createProofRequest.roomId);
+        setLinkedMoveId(createProofRequest.moveId);
+        pendingHandoffFocusRef.current = createProofRequest.nonce;
+        setHandoffFocusNonce(createProofRequest.nonce);
+        setOpen(true);
+      } else {
+        onCreateProofRequestUnavailable?.();
+      }
+      onCreateProofRequestHandled?.();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [canCreate, createProofRequest, moves, onCreateProofRequestHandled, onCreateProofRequestUnavailable, resetComposer, rooms]);
+
+  useLayoutEffect(() => {
+    if (handoffFocusNonce === null || !open || pendingHandoffFocusRef.current !== handoffFocusNonce) return;
+    firstFieldRef.current?.focus();
+    pendingHandoffFocusRef.current = null;
+  }, [handoffFocusNonce, open]);
 
   function openComposer(event: React.MouseEvent<HTMLButtonElement>) {
     openerRef.current = event.currentTarget;
@@ -156,7 +203,7 @@ export function ProofSurface({ mission, rooms, moves }: Readonly<{ mission: Miss
   }
 
   return <section aria-label="Mission Proofs" className="proof-surface">
-    <button className="proof-surface__trigger" onClick={openComposer} type="button"><span aria-hidden="true">✓</span> {canCreate ? "Open Proofs" : "View Proofs"}{proofs === undefined ? "" : ` (${proofs.length})`}</button>
+    <button className="proof-surface__trigger" onClick={openComposer} ref={triggerRef} type="button"><span aria-hidden="true">✓</span> {canCreate ? "Open Proofs" : "View Proofs"}{proofs === undefined ? "" : ` (${proofs.length})`}</button>
     <div aria-label="Proofs anchored to Mission rooms" className="proof-beacons" role="group">{proofs?.map((proof, index) => {
       const room = rooms.find((candidate) => candidate._id === proof.roomId);
       return <button aria-label={`Open Proof: ${proof.title}, ${statusLabel(proof.status)}`} className={`proof-beacon proof-beacon--${proof.status}`} key={proof._id} onClick={(event) => inspectProof(proof._id, event)} style={{ left: `calc(${room?.x ?? 50}% + ${(index % 2) * 14}px)`, top: `calc(${room?.y ?? 50}% + ${-68 - Math.floor(index / 2) * 12}px)` }} type="button"><span aria-hidden="true">✓</span><strong>{proof.title}</strong><small>{statusLabel(proof.status)}</small></button>;

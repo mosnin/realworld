@@ -75,6 +75,9 @@ test("an authenticated owner can launch an honest empty Blank canvas Workshop", 
   const firstCallDetail = "Review the proposed outcome and bring back one concrete improvement.";
   const firstFractureTitle = "The first outcome needs a durability check";
   const firstFractureDetail = "The proposed outcome lacks a recovery boundary before collaborators join.";
+  const firstProofTitle = "The first outcome has a durable acceptance check";
+  const firstProofClaim = "The initial outcome can be reviewed through its exact Workshop context.";
+  const firstProofEvidence = "The owner recorded this proof from the selected real Move.";
 
   await page.getByRole("button", { name: "New Mission" }).click();
   const launcher = page.getByRole("dialog", { name: "Choose a work shape" });
@@ -99,6 +102,7 @@ test("an authenticated owner can launch an honest empty Blank canvas Workshop", 
   await expect(page.getByRole("button", { name: "View Workshop" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Ask for help" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Report a Fracture" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Submit Proof" })).toHaveCount(0);
 
   const createFirstMove = page.getByRole("button", { name: "Create first Move" });
   await createFirstMove.focus();
@@ -179,6 +183,34 @@ test("an authenticated owner can launch an honest empty Blank canvas Workshop", 
   await expect(inspectedMove).toContainText(firstMoveTitle);
   await expect(inspectedMove).toContainText(firstMoveIntent);
   await expect(inspectedMove).toContainText("proposed");
+  const submitProof = page.getByRole("button", { name: "Submit Proof" });
+  await submitProof.focus();
+  await expect(submitProof).toBeFocused();
+  await page.keyboard.press("Enter");
+  const proofDialog = page.getByRole("dialog", { name: "Make the work verifiable" });
+  await expect(proofDialog.getByLabel("Proof title")).toBeFocused();
+  await expect(proofDialog.getByLabel("Room").locator("option:checked")).toHaveText("Workshop");
+  await expect(proofDialog.getByLabel("Linked Move (optional)").locator("option:checked")).toHaveText(firstMoveTitle);
+  await proofDialog.getByLabel("Proof title").fill(firstProofTitle);
+  await proofDialog.getByLabel("Claim").fill(firstProofClaim);
+  await proofDialog.getByLabel("Evidence note").fill(firstProofEvidence);
+  await proofDialog.getByRole("button", { name: "Submit Proof", exact: true }).click();
+  await expect(proofDialog.getByText("Proof submitted.")).toBeVisible();
+  await proofDialog.getByRole("button", { name: "Close Proofs" }).click();
+  await expect(page.getByRole("button", { name: /Open Proofs/ })).toBeFocused();
+  const firstProofBeacon = page.getByRole("button", { name: `Open Proof: ${firstProofTitle}, submitted` });
+  await expect(firstProofBeacon).toBeVisible();
+  await firstProofBeacon.click();
+  const firstProofDetails = proofDialog.getByLabel(`Proof details for ${firstProofTitle}`);
+  await expect(firstProofDetails).toContainText(firstProofTitle);
+  await expect(firstProofDetails).toContainText(firstProofClaim);
+  await expect(firstProofDetails).toContainText(firstProofEvidence);
+  await expect(firstProofDetails).toContainText("Room: Workshop");
+  await expect(firstProofDetails).toContainText(`Linked Move: ${firstMoveTitle}`);
+  await expect(firstProofDetails).toContainText("submitted");
+  await proofDialog.getByRole("button", { name: "Close Proofs" }).click();
+  await enterWorkshop(page);
+  await workshopWork.getByRole("button", { name: new RegExp(firstMoveTitle) }).click();
   const reportFracture = page.getByRole("button", { name: "Report a Fracture" });
   await reportFracture.focus();
   await expect(reportFracture).toBeFocused();
@@ -252,6 +284,11 @@ test("an authenticated owner can launch an honest empty Blank canvas Workshop", 
   await expect(page.getByRole("heading", { name: "Blank canvas" })).toBeVisible();
   await expect(page.getByRole("button", { name: /Workshop — 1 proposed Move/ })).toBeVisible();
   await expect(page.locator(".world-routes path.world-routes__active")).toHaveCount(1);
+  await expect(firstProofBeacon).toBeVisible();
+  await firstProofBeacon.click();
+  await expect(proofDialog.getByLabel(`Proof details for ${firstProofTitle}`)).toContainText(firstProofEvidence);
+  await expect(proofDialog.getByLabel(`Proof details for ${firstProofTitle}`)).toContainText(`Linked Move: ${firstMoveTitle}`);
+  await proofDialog.getByRole("button", { name: "Close Proofs" }).click();
   await expect(firstFractureBeacon).toBeVisible();
   await firstFractureBeacon.click();
   await expect(fractureDialog.getByLabel(`Fracture details for ${firstFractureTitle}`)).toContainText(`Linked Move: ${firstMoveTitle}`);
@@ -470,6 +507,7 @@ test("an owner can archive a Mission into a read-only world, restore it, and kee
   await expect(page.getByRole("button", { name: /Open Moves/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Ask for help" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Report a Fracture" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Submit Proof" })).toHaveCount(0);
   await page.getByRole("button", { name: "Mission World" }).click();
 
   await page.getByRole("button", { name: "Room directory" }).click();
@@ -480,6 +518,7 @@ test("an owner can archive a Mission into a read-only world, restore it, and kee
   await expect(page.getByRole("button", { name: /Open Moves/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Ask for help" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Report a Fracture" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Submit Proof" })).toHaveCount(0);
   await page.getByRole("button", { name: "Mission World" }).click();
   await expect(page.getByRole("status", { name: "Archived Mission read-only" })).toBeVisible();
 
@@ -1048,6 +1087,7 @@ test("an owner and scoped reviewer complete a reactive Proof handoff", async ({ 
     await expectWorkshopContext(reviewer);
     await expect(reviewer.getByRole("button", { name: "Ask for help" })).toHaveCount(0);
     await expect(reviewer.getByRole("button", { name: "Report a Fracture" })).toHaveCount(0);
+    await expect(reviewer.getByRole("button", { name: "Submit Proof" })).toHaveCount(0);
     await reviewer.getByRole("button", { name: "Mission World" }).click();
 
     await page.getByRole("button", { name: "Close invitations" }).click();
@@ -1205,6 +1245,7 @@ test("a scoped observer receives a stable read-only Mission shell without privat
     await expect(observerWork.getByText("Fracture", { exact: true })).toHaveCount(0);
     await expect(observer.getByRole("button", { name: "Ask for help" })).toHaveCount(0);
     await expect(observer.getByRole("button", { name: "Report a Fracture" })).toHaveCount(0);
+    await expect(observer.getByRole("button", { name: "Submit Proof" })).toHaveCount(0);
     await observerWork.getByRole("button", { name: new RegExp(observerCallTitle) }).click();
     const observerOpenCall = observer.getByRole("button", { name: "Open Call" });
     await observerOpenCall.focus();
