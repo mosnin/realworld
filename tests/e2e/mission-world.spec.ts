@@ -710,7 +710,7 @@ test("an owner and scoped reviewer complete a reactive Proof handoff", async ({ 
     const activity = pulse.getByLabel("Recent durable Mission activity");
     const verifiedEvent = activity.getByRole("button", { name: /Proof verified/ }).first();
     await expect(verifiedEvent).toBeVisible();
-    await expect(verifiedEvent.locator("small")).toHaveText(/reviewer · Workshop · (just now|\d+m ago)/);
+    await expect(verifiedEvent.locator("small")).toHaveText(/reviewer collaborator · Workshop · (just now|\d+m ago)/);
   } finally {
     await reviewerContext.close();
   }
