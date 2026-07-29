@@ -431,13 +431,14 @@ function Workshop({
         hasFocusedLoadedRoomRef.current = true;
       });
     };
-    if (document.readyState === "complete") {
+    const navigation = window.performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+    if (document.readyState === "complete" && (navigation?.loadEventEnd ?? 1) > 0) {
       focusLoadedRoom();
     } else {
-      window.addEventListener("load", focusLoadedRoom, { once: true });
+      window.addEventListener("pageshow", focusLoadedRoom, { once: true });
     }
     return () => {
-      window.removeEventListener("load", focusLoadedRoom);
+      window.removeEventListener("pageshow", focusLoadedRoom);
       if (frame !== null) window.cancelAnimationFrame(frame);
     };
   }, [loading]);
