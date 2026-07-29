@@ -4,7 +4,7 @@ import type { Doc } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
 import { requireActiveMembership, requireRole, requireWritableMission } from "./lib/auth";
-import { humanAttributionAtAction } from "./lib/human-attribution";
+import { humanAttributionAtAction } from "./lib/human_attribution";
 
 const layout = v.object({ x: v.number(), y: v.number(), width: v.number(), height: v.number() });
 const roomKind = v.union(v.literal("missionCore"), v.literal("workshop"), v.literal("observatory"), v.literal("branchLab"), v.literal("reviewDeck"), v.literal("signalTower"), v.literal("surgeHall"));

@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { requireActiveMembership, requireAuthenticatedTokenIdentifier, requireRole, requireWritableMission } from "./lib/auth";
-import { humanAttributionAtAction } from "./lib/human-attribution";
+import { humanAttributionAtAction } from "./lib/human_attribution";
 
 const inviteRole = v.union(v.literal("builder"), v.literal("reviewer"), v.literal("contributor"), v.literal("observer"));
 const membershipRole = v.union(v.literal("owner"), v.literal("steward"), v.literal("builder"), v.literal("reviewer"), v.literal("contributor"), v.literal("observer"), v.literal("agent"));

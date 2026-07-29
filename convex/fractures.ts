@@ -4,7 +4,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { requireActiveMembership, requireRole, requireWritableMission } from "./lib/auth";
-import { humanAttributionAtAction } from "./lib/human-attribution";
+import { humanAttributionAtAction } from "./lib/human_attribution";
 
 const fractureStatus = v.union(v.literal("open"), v.literal("investigating"), v.literal("resolved"), v.literal("dismissed"));
 const fractureSeverity = v.union(v.literal("low"), v.literal("medium"), v.literal("high"), v.literal("critical"));

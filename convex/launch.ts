@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { mutation } from "./_generated/server";
 import { requireAuthenticatedTokenIdentifier } from "./lib/auth";
-import { humanAttributionAtAction } from "./lib/human-attribution";
+import { humanAttributionAtAction } from "./lib/human_attribution";
 import { isMissionTemplateKey, missionTemplates } from "./lib/mission_templates";
 
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;

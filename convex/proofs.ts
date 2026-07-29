@@ -4,7 +4,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { requireActiveMembership, requireRole, requireWritableMission } from "./lib/auth";
-import { humanAttributionAtAction } from "./lib/human-attribution";
+import { humanAttributionAtAction } from "./lib/human_attribution";
 
 const proofStatus = v.union(v.literal("submitted"), v.literal("verified"), v.literal("rejected"));
 const receiptMs = 30 * 86400000;

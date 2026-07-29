@@ -16,6 +16,7 @@ import type * as http from "../http.js";
 import type * as invites from "../invites.js";
 import type * as launch from "../launch.js";
 import type * as lib_auth from "../lib/auth.js";
+import type * as lib_human_attribution from "../lib/human_attribution.js";
 import type * as lib_mission_templates from "../lib/mission_templates.js";
 import type * as missions from "../missions.js";
 import type * as moves from "../moves.js";
@@ -40,6 +41,7 @@ declare const fullApi: ApiFromModules<{
   invites: typeof invites;
   launch: typeof launch;
   "lib/auth": typeof lib_auth;
+  "lib/human_attribution": typeof lib_human_attribution;
   "lib/mission_templates": typeof lib_mission_templates;
   missions: typeof missions;
   moves: typeof moves;

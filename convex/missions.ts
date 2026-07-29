@@ -3,7 +3,7 @@ import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import { isActiveMembership, requireActiveMembership, requireAuthenticatedTokenIdentifier, requireExistingHumanPrincipal, requireRole } from "./lib/auth";
-import { humanAttributionAtAction } from "./lib/human-attribution";
+import { humanAttributionAtAction } from "./lib/human_attribution";
 
 const receiptRetentionMs = 30 * 24 * 60 * 60 * 1000;
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;

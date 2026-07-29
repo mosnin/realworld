@@ -4,7 +4,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
 import { requireActiveMembership, requireRole, requireWritableMission } from "./lib/auth";
-import { humanAttributionAtAction } from "./lib/human-attribution";
+import { humanAttributionAtAction } from "./lib/human_attribution";
 
 const moveState = v.union(v.literal("proposed"), v.literal("ready"), v.literal("inProgress"), v.literal("blocked"), v.literal("review"), v.literal("completed"), v.literal("cancelled"));
 const storedMoveState = v.union(v.literal("proposed"), v.literal("ready"), v.literal("claimed"), v.literal("inProgress"), v.literal("blocked"), v.literal("review"), v.literal("completed"), v.literal("cancelled"), v.literal("archived"));
