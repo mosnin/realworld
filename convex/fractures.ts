@@ -2,7 +2,7 @@ import { v } from "convex/values";
 
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
-import type { MutationCtx, QueryCtx } from "./_generated/server";
+import type { MutationCtx } from "./_generated/server";
 import { requireActiveMembership, requireRole, requireWritableMission } from "./lib/auth";
 import { humanAttributionAtAction } from "./lib/human_attribution";
 
@@ -126,11 +126,11 @@ async function recordFractureEvent(
   summary: string,
   beforeVersion: number | undefined,
   afterVersion: number,
+  actorAttributionAtAction: Awaited<ReturnType<typeof humanAttributionAtAction>>,
 ) {
   const mission = await ctx.db.get(fracture.missionId);
   if (!mission) throw new Error("Not found");
   const now = Date.now();
-  const actorAttributionAtAction = await humanAttributionAtAction(ctx, membership.principalId);
   const eventId = await ctx.db.insert("missionEvents", {
     missionId: mission._id,
     roomId: fracture.roomId,
@@ -191,18 +191,17 @@ function replayReceipt(receipt: Doc<"operationReceipts">) {
   };
 }
 
-async function fractureProjection(
-  ctx: Pick<QueryCtx, "db">,
+function fractureProjection(
   membership: Awaited<ReturnType<typeof requireActiveMembership>>,
   fracture: Doc<"fractures">,
 ) {
-  const reporter = await ctx.db.get(fracture.reporterPrincipalId);
   return {
     _id: fracture._id,
     missionId: fracture.missionId,
     roomId: fracture.roomId,
     linkedMoveId: fracture.linkedMoveId,
-    reporterDisplayName: reporter?.displayName,
+    reporterDisplayName: fracture.reporterDisplayNameAtAction
+      ?? (fracture.reporterRoleAtAction === undefined ? "collaborator" : `${fracture.reporterRoleAtAction} collaborator`),
     title: fracture.title,
     detail: fracture.detail,
     severity: fracture.severity,
@@ -227,7 +226,7 @@ export const listRoomFractures = query({
     const fractures = args.status === undefined
       ? await ctx.db.query("fractures").withIndex("by_room_and_status", (index) => index.eq("roomId", room._id)).order("desc").take(limit)
       : await ctx.db.query("fractures").withIndex("by_room_and_status", (index) => index.eq("roomId", room._id).eq("status", args.status!)).order("desc").take(limit);
-    return await Promise.all(fractures.map((fracture) => fractureProjection(ctx, membership, fracture)));
+    return fractures.map((fracture) => fractureProjection(membership, fracture));
   },
 });
 
@@ -245,7 +244,7 @@ export const listMissionFractures = query({
       .order("desc")
       .take(maxListLimit);
     const visible = candidates.filter((fracture) => canReadFracture(membership, fracture)).slice(0, limit);
-    return await Promise.all(visible.map((fracture) => fractureProjection(ctx, membership, fracture)));
+    return visible.map((fracture) => fractureProjection(membership, fracture));
   },
 });
 
@@ -278,11 +277,15 @@ export const createFracture = mutation({
     await requireFractureRoom(ctx, args.missionId, args.roomId);
     await requireLinkedMove(ctx, args.missionId, args.roomId, args.linkedMoveId);
     const now = Date.now();
+    const reporterAttributionAtAction = await humanAttributionAtAction(ctx, membership.principalId);
     const fractureId = await ctx.db.insert("fractures", {
       missionId: args.missionId,
       roomId: args.roomId,
       linkedMoveId: args.linkedMoveId,
       reporterPrincipalId: membership.principalId,
+      ...(reporterAttributionAtAction?.actorDisplayNameAtAction === undefined ? {} : { reporterDisplayNameAtAction: reporterAttributionAtAction.actorDisplayNameAtAction }),
+      ...(reporterAttributionAtAction === undefined ? {} : { reporterTypeAtAction: reporterAttributionAtAction.actorTypeAtAction }),
+      reporterRoleAtAction: membership.role,
       title,
       detail,
       severity: args.severity,
@@ -292,7 +295,7 @@ export const createFracture = mutation({
       updatedAt: now,
       schemaVersion: 1,
     });
-    const event = await recordFractureEvent(ctx, { missionId: args.missionId, roomId: args.roomId }, membership, "fracture.created", idempotencyKey, correlationId, "Fracture reported", undefined, 1);
+    const event = await recordFractureEvent(ctx, { missionId: args.missionId, roomId: args.roomId }, membership, "fracture.created", idempotencyKey, correlationId, "Fracture reported", undefined, 1, reporterAttributionAtAction);
     const operationReceiptId = await saveReceipt(ctx, { scope, idempotencyKey, commandFingerprint, missionId: args.missionId, fractureId, eventId: event.eventId, currentVersion: 1, correlationId, now: event.now });
     return { fractureId, eventId: event.eventId, operationReceiptId, currentVersion: 1 };
   },
@@ -334,7 +337,8 @@ export const updateFracture = mutation({
     await requireFractureRoom(ctx, fracture.missionId, args.roomId);
     await requireLinkedMove(ctx, fracture.missionId, args.roomId, linkedMoveId);
     const nextVersion = fracture.currentVersion + 1;
-    const event = await recordFractureEvent(ctx, { ...fracture, roomId: args.roomId }, membership, "fracture.updated", idempotencyKey, correlationId, "Fracture details updated", fracture.currentVersion, nextVersion);
+    const actorAttributionAtAction = await humanAttributionAtAction(ctx, membership.principalId);
+    const event = await recordFractureEvent(ctx, { ...fracture, roomId: args.roomId }, membership, "fracture.updated", idempotencyKey, correlationId, "Fracture details updated", fracture.currentVersion, nextVersion, actorAttributionAtAction);
     await ctx.db.patch(fracture._id, { roomId: args.roomId, linkedMoveId, title, detail, severity: args.severity, currentVersion: nextVersion, updatedAt: event.now });
     const operationReceiptId = await saveReceipt(ctx, { scope, idempotencyKey, commandFingerprint, missionId: fracture.missionId, fractureId: fracture._id, eventId: event.eventId, currentVersion: nextVersion, correlationId, now: event.now });
     return { fractureId: fracture._id, eventId: event.eventId, operationReceiptId, currentVersion: nextVersion };
@@ -361,7 +365,8 @@ export const transitionFracture = mutation({
     if (fracture.currentVersion !== args.expectedVersion) throw new Error("Fracture version conflict");
     if (!transitionAllowed(fracture.status, args.nextStatus)) throw new Error("Invalid Fracture transition");
     const nextVersion = fracture.currentVersion + 1;
-    const event = await recordFractureEvent(ctx, fracture, membership, "fracture.transitioned", idempotencyKey, correlationId, `Fracture transitioned to ${args.nextStatus}`, fracture.currentVersion, nextVersion);
+    const actorAttributionAtAction = await humanAttributionAtAction(ctx, membership.principalId);
+    const event = await recordFractureEvent(ctx, fracture, membership, "fracture.transitioned", idempotencyKey, correlationId, `Fracture transitioned to ${args.nextStatus}`, fracture.currentVersion, nextVersion, actorAttributionAtAction);
     await ctx.db.patch(fracture._id, { status: args.nextStatus, currentVersion: nextVersion, updatedAt: event.now });
     const operationReceiptId = await saveReceipt(ctx, { scope, idempotencyKey, commandFingerprint, missionId: fracture.missionId, fractureId: fracture._id, eventId: event.eventId, currentVersion: nextVersion, correlationId, now: event.now });
     return { fractureId: fracture._id, eventId: event.eventId, operationReceiptId, currentVersion: nextVersion };

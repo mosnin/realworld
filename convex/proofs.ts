@@ -2,7 +2,7 @@ import { v } from "convex/values";
 
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
-import type { MutationCtx, QueryCtx } from "./_generated/server";
+import type { MutationCtx } from "./_generated/server";
 import { requireActiveMembership, requireRole, requireWritableMission } from "./lib/auth";
 import { humanAttributionAtAction } from "./lib/human_attribution";
 
@@ -118,11 +118,11 @@ async function recordProofEvent(
   summary: string,
   beforeVersion: number | undefined,
   afterVersion: number,
+  actorAttributionAtAction: Awaited<ReturnType<typeof humanAttributionAtAction>>,
 ) {
   const mission = await ctx.db.get(proof.missionId);
   if (!mission) throw new Error("Not found");
   const now = Date.now();
-  const actorAttributionAtAction = await humanAttributionAtAction(ctx, membership.principalId);
   const eventId = await ctx.db.insert("missionEvents", {
     missionId: mission._id,
     roomId: proof.roomId,
@@ -178,22 +178,20 @@ function replayReceipt(receipt: Doc<"operationReceipts">) {
   return { proofId: receipt.proofId, eventId: receipt.eventId, operationReceiptId: receipt._id, currentVersion: receipt.resultVersion };
 }
 
-async function proofProjection(
-  ctx: Pick<QueryCtx, "db">,
+function proofProjection(
   membership: Awaited<ReturnType<typeof requireActiveMembership>>,
   proof: Doc<"proofs">,
 ) {
-  const [submitter, verifier] = await Promise.all([
-    ctx.db.get(proof.submitterPrincipalId),
-    proof.verifierPrincipalId === undefined ? undefined : ctx.db.get(proof.verifierPrincipalId),
-  ]);
+  const fallback = (role: Doc<"missionMembers">["role"] | undefined) => role === undefined ? "collaborator" : `${role} collaborator`;
   return {
     _id: proof._id,
     missionId: proof.missionId,
     roomId: proof.roomId,
     linkedMoveId: proof.linkedMoveId,
-    ...(submitter?.displayName === undefined ? {} : { submitterDisplayName: submitter.displayName }),
-    ...(verifier?.displayName === undefined ? {} : { verifierDisplayName: verifier.displayName }),
+    submitterDisplayName: proof.submitterDisplayNameAtAction ?? fallback(proof.submitterRoleAtAction),
+    ...(proof.verifierPrincipalId === undefined ? {} : {
+      verifierDisplayName: proof.verifierDisplayNameAtAction ?? fallback(proof.verifierRoleAtAction),
+    }),
     ...(proof.verifiedAt === undefined ? {} : { verifiedAt: proof.verifiedAt }),
     title: proof.title,
     claim: proof.claim,
@@ -222,7 +220,7 @@ export const listMissionProofs = query({
       .order("desc")
       .take(maxListLimit);
     const visible = candidates.filter((proof) => canReadProof(membership, proof)).slice(0, limit);
-    return await Promise.all(visible.map((proof) => proofProjection(ctx, membership, proof)));
+    return visible.map((proof) => proofProjection(membership, proof));
   },
 });
 
@@ -239,7 +237,7 @@ export const listRoomProofs = query({
     const proofs = args.status === undefined
       ? await ctx.db.query("proofs").withIndex("by_room_and_status", (index) => index.eq("roomId", room._id)).order("desc").take(limit)
       : await ctx.db.query("proofs").withIndex("by_room_and_status", (index) => index.eq("roomId", room._id).eq("status", args.status!)).order("desc").take(limit);
-    return await Promise.all(proofs.map((proof) => proofProjection(ctx, membership, proof)));
+    return proofs.map((proof) => proofProjection(membership, proof));
   },
 });
 
@@ -273,11 +271,15 @@ export const createProof = mutation({
     await requireProofRoom(ctx, args.missionId, args.roomId);
     await requireLinkedMove(ctx, args.missionId, args.roomId, args.linkedMoveId);
     const now = Date.now();
+    const submitterAttributionAtAction = await humanAttributionAtAction(ctx, membership.principalId);
     const proofId = await ctx.db.insert("proofs", {
       missionId: args.missionId,
       roomId: args.roomId,
       linkedMoveId: args.linkedMoveId,
       submitterPrincipalId: membership.principalId,
+      ...(submitterAttributionAtAction?.actorDisplayNameAtAction === undefined ? {} : { submitterDisplayNameAtAction: submitterAttributionAtAction.actorDisplayNameAtAction }),
+      ...(submitterAttributionAtAction === undefined ? {} : { submitterTypeAtAction: submitterAttributionAtAction.actorTypeAtAction }),
+      submitterRoleAtAction: membership.role,
       title,
       claim,
       evidenceNote,
@@ -287,7 +289,7 @@ export const createProof = mutation({
       updatedAt: now,
       schemaVersion: 1,
     });
-    const event = await recordProofEvent(ctx, { missionId: args.missionId, roomId: args.roomId }, membership, "proof.submitted", idempotencyKey, correlationId, "Proof submitted", undefined, 1);
+    const event = await recordProofEvent(ctx, { missionId: args.missionId, roomId: args.roomId }, membership, "proof.submitted", idempotencyKey, correlationId, "Proof submitted", undefined, 1, submitterAttributionAtAction);
     const operationReceiptId = await saveReceipt(ctx, { scope, idempotencyKey, commandFingerprint, missionId: args.missionId, proofId, eventId: event.eventId, currentVersion: 1, correlationId, now: event.now });
     return { proofId, eventId: event.eventId, operationReceiptId, currentVersion: 1 };
   },
@@ -331,7 +333,8 @@ export const updateProof = mutation({
     await requireProofRoom(ctx, proof.missionId, args.roomId);
     await requireLinkedMove(ctx, proof.missionId, args.roomId, linkedMoveId);
     const nextVersion = proof.currentVersion + 1;
-    const event = await recordProofEvent(ctx, { ...proof, roomId: args.roomId }, membership, "proof.updated", idempotencyKey, correlationId, "Proof details updated", proof.currentVersion, nextVersion);
+    const actorAttributionAtAction = await humanAttributionAtAction(ctx, membership.principalId);
+    const event = await recordProofEvent(ctx, { ...proof, roomId: args.roomId }, membership, "proof.updated", idempotencyKey, correlationId, "Proof details updated", proof.currentVersion, nextVersion, actorAttributionAtAction);
     await ctx.db.patch(proof._id, { roomId: args.roomId, linkedMoveId, title, claim, evidenceNote, currentVersion: nextVersion, updatedAt: event.now });
     const operationReceiptId = await saveReceipt(ctx, { scope, idempotencyKey, commandFingerprint, missionId: proof.missionId, proofId: proof._id, eventId: event.eventId, currentVersion: nextVersion, correlationId, now: event.now });
     return { proofId: proof._id, eventId: event.eventId, operationReceiptId, currentVersion: nextVersion };
@@ -363,12 +366,19 @@ export const transitionProof = mutation({
     if (!isAllowed) throw new Error("Invalid Proof transition");
     const nextVersion = proof.currentVersion + 1;
     const eventType = args.nextStatus === "verified" ? "proof.verified" : args.nextStatus === "rejected" ? "proof.rejected" : "proof.resubmitted";
-    const event = await recordProofEvent(ctx, proof, membership, eventType, idempotencyKey, correlationId, `Proof ${args.nextStatus}`, proof.currentVersion, nextVersion);
+    const actorAttributionAtAction = await humanAttributionAtAction(ctx, membership.principalId);
+    const event = await recordProofEvent(ctx, proof, membership, eventType, idempotencyKey, correlationId, `Proof ${args.nextStatus}`, proof.currentVersion, nextVersion, actorAttributionAtAction);
     await ctx.db.patch(proof._id, {
       status: args.nextStatus,
       ...(args.nextStatus === "verified"
-        ? { verifierPrincipalId: membership.principalId, verifiedAt: event.now }
-        : { verifierPrincipalId: undefined, verifiedAt: undefined }),
+        ? {
+            verifierPrincipalId: membership.principalId,
+            ...(actorAttributionAtAction?.actorDisplayNameAtAction === undefined ? {} : { verifierDisplayNameAtAction: actorAttributionAtAction.actorDisplayNameAtAction }),
+            ...(actorAttributionAtAction === undefined ? {} : { verifierTypeAtAction: actorAttributionAtAction.actorTypeAtAction }),
+            verifierRoleAtAction: membership.role,
+            verifiedAt: event.now,
+          }
+        : { verifierPrincipalId: undefined, verifierDisplayNameAtAction: undefined, verifierTypeAtAction: undefined, verifierRoleAtAction: undefined, verifiedAt: undefined }),
       currentVersion: nextVersion,
       updatedAt: event.now,
     });

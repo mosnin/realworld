@@ -22,7 +22,7 @@ const callView = v.object({
   missionId: v.id("missions"),
   roomId: v.optional(v.id("rooms")),
   linkedMoveId: v.optional(v.id("moves")),
-  creatorPrincipalId: v.id("principals"),
+  creatorDisplayName: v.string(),
   title: v.string(),
   detail: v.string(),
   maxParticipants: v.number(),
@@ -169,6 +169,10 @@ function isTransitionAllowed(current: Doc<"calls">["status"], next: Doc<"calls">
   } as const)[current].includes(next as never);
 }
 
+function historicalCollaboratorLabel(role: Doc<"missionMembers">["role"] | undefined) {
+  return role === undefined ? "collaborator" : `${role} collaborator`;
+}
+
 async function operationReceipt(ctx: MutationCtx, scope: string, idempotencyKey: string) {
   return await ctx.db
     .query("operationReceipts")
@@ -208,11 +212,11 @@ async function recordCallEvent(
   summary: string,
   beforeVersion: number | undefined,
   afterVersion: number,
+  actorAttributionAtAction: Awaited<ReturnType<typeof humanAttributionAtAction>>,
 ) {
   const mission = await ctx.db.get(call.missionId);
   if (!mission) throw new Error("Not found");
   const now = Date.now();
-  const actorAttributionAtAction = await humanAttributionAtAction(ctx, membership.principalId);
   const eventId = await ctx.db.insert("missionEvents", {
     missionId: mission._id,
     ...(call.roomId === undefined ? {} : { roomId: call.roomId }),
@@ -288,7 +292,7 @@ export const listMissionCalls = query({
         missionId: call.missionId,
         roomId: call.roomId,
         linkedMoveId: call.linkedMoveId,
-        creatorPrincipalId: call.creatorPrincipalId,
+        creatorDisplayName: call.creatorDisplayNameAtAction ?? historicalCollaboratorLabel(call.creatorRoleAtAction),
         title: call.title,
         detail: call.detail,
         maxParticipants: normalizedMaxParticipants(call.maxParticipants),
@@ -320,26 +324,16 @@ export const listCallResponseHistory = query({
       .withIndex("by_call", (index) => index.eq("callId", call._id))
       .order("desc")
       .take(limit);
-    return await Promise.all(revisions.map(async (revision) => {
-      const [principal, revisionMembership] = await Promise.all([
-        ctx.db.get(revision.principalId),
-        ctx.db
-          .query("missionMembers")
-          .withIndex("by_mission_and_principal", (index) =>
-            index.eq("missionId", call.missionId).eq("principalId", revision.principalId))
-          .unique(),
-      ]);
-      return {
+    return revisions.map((revision) => ({
         _id: revision._id,
         callId: revision.callId,
-        displayName: principal?.displayName,
-        role: revisionMembership?.role,
+        displayName: revision.displayNameAtAction ?? historicalCollaboratorLabel(revision.roleAtAction),
+        role: revision.roleAtAction,
         isCurrentUser: revision.principalId === membership.principalId,
         revision: revision.revision,
         response: revision.response,
         createdAt: revision.createdAt,
-      };
-    }));
+      }));
   },
 });
 
@@ -355,27 +349,17 @@ export const listCallParticipants = query({
       .query("callParticipants")
       .withIndex("by_call_and_state", (index) => index.eq("callId", call._id).eq("state", "joined"))
       .take(50);
-    return await Promise.all(participants.map(async (participant) => {
-      const [principal, participantMembership] = await Promise.all([
-        ctx.db.get(participant.principalId),
-        ctx.db
-          .query("missionMembers")
-          .withIndex("by_mission_and_principal", (index) =>
-            index.eq("missionId", call.missionId).eq("principalId", participant.principalId))
-          .unique(),
-      ]);
-      return {
+    return participants.map((participant) => ({
         _id: participant._id,
         callId: participant.callId,
-        displayName: principal?.displayName,
-        role: participantMembership?.role,
+        displayName: participant.displayNameAtJoin ?? historicalCollaboratorLabel(participant.roleAtJoin),
+        role: participant.roleAtJoin,
         isCurrentUser: participant.principalId === membership.principalId,
         response: participant.response,
         currentVersion: participant.currentVersion,
         joinedAt: participant.joinedAt,
         updatedAt: participant.updatedAt,
-      };
-    }));
+      }));
   },
 });
 
@@ -411,11 +395,15 @@ export const createCall = mutation({
     await requireCallRoom(ctx, args.missionId, args.roomId);
     await requireVisibleLinkedMove(ctx, args.missionId, membership, args.roomId, args.linkedMoveId);
     const now = Date.now();
+    const creatorAttributionAtAction = await humanAttributionAtAction(ctx, membership.principalId);
     const callId = await ctx.db.insert("calls", {
       missionId: args.missionId,
       roomId: args.roomId,
       linkedMoveId: args.linkedMoveId,
       creatorPrincipalId: membership.principalId,
+      ...(creatorAttributionAtAction?.actorDisplayNameAtAction === undefined ? {} : { creatorDisplayNameAtAction: creatorAttributionAtAction.actorDisplayNameAtAction }),
+      ...(creatorAttributionAtAction === undefined ? {} : { creatorTypeAtAction: creatorAttributionAtAction.actorTypeAtAction }),
+      creatorRoleAtAction: membership.role,
       title,
       detail,
       maxParticipants,
@@ -427,7 +415,7 @@ export const createCall = mutation({
       updatedAt: now,
       schemaVersion: 1,
     });
-    const event = await recordCallEvent(ctx, { missionId: args.missionId, roomId: args.roomId }, membership, "call.created", idempotencyKey, correlationId, "Call created", undefined, 1);
+    const event = await recordCallEvent(ctx, { missionId: args.missionId, roomId: args.roomId }, membership, "call.created", idempotencyKey, correlationId, "Call created", undefined, 1, creatorAttributionAtAction);
     const operationReceiptId = await saveReceipt(ctx, { scope, idempotencyKey, commandFingerprint, missionId: args.missionId, callId, eventId: event.eventId, currentVersion: 1, correlationId, now: event.now });
     return { callId, eventId: event.eventId, operationReceiptId, currentVersion: 1 };
   },
@@ -480,7 +468,8 @@ export const updateCall = mutation({
     await requireCallRoom(ctx, call.missionId, args.roomId);
     await requireVisibleLinkedMove(ctx, call.missionId, membership, args.roomId, linkedMoveId);
     const nextVersion = call.currentVersion + 1;
-    const event = await recordCallEvent(ctx, { ...call, roomId: args.roomId }, membership, "call.updated", idempotencyKey, correlationId, "Call details updated", call.currentVersion, nextVersion);
+    const actorAttributionAtAction = await humanAttributionAtAction(ctx, membership.principalId);
+    const event = await recordCallEvent(ctx, { ...call, roomId: args.roomId }, membership, "call.updated", idempotencyKey, correlationId, "Call details updated", call.currentVersion, nextVersion, actorAttributionAtAction);
     await ctx.db.patch(call._id, { roomId: args.roomId, linkedMoveId, title, detail, maxParticipants, deadlineAt, currentVersion: nextVersion, updatedAt: event.now });
     const operationReceiptId = await saveReceipt(ctx, { scope, idempotencyKey, commandFingerprint, missionId: call.missionId, callId: call._id, eventId: event.eventId, currentVersion: nextVersion, correlationId, now: event.now });
     return { callId: call._id, eventId: event.eventId, operationReceiptId, currentVersion: nextVersion };
@@ -511,7 +500,8 @@ export const transitionCall = mutation({
       ? requiredText(args.resolutionSummary ?? "", "Call resolution summary", 2_000)
       : undefined;
     const nextVersion = call.currentVersion + 1;
-    const event = await recordCallEvent(ctx, call, membership, "call.transitioned", idempotencyKey, correlationId, `Call transitioned to ${args.nextStatus}`, call.currentVersion, nextVersion);
+    const actorAttributionAtAction = await humanAttributionAtAction(ctx, membership.principalId);
+    const event = await recordCallEvent(ctx, call, membership, "call.transitioned", idempotencyKey, correlationId, `Call transitioned to ${args.nextStatus}`, call.currentVersion, nextVersion, actorAttributionAtAction);
     await ctx.db.patch(call._id, {
       status: args.nextStatus,
       ...(resolutionSummary === undefined ? {} : { resolutionSummary, resolvedAt: event.now }),
@@ -577,12 +567,16 @@ export const joinCall = mutation({
     const joinedCount = call.joinedCount ?? 0;
     if (joinedCount >= maxParticipants) throw new Error("Call participant capacity reached");
     const nextCallVersion = call.currentVersion + 1;
-    const event = await recordCallEvent(ctx, call, membership, "call.participantJoined", idempotencyKey, correlationId, "Call participant joined", call.currentVersion, nextCallVersion);
+    const participantAttributionAtJoin = await humanAttributionAtAction(ctx, membership.principalId);
+    const event = await recordCallEvent(ctx, call, membership, "call.participantJoined", idempotencyKey, correlationId, "Call participant joined", call.currentVersion, nextCallVersion, participantAttributionAtJoin);
     const participantVersion = (existing?.currentVersion ?? 0) + 1;
     const participantId = existing?._id ?? await ctx.db.insert("callParticipants", {
       callId: call._id,
       missionId: call.missionId,
       principalId: membership.principalId,
+      ...(participantAttributionAtJoin?.actorDisplayNameAtAction === undefined ? {} : { displayNameAtJoin: participantAttributionAtJoin.actorDisplayNameAtAction }),
+      ...(participantAttributionAtJoin === undefined ? {} : { typeAtJoin: participantAttributionAtJoin.actorTypeAtAction }),
+      roleAtJoin: membership.role,
       state: "joined",
       currentVersion: participantVersion,
       joinedAt: event.now,
@@ -591,7 +585,19 @@ export const joinCall = mutation({
       schemaVersion: 1,
     });
     if (existing) {
-      await ctx.db.patch(existing._id, { state: "joined", response: undefined, currentVersion: participantVersion, joinedAt: event.now, updatedAt: event.now, joinEventId: event.eventId, withdrawEventId: undefined, responseEventId: undefined });
+      await ctx.db.patch(existing._id, {
+        state: "joined",
+        response: undefined,
+        ...(participantAttributionAtJoin?.actorDisplayNameAtAction === undefined ? { displayNameAtJoin: undefined } : { displayNameAtJoin: participantAttributionAtJoin.actorDisplayNameAtAction }),
+        ...(participantAttributionAtJoin === undefined ? { typeAtJoin: undefined } : { typeAtJoin: participantAttributionAtJoin.actorTypeAtAction }),
+        roleAtJoin: membership.role,
+        currentVersion: participantVersion,
+        joinedAt: event.now,
+        updatedAt: event.now,
+        joinEventId: event.eventId,
+        withdrawEventId: undefined,
+        responseEventId: undefined,
+      });
     }
     const nextCall = { ...call, currentVersion: nextCallVersion, joinedCount: joinedCount + 1, updatedAt: event.now };
     await ctx.db.patch(call._id, { currentVersion: nextCallVersion, joinedCount: joinedCount + 1, updatedAt: event.now });
@@ -633,7 +639,8 @@ export const withdrawCall = mutation({
     }
     if (participant.currentVersion !== args.expectedParticipantVersion) throw new Error("Call participant version conflict");
     const nextCallVersion = call.currentVersion + 1;
-    const event = await recordCallEvent(ctx, call, membership, "call.participantWithdrawn", idempotencyKey, correlationId, "Call participant withdrew", call.currentVersion, nextCallVersion);
+    const actorAttributionAtAction = await humanAttributionAtAction(ctx, membership.principalId);
+    const event = await recordCallEvent(ctx, call, membership, "call.participantWithdrawn", idempotencyKey, correlationId, "Call participant withdrew", call.currentVersion, nextCallVersion, actorAttributionAtAction);
     const nextParticipantVersion = participant.currentVersion + 1;
     const nextJoinedCount = Math.max(0, (call.joinedCount ?? 0) - 1);
     const nextCall = { ...call, currentVersion: nextCallVersion, joinedCount: nextJoinedCount, updatedAt: event.now };
@@ -672,7 +679,8 @@ export const respondToCall = mutation({
     if (!participant || participant.state !== "joined") throw new Error("Not found");
     if (participant.currentVersion !== args.expectedParticipantVersion) throw new Error("Call participant version conflict");
     const nextCallVersion = call.currentVersion + 1;
-    const event = await recordCallEvent(ctx, call, membership, "call.responseUpdated", idempotencyKey, correlationId, "Call response updated", call.currentVersion, nextCallVersion);
+    const responseAttributionAtAction = await humanAttributionAtAction(ctx, membership.principalId);
+    const event = await recordCallEvent(ctx, call, membership, "call.responseUpdated", idempotencyKey, correlationId, "Call response updated", call.currentVersion, nextCallVersion, responseAttributionAtAction);
     const nextParticipantVersion = participant.currentVersion + 1;
     const latestResponseRevision = await ctx.db
       .query("callResponseRevisions")
@@ -688,6 +696,9 @@ export const respondToCall = mutation({
       missionId: call.missionId,
       participantId: participant._id,
       principalId: membership.principalId,
+      ...(responseAttributionAtAction?.actorDisplayNameAtAction === undefined ? {} : { displayNameAtAction: responseAttributionAtAction.actorDisplayNameAtAction }),
+      ...(responseAttributionAtAction === undefined ? {} : { typeAtAction: responseAttributionAtAction.actorTypeAtAction }),
+      roleAtAction: membership.role,
       revision: nextResponseRevision,
       response,
       eventId: event.eventId,
