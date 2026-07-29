@@ -454,6 +454,16 @@ function Workshop({
   const linkedMoveTrail = selectedContext?.kind === "Move"
     ? availableContext.filter((context) => context.kind !== "Move" && context.linkedMoveId === selectedContext.moveId)
     : [];
+  const linkedMoveContext = selectedContext !== null && selectedContext.kind !== "Move" && selectedContext.linkedMoveId !== undefined
+    ? availableContext.find((context) => context.kind === "Move" && context.moveId === selectedContext.linkedMoveId) ?? null
+    : null;
+  const returnToLinkedMove = () => {
+    if (selectedContext === null || selectedContext.kind === "Move" || selectedContext.linkedMoveId === undefined) return;
+    const currentLinkedMove = availableContext.find((context) => context.kind === "Move" && context.moveId === selectedContext.linkedMoveId);
+    if (currentLinkedMove === undefined) return;
+    setSelectedContextKey(currentLinkedMove.key);
+    requestAnimationFrame(() => document.getElementById("main-content")?.focus());
+  };
   const selectedUpdatedAt = selectedContext === null
     ? null
     : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(selectedContext.updatedAt);
@@ -529,6 +539,7 @@ function Workshop({
               {selectedContext.kind === "Move" && canAskForHelp ? <button className="secondary-button" onClick={() => onAskForHelp(selectedContext.moveId)} type="button">Ask for help</button> : null}
               {selectedContext.kind === "Move" && canReportFracture ? <button className="secondary-button" onClick={() => onReportFracture(selectedContext.moveId)} type="button">Report a Fracture</button> : null}
               {selectedContext.kind === "Move" && canSubmitProof ? <button className="secondary-button" onClick={() => onSubmitProof(selectedContext.moveId)} type="button">Submit Proof</button> : null}
+              {linkedMoveContext !== null ? <button className="secondary-button" onClick={returnToLinkedMove} type="button">Return to linked Move</button> : null}
               {selectedContext.kind === "Call" ? <button className="secondary-button" onClick={() => onOpenCall(selectedContext.callId)} type="button">Open Call</button> : null}
               {selectedContext.kind === "Fracture" ? <button className="secondary-button" onClick={() => onOpenFracture(selectedContext.fractureId)} type="button">Open Fracture</button> : null}
               {selectedContext.kind === "Proof" ? <button className="secondary-button" onClick={() => onOpenProof(selectedContext.proofId)} type="button">Open Proof</button> : null}
