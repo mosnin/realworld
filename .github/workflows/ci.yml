@@ -48,7 +48,38 @@ jobs:
       - name: Install browser
         run: pnpm exec playwright install --with-deps chromium
       - name: Browser tests
-        run: pnpm exec convex dev --once --tail-logs disable --start "node scripts/verification/run-authenticated-e2e.mjs"
+        run: |
+          status_file=".ci-authenticated-e2e.status"
+          rm -f "$status_file"
+          set +e
+          pnpm exec convex dev --once --tail-logs disable --start "sh -c 'node scripts/verification/run-authenticated-e2e.mjs; e2e_status=\$?; printf \"%s\\n\" \"\$e2e_status\" > \"$status_file\"; exit 0'"
+          convex_status=$?
+          set -e
+          if [ ! -f "$status_file" ]; then
+            if [ "$convex_status" -ne 0 ]; then
+              echo "Ephemeral Convex setup failed with exit code $convex_status."
+              exit "$convex_status"
+            fi
+            echo "Authenticated browser test status was not recorded."
+            exit 1
+          fi
+          e2e_status="$(cat "$status_file")"
+          rm -f "$status_file"
+          if [ "$convex_status" -ne 0 ]; then
+            echo "Ephemeral Convex setup failed with exit code $convex_status."
+            exit "$convex_status"
+          fi
+          case "$e2e_status" in
+            0) ;;
+            *[!0-9]*|'')
+              echo "Authenticated browser test status is invalid: $e2e_status"
+              exit 1
+              ;;
+            *)
+              echo "Authenticated browser tests failed with exit code $e2e_status."
+              exit "$e2e_status"
+              ;;
+          esac
       - name: Verify foundation evidence
         env:
           RW_EVIDENCE_AUTOMATED: install,lint,typecheck,unit,convex-tests,build,chromium,accessibility
