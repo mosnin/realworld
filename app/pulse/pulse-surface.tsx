@@ -29,7 +29,7 @@ export function PulseSurface({ mission }: Readonly<{ mission: Mission }>) {
   return <footer aria-label="Mission activity Pulse" className="pulse-surface">
     {open ? <section aria-label="Recent durable Mission activity" className="pulse-surface__detail">
       {entries === undefined ? <p aria-live="polite">Loading durable activity…</p> : entries.length === 0 ? <p>No durable Mission activity yet. The first real action will appear here.</p> : <>
-        {selected ? <div aria-live="polite" className="pulse-surface__selected"><strong>{selected.summary}</strong><span>{actorLabel(selected)} · {selected.roomTitle ?? "Mission-wide"} · {timeLabel(selected.createdAt)}</span></div> : null}
+        {selected ? <div className="pulse-surface__selected"><strong>{selected.summary}</strong><span>{actorLabel(selected)} · {selected.roomTitle ?? "Mission-wide"} · {timeLabel(selected.createdAt)}</span></div> : null}
         <ol className="pulse-surface__events">
           {entries.map((entry) => <li key={entry._id}><button aria-pressed={selected?._id === entry._id} onClick={() => setSelectedId(entry._id)} type="button"><span className={`pulse-surface__event-mark pulse-surface__event-mark--${entry.actorType}`} aria-hidden="true">{actorLabel(entry).slice(0, 1)}</span><span><strong>{entry.summary}</strong><small>{actorLabel(entry)} · {entry.roomTitle ?? "Mission-wide"} · {timeLabel(entry.createdAt)}</small></span></button></li>)}
         </ol>
@@ -39,7 +39,7 @@ export function PulseSurface({ mission }: Readonly<{ mission: Mission }>) {
     <div className="pulse-rail">
       <div><strong>Pulse</strong><span>{entries === undefined ? "Loading activity" : entries.length === 0 ? "Waiting for a durable action" : "Durable activity"}</span></div>
       <div aria-hidden="true" className="pulse-rail__route" />
-      <div aria-label={entries === undefined ? "Loading Mission activity" : `${entries.length} recent durable Mission events`} className="pulse-rail__people">
+      <div className="pulse-rail__people">
         {entries?.slice(0, 7).map((entry) => <button aria-label={`${actorLabel(entry)}: ${entry.summary}`} className={`pulse-surface__node pulse-surface__node--${entry.actorType}`} key={entry._id} onClick={() => { setSelectedId(entry._id); setOpen(true); }} type="button">{actorLabel(entry).slice(0, 1)}</button>)}
       </div>
       <button aria-expanded={open} className="pulse-rail__count" onClick={() => setOpen((current) => !current)} type="button">{open ? "Close Mission Pulse" : "Open Mission Pulse"}{entries === undefined ? "" : ` (${entries.length})`}</button>
