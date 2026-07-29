@@ -738,8 +738,10 @@ test("an owner can issue, edit, advance, and reload a durable room Call", async 
   await resolvedBeacon.focus();
   await page.keyboard.press("Enter");
   await expect(callDialog.getByLabel("Mission Calls read-only")).toBeVisible();
-  await expect(callDialog.getByRole("list", { name: "Mission Calls" }).getByText(updatedDetail, { exact: true })).toBeVisible();
-  await expect(callDialog.getByRole("list", { name: "Mission Calls" }).getByText(`Workshop · Move: ${linkedMove}`, { exact: true })).toBeVisible();
+  const archivedResolvedCall = callDialog.getByLabel(`Call details for ${updatedTitle}`);
+  await expect(archivedResolvedCall).toContainText(updatedDetail);
+  await expect(archivedResolvedCall).toContainText("Room: Workshop");
+  await expect(archivedResolvedCall).toContainText(`Linked Move: ${linkedMove}`);
   await expect(callDialog.getByLabel("Call title")).toHaveCount(0);
   await expect(callDialog.getByLabel(`Call actions for ${updatedTitle}`)).toHaveCount(0);
 });
