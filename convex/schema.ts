@@ -256,6 +256,10 @@ export default defineSchema({
     aggregateType: v.literal("mission"),
     aggregateId: v.id("missions"),
     actorPrincipalId: v.id("principals"),
+    // Immutable presentation snapshot. Legacy rows intentionally omit it and
+    // projections must never recover a value from the mutable principal.
+    actorDisplayNameAtAction: v.optional(v.string()),
+    actorTypeAtAction: v.optional(principalType),
     effectiveRole: membershipRole,
     correlationId: v.string(),
     idempotencyKey: v.string(),

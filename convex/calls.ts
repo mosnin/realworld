@@ -4,6 +4,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
 import { requireActiveMembership, requireRole, requireWritableMission } from "./lib/auth";
+import { humanAttributionAtAction } from "./lib/human-attribution";
 
 const callStatus = v.union(
   v.literal("open"),
@@ -211,6 +212,7 @@ async function recordCallEvent(
   const mission = await ctx.db.get(call.missionId);
   if (!mission) throw new Error("Not found");
   const now = Date.now();
+  const actorAttributionAtAction = await humanAttributionAtAction(ctx, membership.principalId);
   const eventId = await ctx.db.insert("missionEvents", {
     missionId: mission._id,
     ...(call.roomId === undefined ? {} : { roomId: call.roomId }),
@@ -218,6 +220,7 @@ async function recordCallEvent(
     aggregateType: "mission",
     aggregateId: mission._id,
     actorPrincipalId: membership.principalId,
+    ...(actorAttributionAtAction ?? {}),
     effectiveRole: membership.role,
     correlationId,
     idempotencyKey,

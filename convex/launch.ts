@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { mutation } from "./_generated/server";
 import { requireAuthenticatedTokenIdentifier } from "./lib/auth";
+import { humanAttributionAtAction } from "./lib/human-attribution";
 import { isMissionTemplateKey, missionTemplates } from "./lib/mission_templates";
 
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -28,7 +29,8 @@ export const createMissionFromTemplate = mutation({
     let workshopId: Id<"rooms"> | undefined;
     for (const [index, kind] of template.rooms.entries()) { const id = await ctx.db.insert("rooms", { missionId, kind, title: roomTitles[kind], accessPolicy: "mission", mapType: "field", layout: { x: 160 + (index % 3) * 260, y: 180 + Math.floor(index / 3) * 190, width: 220, height: 140 }, layoutVersion: 1, state: "active", currentVersion: 1, createdAt: now, updatedAt: now, schemaVersion: 1 }); if (kind === "workshop") workshopId = id; }
     for (const title of template.moves) await ctx.db.insert("moves", { missionId, roomId: workshopId, title, intent: title, state: "proposed", currentVersion: 1, createdAt: now, updatedAt: now, schemaVersion: 1 });
-    const eventId = await ctx.db.insert("missionEvents", { missionId, type: "mission.created", aggregateType: "mission", aggregateId: missionId, actorPrincipalId: principalId, effectiveRole: "owner", correlationId: args.correlationId, idempotencyKey: args.idempotencyKey, publicSummary: `Mission launched from ${args.templateKey}`, afterVersion: 1, createdAt: now, schemaVersion: 1 });
+    const actorAttributionAtAction = await humanAttributionAtAction(ctx, principalId);
+    const eventId = await ctx.db.insert("missionEvents", { missionId, type: "mission.created", aggregateType: "mission", aggregateId: missionId, actorPrincipalId: principalId, ...(actorAttributionAtAction ?? {}), effectiveRole: "owner", correlationId: args.correlationId, idempotencyKey: args.idempotencyKey, publicSummary: `Mission launched from ${args.templateKey}`, afterVersion: 1, createdAt: now, schemaVersion: 1 });
     await ctx.db.insert("operationReceipts", { scope, idempotencyKey: args.idempotencyKey, commandFingerprint: fingerprint, state: "complete", missionId, eventId, resultVersion: 1, correlationId: args.correlationId, createdAt: now, expiresAt: now + 30 * 86400000, schemaVersion: 1 });
     return { missionId, eventId, currentVersion: 1 };
   },

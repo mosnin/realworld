@@ -4,6 +4,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { requireActiveMembership, requireRole, requireWritableMission } from "./lib/auth";
+import { humanAttributionAtAction } from "./lib/human-attribution";
 
 const fractureStatus = v.union(v.literal("open"), v.literal("investigating"), v.literal("resolved"), v.literal("dismissed"));
 const fractureSeverity = v.union(v.literal("low"), v.literal("medium"), v.literal("high"), v.literal("critical"));
@@ -129,6 +130,7 @@ async function recordFractureEvent(
   const mission = await ctx.db.get(fracture.missionId);
   if (!mission) throw new Error("Not found");
   const now = Date.now();
+  const actorAttributionAtAction = await humanAttributionAtAction(ctx, membership.principalId);
   const eventId = await ctx.db.insert("missionEvents", {
     missionId: mission._id,
     roomId: fracture.roomId,
@@ -136,6 +138,7 @@ async function recordFractureEvent(
     aggregateType: "mission",
     aggregateId: mission._id,
     actorPrincipalId: membership.principalId,
+    ...(actorAttributionAtAction ?? {}),
     effectiveRole: membership.role,
     correlationId,
     idempotencyKey,

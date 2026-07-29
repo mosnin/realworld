@@ -4,6 +4,7 @@ import type { Doc } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
 import { requireActiveMembership, requireRole, requireWritableMission } from "./lib/auth";
+import { humanAttributionAtAction } from "./lib/human-attribution";
 
 const layout = v.object({ x: v.number(), y: v.number(), width: v.number(), height: v.number() });
 const roomKind = v.union(v.literal("missionCore"), v.literal("workshop"), v.literal("observatory"), v.literal("branchLab"), v.literal("reviewDeck"), v.literal("signalTower"), v.literal("surgeHall"));
@@ -51,7 +52,8 @@ async function recordRoomEvent(ctx: MutationCtx, room: Pick<Doc<"rooms">, "_id" 
   const mission = await ctx.db.get(room.missionId);
   if (!mission) throw new Error("Not found");
   const now = Date.now();
-  const eventId = await ctx.db.insert("missionEvents", { missionId: mission._id, roomId: room._id, type, aggregateType: "mission", aggregateId: mission._id, actorPrincipalId: member.principalId, effectiveRole: member.role, correlationId: `room:${idempotencyKey}`, idempotencyKey, publicSummary: summary, afterVersion, createdAt: now, schemaVersion: 1 });
+  const actorAttributionAtAction = await humanAttributionAtAction(ctx, member.principalId);
+  const eventId = await ctx.db.insert("missionEvents", { missionId: mission._id, roomId: room._id, type, aggregateType: "mission", aggregateId: mission._id, actorPrincipalId: member.principalId, ...(actorAttributionAtAction ?? {}), effectiveRole: member.role, correlationId: `room:${idempotencyKey}`, idempotencyKey, publicSummary: summary, afterVersion, createdAt: now, schemaVersion: 1 });
   return { eventId, now };
 }
 

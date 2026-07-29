@@ -212,6 +212,102 @@ describe("Pulse kernel", () => {
     expect(pulse.every((entry) => entry.roomId === workshopId)).toBe(true);
   });
 
+  it("keeps action-time callsigns immutable and renders legacy rows without mutable-principal joins", async () => {
+    const { t, asOwner, missionId, workshopId } = await setup();
+    const builder = identity("builder");
+    const asBuilder = await grant(t, missionId, "builder", "builder", [`room:${workshopId}`]);
+    const firstArgs = createMoveArgs(missionId, workshopId, "callsign-before-rename");
+    const first = await asBuilder.mutation(api.moves.createMove, firstArgs);
+
+    await t.run(async (ctx) => {
+      const principal = await ctx.db.query("principals")
+        .withIndex("by_token_identifier", (index) => index.eq("tokenIdentifier", builder.tokenIdentifier))
+        .unique();
+      if (!principal) throw new Error("Test setup failed");
+      await ctx.db.patch(principal._id, {
+        displayName: "Renamed Builder",
+        displayNameUpdatedAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+    });
+    // Exact replay returns the original durable action rather than recapturing
+    // the current profile name.
+    expect(await asBuilder.mutation(api.moves.createMove, firstArgs)).toEqual(first);
+    const second = await asBuilder.mutation(api.moves.createMove, createMoveArgs(missionId, workshopId, "callsign-after-rename"));
+    const [legacyCurrentActorEventId, legacyMissingActorEventId] = await t.run(async (ctx) => {
+      const now = Date.now();
+      const builderPrincipal = await ctx.db.query("principals")
+        .withIndex("by_token_identifier", (index) => index.eq("tokenIdentifier", builder.tokenIdentifier))
+        .unique();
+      if (!builderPrincipal) throw new Error("Test setup failed");
+      const legacyCurrentActorEventId = await ctx.db.insert("missionEvents", {
+        missionId,
+        roomId: workshopId,
+        type: "move.created",
+        aggregateType: "mission",
+        aggregateId: missionId,
+        actorPrincipalId: builderPrincipal._id,
+        effectiveRole: "builder",
+        correlationId: "legacy-current-actor",
+        idempotencyKey: "legacy-current-actor",
+        publicSummary: "Legacy event must not read the renamed principal",
+        afterVersion: 1,
+        createdAt: now,
+        schemaVersion: 1,
+      });
+      const missingPrincipalId = await ctx.db.insert("principals", {
+        type: "human",
+        state: "active",
+        displayName: "Mutable legacy name",
+        createdAt: now,
+        updatedAt: now,
+        schemaVersion: 1,
+      });
+      const eventId = await ctx.db.insert("missionEvents", {
+        missionId,
+        type: "mission.updated",
+        aggregateType: "mission",
+        aggregateId: missionId,
+        actorPrincipalId: missingPrincipalId,
+        effectiveRole: "owner",
+        correlationId: "legacy-missing-actor",
+        idempotencyKey: "legacy-missing-actor",
+        publicSummary: "Legacy event stays attributable only by role",
+        afterVersion: 1,
+        createdAt: now,
+        schemaVersion: 1,
+      });
+      await ctx.db.delete(missingPrincipalId);
+      return [legacyCurrentActorEventId, eventId];
+    });
+
+    const pulse = await asOwner.query(api.pulse.listMissionPulse, { missionId, limit: 50 });
+    expect(pulse.find((entry) => entry._id === first.eventId)).toMatchObject({
+      actorDisplayName: "Pulse builder",
+      actorType: "human",
+    });
+    expect(pulse.find((entry) => entry._id === second.eventId)).toMatchObject({
+      actorDisplayName: "Renamed Builder",
+      actorType: "human",
+    });
+    expect(pulse.find((entry) => entry._id === legacyCurrentActorEventId)).toMatchObject({
+      actorDisplayName: "builder collaborator",
+      actorType: "human",
+    });
+    expect(pulse.find((entry) => entry._id === legacyMissingActorEventId)).toMatchObject({
+      actorDisplayName: "owner collaborator",
+      actorType: "human",
+    });
+    await t.run(async (ctx) => {
+      const [firstEvent, secondEvent] = await Promise.all([
+        ctx.db.get(first.eventId),
+        ctx.db.get(second.eventId),
+      ]);
+      expect(firstEvent).toMatchObject({ actorDisplayNameAtAction: "Pulse builder", actorTypeAtAction: "human" });
+      expect(secondEvent).toMatchObject({ actorDisplayNameAtAction: "Renamed Builder", actorTypeAtAction: "human" });
+    });
+  });
+
   it("denies observer and cross-Mission probes while retaining authorized history after archive", async () => {
     const { t, asOwner, missionId, workshopId } = await setup();
     const asBuilder = await grant(t, missionId, "builder", "builder", [`room:${workshopId}`]);

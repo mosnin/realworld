@@ -4,6 +4,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
 import { requireActiveMembership, requireRole, requireWritableMission } from "./lib/auth";
+import { humanAttributionAtAction } from "./lib/human-attribution";
 
 const moveState = v.union(v.literal("proposed"), v.literal("ready"), v.literal("inProgress"), v.literal("blocked"), v.literal("review"), v.literal("completed"), v.literal("cancelled"));
 const storedMoveState = v.union(v.literal("proposed"), v.literal("ready"), v.literal("claimed"), v.literal("inProgress"), v.literal("blocked"), v.literal("review"), v.literal("completed"), v.literal("cancelled"), v.literal("archived"));
@@ -82,7 +83,8 @@ async function recordMoveEvent(ctx: MutationCtx, move: Pick<Doc<"moves">, "missi
   const mission = await ctx.db.get(move.missionId);
   if (!mission) throw new Error("Not found");
   const now = Date.now();
-  const eventId = await ctx.db.insert("missionEvents", { missionId: mission._id, ...(move.roomId === undefined ? {} : { roomId: move.roomId }), type, aggregateType: "mission", aggregateId: mission._id, actorPrincipalId: membership.principalId, effectiveRole: membership.role, correlationId, idempotencyKey, publicSummary: summary, ...(beforeVersion === undefined ? {} : { beforeVersion }), afterVersion, createdAt: now, schemaVersion: 1 });
+  const actorAttributionAtAction = await humanAttributionAtAction(ctx, membership.principalId);
+  const eventId = await ctx.db.insert("missionEvents", { missionId: mission._id, ...(move.roomId === undefined ? {} : { roomId: move.roomId }), type, aggregateType: "mission", aggregateId: mission._id, actorPrincipalId: membership.principalId, ...(actorAttributionAtAction ?? {}), effectiveRole: membership.role, correlationId, idempotencyKey, publicSummary: summary, ...(beforeVersion === undefined ? {} : { beforeVersion }), afterVersion, createdAt: now, schemaVersion: 1 });
   return { eventId, now };
 }
 

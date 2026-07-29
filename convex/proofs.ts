@@ -4,6 +4,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { requireActiveMembership, requireRole, requireWritableMission } from "./lib/auth";
+import { humanAttributionAtAction } from "./lib/human-attribution";
 
 const proofStatus = v.union(v.literal("submitted"), v.literal("verified"), v.literal("rejected"));
 const receiptMs = 30 * 86400000;
@@ -121,6 +122,7 @@ async function recordProofEvent(
   const mission = await ctx.db.get(proof.missionId);
   if (!mission) throw new Error("Not found");
   const now = Date.now();
+  const actorAttributionAtAction = await humanAttributionAtAction(ctx, membership.principalId);
   const eventId = await ctx.db.insert("missionEvents", {
     missionId: mission._id,
     roomId: proof.roomId,
@@ -128,6 +130,7 @@ async function recordProofEvent(
     aggregateType: "mission",
     aggregateId: mission._id,
     actorPrincipalId: membership.principalId,
+    ...(actorAttributionAtAction ?? {}),
     effectiveRole: membership.role,
     correlationId,
     idempotencyKey,

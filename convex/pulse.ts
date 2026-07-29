@@ -65,15 +65,16 @@ async function projectEvent(
   } else if (requestedRoomId !== undefined ? room._id !== requestedRoomId : !canReadRoom(membership, room._id)) {
     return null;
   }
-  const actor = await ctx.db.get(event.actorPrincipalId);
-  if (!actor) return null;
+  // Never join the mutable callsign from principals here. Existing events that
+  // predate snapshots deliberately retain a safe role/generic label.
+  const actorDisplayName = event.actorDisplayNameAtAction ?? `${event.effectiveRole} collaborator`;
   return {
     _id: event._id,
     missionId: event.missionId,
     eventType: event.type,
     summary: event.publicSummary,
-    ...(actor.displayName === undefined ? {} : { actorDisplayName: actor.displayName }),
-    actorType: actor.type,
+    actorDisplayName,
+    actorType: event.actorTypeAtAction ?? (event.effectiveRole === "agent" ? "agent" : "human"),
     effectiveRole: event.effectiveRole,
     ...(room === undefined ? {} : { roomId: room._id, roomTitle: room.title }),
     createdAt: event.createdAt,
