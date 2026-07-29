@@ -6,6 +6,24 @@ async function completeCallsign(page: Page, callsign: string) {
   await page.getByRole("button", { name: "Save callsign" }).click();
 }
 
+async function enterWorkshop(page: Page) {
+  await page.getByRole("button", { name: /^Workshop\./ }).click();
+  await page.getByRole("complementary", { name: "Workshop" }).getByRole("button", { name: "Enter Workshop" }).click();
+}
+
+async function expectWorkshopContext(page: Page) {
+  await expect(page.getByRole("heading", { name: "Durable work in Workshop." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Select a Move or Call." })).toBeVisible();
+  await expect(page.getByRole("article", { name: "Durable room context" })).toBeVisible();
+  const availableWork = page.getByRole("list", { name: "Available durable work" });
+  const firstContext = availableWork.getByRole("button").first();
+  await firstContext.focus();
+  await expect(firstContext).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByLabel("Selected durable context")).toContainText("State");
+  return availableWork;
+}
+
 test.beforeEach(async ({ page }, testInfo) => {
   await page.goto("/");
 
@@ -59,7 +77,7 @@ test("a participant can inspect and enter Workshop from the Mission World", asyn
   await page.getByRole("button", { name: /^Workshop\./ }).click();
   await expect(page.getByRole("heading", { name: "Workshop" })).toBeVisible();
   await page.getByRole("complementary", { name: "Workshop" }).getByRole("button", { name: "Enter Workshop" }).click();
-  await expect(page.getByRole("heading", { name: "No durable Artifact is selected." })).toBeVisible();
+  await expectWorkshopContext(page);
   await page.getByRole("button", { name: "Mission World" }).click();
   await expect(page.getByRole("heading", { name: "Company sprint" })).toBeVisible();
 });
@@ -70,7 +88,7 @@ test("the room directory provides a non-spatial path to Workshop", async ({ page
   await page.getByRole("button", { name: "Room directory" }).click();
   await expect(page.getByRole("heading", { name: "Mission rooms" })).toBeVisible();
   await page.locator(".room-directory").getByRole("button", { name: "Enter Workshop" }).click();
-  await expect(page.getByRole("heading", { name: "No durable Artifact is selected." })).toBeVisible();
+  await expectWorkshopContext(page);
 });
 
 test.describe("on a phone-sized Mission World", () => {
@@ -88,7 +106,7 @@ test.describe("on a phone-sized Mission World", () => {
     await expect(page.getByRole("heading", { name: "Mission rooms" })).toBeVisible();
 
     await page.locator(".room-directory").getByRole("button", { name: "Enter Workshop" }).click();
-    await expect(page.getByRole("heading", { name: "No durable Artifact is selected." })).toBeVisible();
+    await expectWorkshopContext(page);
 
     await page.getByRole("button", { name: "Mission World" }).click();
     await expect(page.getByRole("heading", { name: "Company sprint" })).toBeVisible();
@@ -374,6 +392,14 @@ test("an owner can create, link, advance, and reload durable Moves", async ({ pa
   await page.getByRole("button", { name: /Open Moves/ }).click();
   await expect(board.getByRole("article", { name: `Move ${updatedTitle}` }).getByText("completed", { exact: true })).toBeVisible();
   await expect(board.getByRole("article", { name: `Move ${updatedTitle}` }).getByText(`Depends on ${prerequisite}`)).toBeVisible();
+  await board.getByRole("button", { name: "Close Moves" }).click();
+  const workshopWork = await (async () => {
+    await enterWorkshop(page);
+    return await expectWorkshopContext(page);
+  })();
+  await workshopWork.getByRole("button", { name: new RegExp(updatedTitle) }).click();
+  await expect(page.getByLabel("Selected durable context")).toContainText(updatedIntent);
+  await expect(page.getByLabel("Selected durable context")).toContainText("completed");
 });
 
 test("an owner can issue, edit, advance, and reload a durable room Call", async ({ page }) => {
@@ -454,6 +480,15 @@ test("an owner can issue, edit, advance, and reload a durable room Call", async 
   await expect(callDialog.getByLabel(`Call actions for ${updatedTitle}`)).toHaveCount(0);
 
   await callDialog.getByRole("button", { name: "Close Calls" }).click();
+  const workshopWork = await (async () => {
+    await enterWorkshop(page);
+    return await expectWorkshopContext(page);
+  })();
+  await workshopWork.getByRole("button", { name: new RegExp(updatedTitle) }).click();
+  await expect(page.getByLabel("Selected durable context")).toContainText(updatedDetail);
+  await expect(page.getByLabel("Selected durable context")).toContainText("resolved");
+  await expect(page.getByLabel("Selected durable context")).toContainText("Joined participants");
+  await page.getByRole("button", { name: "Mission World" }).click();
   await page.getByRole("button", { name: "Manage Mission" }).click();
   await page.getByRole("button", { name: "Archive Mission" }).click();
   await expect(page.getByRole("status", { name: "Archived Mission read-only" })).toBeVisible();
@@ -796,10 +831,10 @@ test("a scoped observer receives a stable read-only Mission shell without privat
     await expect(calls.getByLabel("Mission Calls read-only")).toBeVisible();
     await calls.getByRole("button", { name: "Close Calls" }).click();
 
-    await observer.getByRole("button", { name: /^Workshop\./ }).click();
-    await observer.getByRole("button", { name: "Enter Workshop" }).click();
-    await expect(observer.getByText("Read-only observer view", { exact: true })).toBeVisible();
-    await expect(observer.getByText("Live presence is not connected to this room yet. Durable work appears in Pulse.")).toBeVisible();
+    await enterWorkshop(observer);
+    const observerWork = await expectWorkshopContext(observer);
+    await expect(observerWork.getByRole("button")).toHaveCount(3);
+    await expect(observerWork.getByText("Mission Core", { exact: true })).toHaveCount(0);
     await expect(observer.getByLabel("Mission activity Pulse")).toHaveCount(0);
     await observer.getByRole("button", { name: "Mission World" }).click();
     await expect(observer.getByRole("heading", { name: "Company sprint" })).toBeVisible();

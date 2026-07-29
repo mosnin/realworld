@@ -265,8 +265,76 @@ function CallsignBadge({ callsign }: Readonly<{ callsign: string }>) {
   );
 }
 
-function Workshop({ mission, onExit }: Readonly<{ mission: { _id: Id<"missions">; role: string }; onExit: () => void }>) {
-  const isObserver = mission.role === "observer";
+type WorkshopMove = {
+  _id: Id<"moves">;
+  roomId?: Id<"rooms">;
+  title: string;
+  intent: string;
+  state: string;
+  currentVersion: number;
+  updatedAt: number;
+};
+
+type WorkshopCall = {
+  _id: Id<"calls">;
+  roomId?: Id<"rooms">;
+  title: string;
+  detail: string;
+  status: string;
+  joinedCount: number;
+  maxParticipants: number;
+  currentVersion: number;
+  updatedAt: number;
+};
+
+type WorkshopContext =
+  | { key: string; kind: "Move"; title: string; detail: string; state: string; version: number; updatedAt: number }
+  | { key: string; kind: "Call"; title: string; detail: string; state: string; joinedCount: number; maxParticipants: number; version: number; updatedAt: number };
+
+function Workshop({
+  mission,
+  roomId,
+  roomTitle,
+  moves,
+  calls,
+  onExit,
+}: Readonly<{
+  mission: { _id: Id<"missions">; role: string };
+  roomId: Id<"rooms">;
+  roomTitle: string;
+  moves: WorkshopMove[] | undefined;
+  calls: WorkshopCall[] | undefined;
+  onExit: () => void;
+}>) {
+  const [selectedContextKey, setSelectedContextKey] = useState<string | null>(null);
+  const loading = moves === undefined || calls === undefined;
+  const availableContext: WorkshopContext[] = [
+    ...(moves ?? []).filter((move) => move.roomId === roomId).map((move) => ({
+      key: `move:${move._id}`,
+      kind: "Move" as const,
+      title: move.title,
+      detail: move.intent,
+      state: move.state,
+      version: move.currentVersion,
+      updatedAt: move.updatedAt,
+    })),
+    ...(calls ?? []).filter((call) => call.roomId === roomId).map((call) => ({
+      key: `call:${call._id}`,
+      kind: "Call" as const,
+      title: call.title,
+      detail: call.detail,
+      state: call.status,
+      joinedCount: call.joinedCount,
+      maxParticipants: call.maxParticipants,
+      version: call.currentVersion,
+      updatedAt: call.updatedAt,
+    })),
+  ].sort((left, right) => right.updatedAt - left.updatedAt);
+  const selectedContext = availableContext.find((context) => context.key === selectedContextKey) ?? null;
+  const selectedUpdatedAt = selectedContext === null
+    ? null
+    : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(selectedContext.updatedAt);
+
   return (
     <div className="workshop-view" aria-labelledby="workshop-heading">
       <header className="room-topbar">
@@ -279,24 +347,50 @@ function Workshop({ mission, onExit }: Readonly<{ mission: { _id: Id<"missions">
       <div className="workshop-layout">
         <aside className="workshop-rail" aria-label="Workshop context">
           <p className="eyebrow">Workshop context</p>
-          <h1 id="workshop-heading">Make room entry feel instantly useful.</h1>
-          <p>Turn the first room into a place where a team can produce a durable Artifact.</p>
-          <p>Live presence is not connected to this room yet. Durable work appears in Pulse.</p>
+          <h1 id="workshop-heading">Durable work in {roomTitle}.</h1>
+          <p>Moves and Calls below are scoped to this room. They are not live presence or a Mission-wide feed.</p>
+          <section className="workshop-context-list" aria-labelledby="available-durable-work-heading">
+            <h2 id="available-durable-work-heading">Available durable work</h2>
+            {loading ? <p aria-live="polite">Loading room-scoped durable work…</p> : availableContext.length === 0 ? <p>No durable Moves or Calls are scoped to this room yet.</p> : (
+              <ul aria-label="Available durable work">
+                {availableContext.map((context) => (
+                  <li key={context.key}>
+                    <button aria-pressed={selectedContext?.key === context.key} onClick={() => setSelectedContextKey(context.key)} type="button">
+                      <span className="workshop-context-list__kind">{context.kind}</span>
+                      <strong>{context.title}</strong>
+                      <small>{context.state}</small>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
         </aside>
         <main className="artifact-canvas" id="main-content" tabIndex={-1}>
-          <div className="artifact-toolbar" aria-label="Artifact context"><span className="artifact-kind">{isObserver ? "Read-only observer view" : "No Artifact selected"}</span></div>
-          <article className="artifact-paper" aria-label="Room entry interaction brief">
-            <p className="eyebrow">Room brief</p>
-            <h2>No durable Artifact is selected.</h2>
-            <p>
-              Create a Move, issue a Call, or open Pulse to orient the next piece of shared work.
-            </p>
+          <div className="artifact-toolbar" aria-label="Durable room context"><span className="artifact-kind">Read-only room context</span></div>
+          <article className="artifact-paper" aria-label={selectedContext === null ? "Durable room context" : "Selected durable context"}>
+            {selectedContext === null ? <>
+              <p className="eyebrow">Room context</p>
+              <h2>Select a Move or Call.</h2>
+              <p>Choose an item from Available durable work to inspect its accountable state. Pulse remains separate Mission history.</p>
+            </> : <>
+              <p className="eyebrow">{selectedContext.kind}</p>
+              <h2>{selectedContext.title}</h2>
+              <p>{selectedContext.detail}</p>
+              <dl className="workshop-context-facts">
+                <div><dt>State</dt><dd>{selectedContext.state}</dd></div>
+                {selectedContext.kind === "Call" ? <div><dt>Joined participants</dt><dd>{selectedContext.joinedCount} / {selectedContext.maxParticipants}</dd></div> : null}
+                <div><dt>Version</dt><dd>{selectedContext.version}</dd></div>
+                <div><dt>Updated</dt><dd>{selectedUpdatedAt}</dd></div>
+              </dl>
+            </>}
           </article>
         </main>
-        <aside className="workshop-inspector" aria-label="Selected Move">
-          <p className="eyebrow">Selected Move</p>
-          <h2>Durable work appears here.</h2>
-          <p>Choose a durable Move or Call to inspect its accountable state.</p>
+        <aside className="workshop-inspector" aria-label="Durable context guide">
+          <p className="eyebrow">Read-only context</p>
+          <h2>Inspect, then act in the Mission World.</h2>
+          <p>Workshop does not create or change work. Use the Mission World controls to make a durable Move or Call.</p>
+          <p>Joined participant counts are durable participation records, not live presence.</p>
         </aside>
       </div>
       {mission.role === "observer" ? null : <PulseSurface mission={mission} />}
@@ -356,6 +450,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   const canManageCanvas = activeMission?.lifecycle === "active" && ["owner", "steward", "builder"].includes(activeMission.role);
   const roomRecords = useQuery(api.canvas.roomLayouts, activeMission === undefined ? "skip" : { missionId: activeMission._id });
   const missionMoves = useQuery(api.moves.listMissionMoves, activeMission === undefined ? "skip" : { missionId: activeMission._id });
+  const missionCalls = useQuery(api.calls.listMissionCalls, activeMission === undefined ? "skip" : { missionId: activeMission._id });
   const launch = useMutation(api.launch.createMissionFromTemplate);
   const createRoomMutation = useMutation(api.canvas.createRoom);
   const updateRoomLayout = useMutation(api.canvas.updateRoomLayout);
@@ -391,7 +486,8 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   const [newRoomName, setNewRoomName] = useState("");
   const [roomError, setRoomError] = useState<string | null>(null);
   const canvasRooms = roomRecords?.map(canvasRoom) ?? [];
-  const selectedRoom = canvasRooms.find((room) => room.id === selectedRoomId) ?? canvasRooms[0];
+  const selectedRoomRecord = canvasRooms.find((room) => room.id === selectedRoomId);
+  const selectedRoom = selectedRoomRecord ?? canvasRooms[0];
   const realtimeRoomReadiness = useQuery(
     api.missions.getRealtimeRoomReadiness,
     activeMission?.lifecycle === "active" && selectedRoom !== undefined
@@ -464,6 +560,15 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   useEffect(() => {
     if (selectedRoomHash !== undefined) window.history.replaceState(null, "", view === "workshop" ? "#workshop" : `#${selectedRoomHash}`);
   }, [selectedRoomHash, view]);
+
+  useEffect(() => {
+    if (view !== "workshop" || roomRecords === undefined || selectedRoomRecord !== undefined) return;
+    const frame = window.requestAnimationFrame(() => {
+      setView("world");
+      setRoomError("That room is no longer available.");
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [roomRecords, selectedRoomRecord, view]);
 
   function enterRoom(roomId: RoomId) {
     setSelectedRoomId(roomId);
@@ -593,8 +698,8 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   }
   const missionWritable = activeMission.lifecycle === "active";
 
-  if (view === "workshop") {
-    return <><AuthenticatedMissionRealtimeLifecycle authenticatedTokenRequester={requestAuthenticatedRealtimeToken} expectedMissionId={activeMission._id} expectedRoomId={selectedRoom.id} membershipGrantVersion={activeMission.grantVersion} readiness={realtimeRoomReadiness} transportFactory={developmentRealtimeTransportFactory} /><Workshop mission={activeMission} onExit={() => setView("world")} /></>;
+  if (view === "workshop" && selectedRoomRecord !== undefined) {
+    return <><AuthenticatedMissionRealtimeLifecycle authenticatedTokenRequester={requestAuthenticatedRealtimeToken} expectedMissionId={activeMission._id} expectedRoomId={selectedRoomRecord.id} membershipGrantVersion={activeMission.grantVersion} readiness={realtimeRoomReadiness} transportFactory={developmentRealtimeTransportFactory} /><Workshop calls={missionCalls} mission={activeMission} moves={missionMoves} onExit={() => setView("world")} roomId={selectedRoomRecord.id as Id<"rooms">} roomTitle={selectedRoomRecord.name} /></>;
   }
 
   return (
