@@ -542,6 +542,11 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   const canvasRooms = roomRecords?.map((room) => canvasRoom(room, roomMoveSignal(room._id, missionMoves))) ?? [];
   const selectedRoomRecord = canvasRooms.find((room) => room.id === selectedRoomId);
   const selectedRoom = selectedRoomRecord ?? canvasRooms[0];
+  const latestSelectedRoomMove = missionMoves === undefined || selectedRoom === undefined
+    ? undefined
+    : missionMoves
+      .filter((move) => move.roomId === selectedRoom.id)
+      .reduce<(typeof missionMoves)[number] | undefined>((latest, move) => latest === undefined || move.updatedAt > latest.updatedAt || (move.updatedAt === latest.updatedAt && String(move._id).localeCompare(String(latest._id)) > 0) ? move : latest, undefined);
   const realtimeRoomReadiness = useQuery(
     api.missions.getRealtimeRoomReadiness,
     activeMission?.lifecycle === "active" && selectedRoom !== undefined
@@ -638,20 +643,25 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
     setView("world");
   }
 
-  function viewCreatedMoveInWorkshop({ roomId, moveId }: { roomId: Id<"rooms">; moveId: Id<"moves"> }) {
+  function inspectWorkshopContext(roomId: Id<"rooms">, key: string) {
     if (!canvasRooms.some((room) => room.id === roomId)) {
       setWorkshopContextRequest(null);
       setView("world");
       setRoomError("That room is no longer available.");
+      requestAnimationFrame(() => document.getElementById("main-content")?.focus());
       return;
     }
-    setWorkshopContextRequest({ roomId, key: `move:${moveId}` });
+    setWorkshopContextRequest({ roomId, key });
     setSelectedRoomId(roomId);
     setView("workshop");
     requestAnimationFrame(() => {
       setWorkshopContextRequest(null);
       document.getElementById("main-content")?.focus();
     });
+  }
+
+  function viewCreatedMoveInWorkshop({ roomId, moveId }: { roomId: Id<"rooms">; moveId: Id<"moves"> }) {
+    inspectWorkshopContext(roomId, `move:${moveId}`);
   }
 
   function selectMission(missionId: Id<"missions">) {
@@ -912,6 +922,13 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
           <h2 id="inspector-title">{selectedRoom.name}</h2>
           <p>{selectedRoom.description}</p>
           <div className="inspector-status"><span>Presence not connected</span><span aria-label={roomMoveSignalLabel(selectedRoom)}>{moveSignalText(selectedRoom.moveSignal)}</span></div>
+          <section className="latest-durable-move" aria-labelledby="latest-durable-move-heading">
+            <h3 id="latest-durable-move-heading">Latest durable Move</h3>
+            {missionMoves === undefined ? <p aria-live="polite">Loading durable Moves…</p> : latestSelectedRoomMove === undefined ? <p>No durable Moves in this room.</p> : <>
+              <p><strong>{latestSelectedRoomMove.title}</strong><span>{moveStateLabel(latestSelectedRoomMove.state)}</span></p>
+              <button className="secondary-button" onClick={() => inspectWorkshopContext(selectedRoom.id as Id<"rooms">, `move:${latestSelectedRoomMove._id}`)} type="button">Inspect in Workshop</button>
+            </>}
+          </section>
           <section><h3>Room activity</h3><p>Live occupants are not represented until a realtime presence provider is connected.</p></section>
           <section><h3>Artifacts</h3><p>No durable Artifacts are linked to this room yet.</p></section>
           {missionWritable && (activeMission.role === "owner" || activeMission.role === "steward" || activeMission.role === "builder") ? <section className="custom-room-tools"><h3>Room controls</h3><label htmlFor="rename-room">Room name</label><input defaultValue={selectedRoom.name} id="rename-room" key={`${selectedRoom.id}-${selectedRoom.currentVersion}`} onBlur={(event) => void renameSelectedRoom(event.target.value)} /><button className="archive-room" onClick={() => {

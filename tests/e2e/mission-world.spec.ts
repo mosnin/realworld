@@ -82,6 +82,10 @@ test("an authenticated owner can launch an honest empty Blank canvas Workshop", 
   await expect(page.getByRole("button", { name: /^Workshop\./ })).toHaveCount(1);
   await expect(page.getByRole("button", { name: /^(Review Deck|Observatory|Surge Hall)\./ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Workshop — No Moves/ })).toBeVisible();
+  await page.getByRole("button", { name: /^Workshop\./ }).click();
+  const emptyWorkshopInspector = page.getByRole("complementary", { name: "Workshop" });
+  await expect(emptyWorkshopInspector.getByRole("heading", { name: "Latest durable Move" })).toBeVisible();
+  await expect(emptyWorkshopInspector.getByText("No durable Moves in this room.")).toBeVisible();
 
   await enterWorkshop(page);
   await expect(page.getByRole("heading", { name: "Durable work in Workshop." })).toBeVisible();
@@ -129,8 +133,24 @@ test("an authenticated owner can launch an honest empty Blank canvas Workshop", 
   await page.getByRole("button", { name: "Mission World" }).click();
   const proposedWorkshop = page.getByRole("button", { name: /Workshop — 1 proposed Move/ });
   await expect(proposedWorkshop).toBeVisible();
-  await expect(page.getByRole("complementary", { name: "Workshop" })).toContainText("1 proposed Move");
+  await proposedWorkshop.click();
+  const workshopInspector = page.getByRole("complementary", { name: "Workshop" });
+  await expect(workshopInspector).toContainText("1 proposed Move");
+  const latestMove = workshopInspector.getByRole("heading", { name: "Latest durable Move" }).locator("..");
+  await expect(latestMove).toContainText(firstMoveTitle);
+  await expect(latestMove).toContainText("proposed");
   await expect(page.locator(".world-routes path.world-routes__active")).toHaveCount(1);
+
+  const inspectInWorkshop = workshopInspector.getByRole("button", { name: "Inspect in Workshop" });
+  await inspectInWorkshop.focus();
+  await expect(inspectInWorkshop).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Durable work in Workshop." })).toBeVisible();
+  const inspectedMove = page.getByLabel("Selected durable context");
+  await expect(inspectedMove).toContainText(firstMoveTitle);
+  await expect(inspectedMove).toContainText(firstMoveIntent);
+  await expect(inspectedMove).toContainText("proposed");
+  await page.getByRole("button", { name: "Mission World" }).click();
 
   await page.getByRole("button", { name: "Room directory" }).click();
   const directory = page.getByRole("region", { name: "Mission rooms" });
@@ -317,6 +337,14 @@ test("an owner can archive a Mission into a read-only world, restore it, and kee
     left: (element as HTMLElement).style.left,
     top: (element as HTMLElement).style.top,
   }))).toEqual(archivedPosition);
+
+  await archivedWorkshop.click();
+  const archivedLatestMove = page.getByRole("complementary", { name: "Workshop" }).locator(".latest-durable-move");
+  await expect(archivedLatestMove).toContainText("proposed");
+  await archivedLatestMove.getByRole("button", { name: "Inspect in Workshop" }).press("Enter");
+  await expect(page.getByRole("status", { name: "Archived room read-only" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Open Moves/ })).toHaveCount(0);
+  await page.getByRole("button", { name: "Mission World" }).click();
 
   await page.getByRole("button", { name: "Room directory" }).click();
   const enterArchivedWorkshop = page.locator(".room-directory").getByRole("button", { name: "Enter Workshop" });
