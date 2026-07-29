@@ -299,7 +299,7 @@ function Workshop({
   calls,
   onExit,
 }: Readonly<{
-  mission: { _id: Id<"missions">; role: string };
+  mission: { _id: Id<"missions">; role: string; lifecycle?: string };
   roomId: Id<"rooms">;
   roomTitle: string;
   moves: WorkshopMove[] | undefined;
@@ -334,6 +334,7 @@ function Workshop({
   const selectedUpdatedAt = selectedContext === null
     ? null
     : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(selectedContext.updatedAt);
+  const isArchived = mission.lifecycle === "archived";
 
   return (
     <div className="workshop-view" aria-labelledby="workshop-heading">
@@ -342,13 +343,14 @@ function Workshop({
           <Icon name="arrow-left" /> Mission World
         </button>
         <span className="room-topbar__slash" aria-hidden="true">/</span>
-        <strong>Workshop</strong>
+        <strong>{roomTitle}</strong>
       </header>
       <div className="workshop-layout">
         <aside className="workshop-rail" aria-label="Workshop context">
-          <p className="eyebrow">Workshop context</p>
+          <p className="eyebrow">Room context</p>
           <h1 id="workshop-heading">Durable work in {roomTitle}.</h1>
           <p>Moves and Calls below are scoped to this room. They are not live presence or a Mission-wide feed.</p>
+          {isArchived ? <p aria-label="Archived room read-only" role="status">Archived Mission — read-only durable room context.</p> : null}
           <section className="workshop-context-list" aria-labelledby="available-durable-work-heading">
             <h2 id="available-durable-work-heading">Available durable work</h2>
             {loading ? <p aria-live="polite">Loading room-scoped durable work…</p> : availableContext.length === 0 ? <p>No durable Moves or Calls are scoped to this room yet.</p> : (
@@ -693,8 +695,11 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
     );
   }
 
-  if (roomRecords === undefined || selectedRoom === undefined || activeMission === undefined) {
+  if (roomRecords === undefined || activeMission === undefined) {
     return <main id="main-content" className="foundation">Loading your shared room map…</main>;
+  }
+  if (selectedRoom === undefined) {
+    return <main id="main-content" className="foundation"><h1>This room is no longer available.</h1><p role="status">Your room access changed. Return to an available Mission room to continue.</p></main>;
   }
   const missionWritable = activeMission.lifecycle === "active";
 
@@ -788,7 +793,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
               {visibleRooms.map((room) => (
                 <li key={room.id} className={selectedRoom.id === room.id ? "is-selected" : ""}>
                   <button onClick={() => setSelectedRoomId(room.id)} type="button"><span className={`directory-icon directory-icon--${room.accent}`}><Icon name={room.icon} /></span><span><strong>{room.name}</strong><small>{room.description}</small></span></button>
-                  <button className="directory-enter" disabled={!missionWritable} onClick={() => enterRoom(room.id)} type="button">{room.action}</button>
+                  <button className="directory-enter" disabled={!missionWritable && room.position !== "workshop"} onClick={() => enterRoom(room.id)} type="button">{room.action}</button>
                 </li>
               ))}
             </ul>
@@ -799,7 +804,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
               <svg className="world-routes" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
                 {visibleRooms.filter((room) => room.id !== "core").map((room) => <path d={`M ${visibleRooms.find((candidate) => candidate.id === "core")?.x ?? 50} ${visibleRooms.find((candidate) => candidate.id === "core")?.y ?? 46} L ${room.x} ${room.y}`} key={room.id} />)}
               </svg>
-              {visibleRooms.map((room) => <RoomLandmark key={room.id} locked={canvas.locked || !canManageCanvas} navigationRooms={visibleRooms} onReposition={repositionRoom} room={room} selected={selectedRoom.id === room.id} onSelect={setSelectedRoomId} onEnter={missionWritable ? enterRoom : () => undefined} />)}
+              {visibleRooms.map((room) => <RoomLandmark key={room.id} locked={canvas.locked || !canManageCanvas} navigationRooms={visibleRooms} onReposition={repositionRoom} room={room} selected={selectedRoom.id === room.id} onSelect={setSelectedRoomId} onEnter={enterRoom} />)}
               <CallSurface
                 key={activeMission._id}
                 mission={activeMission}
@@ -834,7 +839,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
             setRoomError(null);
             void archiveRoomMutation({ roomId: selectedRoom.id as Id<"rooms">, expectedVersion: selectedRoom.currentVersion, idempotencyKey: crypto.randomUUID() }).then(() => setSelectedRoomId("")).catch(() => setRoomError("That room changed elsewhere. The live map has been refreshed."));
           }} type="button">Archive room</button></section> : null}
-          <button className="primary-button" disabled={!missionWritable} onClick={() => enterRoom(selectedRoom.id)} type="button">{selectedRoom.action}</button>
+          <button className="primary-button" disabled={!missionWritable && selectedRoom.position !== "workshop"} onClick={() => enterRoom(selectedRoom.id)} type="button">{selectedRoom.action}</button>
         </aside>
       </main>
       {isObserver ? null : <PulseSurface mission={activeMission} />}

@@ -91,6 +91,23 @@ test("the room directory provides a non-spatial path to Workshop", async ({ page
   await expectWorkshopContext(page);
 });
 
+test("a renamed Workshop keeps its durable room context after reload", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByRole("button", { name: /^Workshop\./ }).click();
+  const renamedWorkshop = "Release Workshop";
+  const roomName = page.getByLabel("Room name");
+  await roomName.fill(renamedWorkshop);
+  await roomName.press("Tab");
+  await expect(page.getByRole("heading", { name: renamedWorkshop })).toBeVisible();
+  await page.reload();
+
+  await page.getByRole("button", { name: new RegExp(`^${renamedWorkshop}\\.`) }).click();
+  await page.getByRole("complementary", { name: renamedWorkshop }).getByRole("button", { name: "Enter Workshop" }).click();
+  await expect(page.getByRole("heading", { name: `Durable work in ${renamedWorkshop}.` })).toBeVisible();
+  await expect(page.getByRole("list", { name: "Available durable work" })).toBeVisible();
+});
+
 test.describe("on a phone-sized Mission World", () => {
   test.use({
     viewport: { width: 390, height: 844 },
@@ -209,8 +226,15 @@ test("an owner can archive a Mission into a read-only world, restore it, and kee
   }))).toEqual(archivedPosition);
 
   await page.getByRole("button", { name: "Room directory" }).click();
-  await expect(page.locator(".room-directory").getByRole("button", { name: "Enter Workshop" })).toBeDisabled();
+  const enterArchivedWorkshop = page.locator(".room-directory").getByRole("button", { name: "Enter Workshop" });
+  await expect(enterArchivedWorkshop).toBeEnabled();
+  await enterArchivedWorkshop.click();
+  await expect(page.getByRole("status", { name: "Archived room read-only" })).toHaveText("Archived Mission — read-only durable room context.");
+  await expect(page.getByRole("button", { name: /Open Moves/ })).toHaveCount(0);
+  await page.getByRole("button", { name: "Mission World" }).click();
+  await expect(page.getByRole("status", { name: "Archived Mission read-only" })).toBeVisible();
 
+  await page.getByRole("button", { name: "Manage Mission" }).click();
   await page.getByRole("button", { name: "Restore Mission" }).click();
   await expect(page.getByRole("status", { name: "Archived Mission read-only" })).toHaveCount(0);
   await expect(page.getByText("Active", { exact: true })).toBeVisible();
@@ -787,6 +811,7 @@ test("a scoped observer receives a stable read-only Mission shell without privat
   await invitations.getByRole("checkbox", { name: /Workshop/i }).check();
   await invitations.getByRole("button", { name: "Create invitation" }).click();
   const inviteUrl = await invitations.getByLabel("Invitation link").inputValue();
+  await page.getByRole("button", { name: "Close invitations" }).click();
 
   const observerContext = await browser.newContext();
   try {
@@ -836,8 +861,10 @@ test("a scoped observer receives a stable read-only Mission shell without privat
     await expect(observerWork.getByRole("button")).toHaveCount(3);
     await expect(observerWork.getByText("Mission Core", { exact: true })).toHaveCount(0);
     await expect(observer.getByLabel("Mission activity Pulse")).toHaveCount(0);
-    await observer.getByRole("button", { name: "Mission World" }).click();
-    await expect(observer.getByRole("heading", { name: "Company sprint" })).toBeVisible();
+    await page.getByRole("button", { name: /^Workshop\./ }).click();
+    await page.getByRole("button", { name: "Archive room" }).click();
+    await expect(observer.getByRole("heading", { name: "This room is no longer available." })).toBeVisible({ timeout: 15_000 });
+    await expect(observer.getByRole("list", { name: "Available durable work" })).toHaveCount(0);
     expect(runtimeErrors).toEqual([]);
   } finally {
     await observerContext.close();
