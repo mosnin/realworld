@@ -60,6 +60,26 @@ type Preferences = {
 function missionWorldStorageKey(missionId: Id<"missions">) {
   return `realworld:mission-world-preferences:v3:${missionId}`;
 }
+
+function canonicalRoomHash(roomId: RoomId, view: "world" | "workshop") {
+  const roomPath = `#room/${encodeURIComponent(roomId)}`;
+  return view === "workshop" ? `${roomPath}/work` : roomPath;
+}
+
+function parseRoomHash(hash: string): { roomId: RoomId; view: "world" | "workshop" } | null {
+  const match = /^#room\/([^/]+)(?:\/(work))?$/.exec(hash);
+  if (match === null) return null;
+  try {
+    const encodedRoomId = match[1];
+    if (encodedRoomId === undefined) return null;
+    const roomId = decodeURIComponent(encodedRoomId);
+    if (!roomId || encodeURIComponent(roomId) !== encodedRoomId) return null;
+    return { roomId, view: match[2] === "work" ? "workshop" : "world" };
+  } catch {
+    return null;
+  }
+}
+
 const selectedMissionStorageKey = "realworld:mission-world:selected-mission:v1";
 const defaultPreferences: Preferences = {
   density: "standard",
@@ -656,11 +676,15 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   const [inspectProofRequest, setInspectProofRequest] = useState<{ proofId: Id<"proofs">; roomId: Id<"rooms">; nonce: string } | null>(null);
   const [workshopContextRequest, setWorkshopContextRequest] = useState<{ roomId: Id<"rooms">; key: string } | null>(null);
   const [loadedPreferencesMissionId, setLoadedPreferencesMissionId] = useState<Id<"missions"> | null>(null);
+  const [hashRestoredMissionId, setHashRestoredMissionId] = useState<Id<"missions"> | null>(null);
   const [canvas, setCanvas] = useState<CanvasState>(defaultCanvasState);
   const [newRoomName, setNewRoomName] = useState("");
   const [roomError, setRoomError] = useState<string | null>(null);
   const roomWorkExitFocusFrameRef = useRef<number | null>(null);
   const roomWorkExitFocusTargetRef = useRef<{ missionId: Id<"missions">; roomId: RoomId } | null>(null);
+  const restoredRoomWorkFocusFrameRef = useRef<number | null>(null);
+  const restoredRoomWorkFocusTargetRef = useRef<{ missionId: Id<"missions">; roomId: RoomId } | null>(null);
+  const currentRoomRouteRef = useRef<{ missionId: Id<"missions">; roomId: RoomId; view: "world" | "workshop" } | null>(null);
   const handleCreateMoveRequestHandled = useCallback(() => setCreateMoveRequest(null), [setCreateMoveRequest]);
   const handleCreateMoveRequestUnavailable = useCallback(() => setRoomError("That room is no longer available."), [setRoomError]);
   const handleCreateCallRequestHandled = useCallback(() => setCreateCallRequest(null), [setCreateCallRequest]);
@@ -705,7 +729,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
     setRoomError("That work is no longer available.");
     requestAnimationFrame(() => document.getElementById("main-content")?.focus());
   }, [setInspectProofRequest, setRoomError]);
-  const canvasRooms = roomRecords?.map((room) => canvasRoom(room, roomMoveSignal(room._id, missionMoves))) ?? [];
+  const canvasRooms = useMemo(() => roomRecords?.map((room) => canvasRoom(room, roomMoveSignal(room._id, missionMoves))) ?? [], [missionMoves, roomRecords]);
   const selectedRoomRecord = canvasRooms.find((room) => room.id === selectedRoomId);
   const selectedRoom = selectedRoomRecord ?? canvasRooms[0];
   const latestSelectedRoomMove = missionMoves === undefined || selectedRoom === undefined
@@ -723,6 +747,12 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   const visibleRooms = canvasRooms;
   const cameraIsFit = canvas.zoom === 1 && canvas.panX === 0 && canvas.panY === 0;
 
+  useEffect(() => {
+    currentRoomRouteRef.current = activeMission === undefined || selectedRoom === undefined
+      ? null
+      : { missionId: activeMission._id, roomId: selectedRoom.id, view };
+  }, [activeMission, selectedRoom, view]);
+
   function cancelRoomWorkExitFocus() {
     if (roomWorkExitFocusFrameRef.current !== null) {
       window.cancelAnimationFrame(roomWorkExitFocusFrameRef.current);
@@ -731,7 +761,40 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
     roomWorkExitFocusTargetRef.current = null;
   }
 
-  useEffect(() => () => cancelRoomWorkExitFocus(), [activeMission?._id]);
+  const cancelRestoredRoomWorkFocus = useCallback(() => {
+    if (restoredRoomWorkFocusFrameRef.current !== null) {
+      window.cancelAnimationFrame(restoredRoomWorkFocusFrameRef.current);
+      restoredRoomWorkFocusFrameRef.current = null;
+    }
+    restoredRoomWorkFocusTargetRef.current = null;
+  }, []);
+
+  const scheduleRestoredRoomWorkFocus = useCallback((missionId: Id<"missions">, roomId: RoomId) => {
+    cancelRestoredRoomWorkFocus();
+    restoredRoomWorkFocusTargetRef.current = { missionId, roomId };
+    restoredRoomWorkFocusFrameRef.current = window.requestAnimationFrame(() => {
+      const target = restoredRoomWorkFocusTargetRef.current;
+      restoredRoomWorkFocusFrameRef.current = null;
+      restoredRoomWorkFocusTargetRef.current = null;
+      const currentRoute = currentRoomRouteRef.current;
+      if (target === null || currentRoute === null || currentRoute.missionId !== target.missionId || currentRoute.roomId !== target.roomId || currentRoute.view !== "workshop") return;
+      document.getElementById("main-content")?.focus();
+    });
+  }, [cancelRestoredRoomWorkFocus]);
+
+  const resolveCurrentMissionRoomRoute = useCallback((hash: string) => {
+    const requestedRoute = parseRoomHash(hash);
+    const requestedRoom = requestedRoute === null ? undefined : canvasRooms.find((room) => room.id === requestedRoute.roomId);
+    if (requestedRoute === null || requestedRoom === undefined) {
+      return { roomId: canvasRooms[0]?.id ?? "", view: "world" as const, authorized: false };
+    }
+    return { roomId: requestedRoom.id, view: requestedRoute.view, authorized: true };
+  }, [canvasRooms]);
+
+  useEffect(() => () => {
+    cancelRoomWorkExitFocus();
+    cancelRestoredRoomWorkFocus();
+  }, [activeMission?._id, cancelRestoredRoomWorkFocus]);
 
   useEffect(() => {
     if (!isObserver) return;
@@ -805,8 +868,44 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   }, [activeMission, canvas, loadedPreferencesMissionId, preferences]);
 
   useEffect(() => {
-    if (selectedRoomHash !== undefined) window.history.replaceState(null, "", view === "workshop" ? "#workshop" : `#${selectedRoomHash}`);
-  }, [selectedRoomHash, view]);
+    if (activeMission === undefined || roomRecords === undefined || hashRestoredMissionId === activeMission._id) return;
+    const frame = window.requestAnimationFrame(() => {
+      const restoredRoute = resolveCurrentMissionRoomRoute(window.location.hash);
+      setSelectedRoomId(restoredRoute.roomId);
+      setView(restoredRoute.view);
+      setHashRestoredMissionId(activeMission._id);
+      if (restoredRoute.authorized && restoredRoute.view === "workshop") scheduleRestoredRoomWorkFocus(activeMission._id, restoredRoute.roomId);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeMission, hashRestoredMissionId, resolveCurrentMissionRoomRoute, roomRecords, scheduleRestoredRoomWorkFocus]);
+
+  useEffect(() => {
+    if (activeMission === undefined || roomRecords === undefined || hashRestoredMissionId !== activeMission._id) return;
+    const synchronizeCurrentMissionRoute = () => {
+      const nextRoute = resolveCurrentMissionRoomRoute(window.location.hash);
+      cancelRoomWorkExitFocus();
+      cancelRestoredRoomWorkFocus();
+      setSelectedRoomId(nextRoute.roomId);
+      setView(nextRoute.view);
+      if (nextRoute.authorized && nextRoute.view === "workshop") scheduleRestoredRoomWorkFocus(activeMission._id, nextRoute.roomId);
+      if (!nextRoute.authorized && nextRoute.roomId) {
+        const fallbackHash = canonicalRoomHash(nextRoute.roomId, "world");
+        if (window.location.hash !== fallbackHash) window.history.replaceState(null, "", fallbackHash);
+      }
+    };
+    window.addEventListener("hashchange", synchronizeCurrentMissionRoute);
+    window.addEventListener("popstate", synchronizeCurrentMissionRoute);
+    return () => {
+      window.removeEventListener("hashchange", synchronizeCurrentMissionRoute);
+      window.removeEventListener("popstate", synchronizeCurrentMissionRoute);
+    };
+  }, [activeMission, cancelRestoredRoomWorkFocus, hashRestoredMissionId, resolveCurrentMissionRoomRoute, roomRecords, scheduleRestoredRoomWorkFocus]);
+
+  useEffect(() => {
+    if (activeMission === undefined || roomRecords === undefined || hashRestoredMissionId !== activeMission._id || selectedRoomHash === undefined) return;
+    const nextHash = canonicalRoomHash(selectedRoomHash, view);
+    if (window.location.hash !== nextHash) window.history.replaceState(null, "", nextHash);
+  }, [activeMission, hashRestoredMissionId, roomRecords, selectedRoomHash, view]);
 
   useEffect(() => {
     if (view !== "workshop" || roomRecords === undefined || selectedRoomRecord !== undefined) return;
@@ -820,6 +919,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   function enterRoom(roomId: RoomId) {
     if (!canvasRooms.some((room) => room.id === roomId)) return;
     cancelRoomWorkExitFocus();
+    cancelRestoredRoomWorkFocus();
     setSelectedRoomId(roomId);
     setView("workshop");
     requestAnimationFrame(() => document.getElementById("main-content")?.focus());
@@ -914,6 +1014,8 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
 
   function selectMission(missionId: Id<"missions">) {
     cancelRoomWorkExitFocus();
+    cancelRestoredRoomWorkFocus();
+    setHashRestoredMissionId(null);
     setSelectedMissionId(missionId);
     setSelectedRoomId("");
     setView("world");

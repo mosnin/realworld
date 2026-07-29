@@ -426,10 +426,21 @@ test("a participant can inspect and enter Workshop from the Mission World", asyn
   await expect(page.getByText(/Priya|Marco|SonicAgent|active people/i)).toHaveCount(0);
   await page.getByRole("button", { name: /^Workshop\./ }).click();
   await expect(page.getByRole("heading", { name: "Workshop" })).toBeVisible();
+  await expect.poll(() => new URL(page.url()).hash).toMatch(/^#room\/[^/]+$/);
+  const workshopWorldHash = new URL(page.url()).hash;
   await page.getByRole("complementary", { name: "Workshop" }).getByRole("button", { name: "Open room work" }).click();
   await expectWorkshopContext(page);
-  await page.getByRole("button", { name: "Mission World" }).click();
+  await expect.poll(() => new URL(page.url()).hash).toBe(`${workshopWorldHash}/work`);
+  await page.reload();
+  await expectWorkshopContext(page);
+  await expect.poll(() => new URL(page.url()).hash).toBe(`${workshopWorldHash}/work`);
+  await expect(page.locator("#main-content")).toBeFocused();
+  const exitWorkshop = page.getByRole("button", { name: "Mission World" });
+  await exitWorkshop.focus();
+  await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { name: "Company sprint" })).toBeVisible();
+  await expect.poll(() => new URL(page.url()).hash).toBe(workshopWorldHash);
+  await expect(page.getByRole("button", { name: /^Workshop\./ })).toBeFocused();
 });
 
 test("the room directory provides a non-spatial path to Workshop", async ({ page }) => {
@@ -446,22 +457,64 @@ test("a participant can keyboard-enter an exact non-Workshop room without work l
 
   const missionCore = page.getByRole("button", { name: /^Mission Core\./ });
   await expect(missionCore).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(() => new URL(page.url()).hash).toMatch(/^#room\/[^/]+$/);
+  const missionCoreWorldHash = new URL(page.url()).hash;
   await missionCore.focus();
   await expect(missionCore).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { name: "Durable work in Mission Core." })).toBeVisible();
   await expect(page.locator("#main-content")).toBeFocused();
+  await expect.poll(() => new URL(page.url()).hash).toBe(`${missionCoreWorldHash}/work`);
   await expect(page.getByText("No durable Moves, Calls, Fractures, or Proofs are scoped to this room yet.")).toBeVisible();
   await expect(page.getByRole("list", { name: "Available durable work" })).toHaveCount(0);
   await expect(page.getByText("Set the sprint outcome", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Brief|Evidence|Artifact|Surge/ })).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Durable work in Mission Core." })).toBeVisible();
+  await expect.poll(() => new URL(page.url()).hash).toBe(`${missionCoreWorldHash}/work`);
+  await expect(page.locator("#main-content")).toBeFocused();
 
   const returnToWorld = page.getByRole("button", { name: "Mission World" });
   await returnToWorld.focus();
   await expect(returnToWorld).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("heading", { name: "Company sprint" })).toBeVisible();
+  await expect.poll(() => new URL(page.url()).hash).toBe(missionCoreWorldHash);
   await expect(missionCore).toBeFocused();
+
+  const workshop = page.getByRole("button", { name: /^Workshop\./ });
+  await workshop.click();
+  await expect(page.getByRole("heading", { name: "Workshop" })).toBeVisible();
+  await expect.poll(() => new URL(page.url()).hash).toMatch(/^#room\/[^/]+$/);
+  const workshopWorldHash = new URL(page.url()).hash;
+
+  await page.evaluate((hash) => { window.location.hash = hash; }, `${missionCoreWorldHash}/work`);
+  await expect(page.getByRole("heading", { name: "Durable work in Mission Core." })).toBeVisible();
+  await expect.poll(() => new URL(page.url()).hash).toBe(`${missionCoreWorldHash}/work`);
+  await expect(page.locator("#main-content")).toBeFocused();
+
+  await page.evaluate((hash) => { window.location.hash = hash; }, `${workshopWorldHash}/work`);
+  await expect(page.getByRole("heading", { name: "Durable work in Workshop." })).toBeVisible();
+  await expect.poll(() => new URL(page.url()).hash).toBe(`${workshopWorldHash}/work`);
+  await expect(page.locator("#main-content")).toBeFocused();
+
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "Durable work in Mission Core." })).toBeVisible();
+  await expect.poll(() => new URL(page.url()).hash).toBe(`${missionCoreWorldHash}/work`);
+  await expect(page.locator("#main-content")).toBeFocused();
+  await page.goForward();
+  await expect(page.getByRole("heading", { name: "Durable work in Workshop." })).toBeVisible();
+  await expect.poll(() => new URL(page.url()).hash).toBe(`${workshopWorldHash}/work`);
+  await expect(page.locator("#main-content")).toBeFocused();
+
+  for (const invalidHash of ["#room/not-an-authorized-room/work", "#room/%E0%A4%A/work"]) {
+    await page.evaluate((hash) => { window.location.hash = hash; }, invalidHash);
+    await expect(page.getByRole("heading", { name: "Company sprint" })).toBeVisible();
+    await expect.poll(() => new URL(page.url()).hash).toBe(missionCoreWorldHash);
+    await expect(page.getByRole("heading", { name: /Durable work in/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Mission World" })).toHaveCount(0);
+  }
 });
 
 test("a renamed Workshop keeps its durable room context after reload", async ({ page }) => {
@@ -571,6 +624,16 @@ test("a participant can customize and persist a personal canvas layout", async (
   await expect(page.getByRole("heading", { name: "Launch Cabin" })).toBeVisible();
 
   const customRoom = page.getByRole("button", { name: /^Launch Cabin\./ });
+  await expect.poll(() => new URL(page.url()).hash).toMatch(/^#room\/[^/]+$/);
+  const customWorldHash = new URL(page.url()).hash;
+  await page.getByRole("complementary", { name: "Launch Cabin" }).getByRole("button", { name: "Open room work" }).click();
+  await expect(page.getByRole("heading", { name: "Durable work in Launch Cabin." })).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`${customWorldHash.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/work$`));
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Durable work in Launch Cabin." })).toBeVisible();
+  await page.getByRole("button", { name: "Mission World" }).click();
+  await expect(page).toHaveURL(new RegExp(`${customWorldHash.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
+  await expect(customRoom).toBeFocused();
   await customRoom.focus();
   const canvas = page.locator(".world-map__canvas");
   await expect.poll(() => canvas.evaluate((element) => (element as HTMLElement).style.transform)).toBe("translate(0%, 0%) scale(1)");
