@@ -7,6 +7,7 @@ import schema from "../../convex/schema";
 const modules = {
   "../../convex/_generated/api.js": () => import("../../convex/_generated/api.js"),
   "../../convex/missions.ts": () => import("../../convex/missions"),
+  "../../convex/profiles.ts": () => import("../../convex/profiles"),
   "../../convex/moves.ts": () => import("../../convex/moves"),
   "../../convex/calls.ts": () => import("../../convex/calls"),
   "../../convex/canvas.ts": () => import("../../convex/canvas"),
@@ -21,6 +22,7 @@ const expired = { tokenIdentifier: "https://realworld.test|call-expired", subjec
 async function setup() {
   const t = convexTest(schema, modules);
   const asOwner = t.withIdentity(owner);
+  await asOwner.mutation(api.profiles.setMine, { displayName: "Call Owner", idempotencyKey: "call-owner-profile" });
   const mission = await asOwner.mutation(api.missions.createPrivateMission, {
     slug: "call-kernel",
     title: "Call kernel",

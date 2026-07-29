@@ -7,6 +7,7 @@ import schema from "../../convex/schema";
 const modules = {
   "../../convex/_generated/api.js": () => import("../../convex/_generated/api.js"),
   "../../convex/missions.ts": () => import("../../convex/missions"),
+  "../../convex/profiles.ts": () => import("../../convex/profiles"),
   "../../convex/moves.ts": () => import("../../convex/moves"),
   "../../convex/calls.ts": () => import("../../convex/calls"),
 };
@@ -15,6 +16,7 @@ const owner = { tokenIdentifier: "https://realworld.test|call-integrity-owner", 
 async function setup() {
   const t = convexTest(schema, modules);
   const asOwner = t.withIdentity(owner);
+  await asOwner.mutation(api.profiles.setMine, { displayName: "Integrity Owner", idempotencyKey: "call-integrity-owner-profile" });
   const mission = await asOwner.mutation(api.missions.createPrivateMission, { slug: "call-integrity", title: "Call integrity", summary: "Call integrity checks.", idempotencyKey: "integrity-mission", correlationId: "integrity-mission" });
   const roomA = await t.run(async (ctx) => ctx.db.insert("rooms", { missionId: mission.missionId, kind: "workshop", title: "A", accessPolicy: "mission", mapType: "field", layout: { x: 0, y: 0, width: 220, height: 140 }, layoutVersion: 1, state: "active", currentVersion: 1, createdAt: Date.now(), updatedAt: Date.now(), schemaVersion: 1 }));
   const roomB = await t.run(async (ctx) => ctx.db.insert("rooms", { missionId: mission.missionId, kind: "observatory", title: "B", accessPolicy: "mission", mapType: "field", layout: { x: 240, y: 0, width: 220, height: 140 }, layoutVersion: 1, state: "active", currentVersion: 1, createdAt: Date.now(), updatedAt: Date.now(), schemaVersion: 1 }));

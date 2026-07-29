@@ -19,6 +19,9 @@ async function launchPrivateMission(page: Page) {
   await page.getByLabel("Password").fill("Realworld-browser-test-2026");
   await page.getByRole("button", { name: "Need an invitation? Create an account" }).click();
   await page.getByRole("button", { name: "Create private-alpha account" }).click();
+  await expect(page.getByRole("heading", { name: "Choose your callsign" })).toBeVisible({ timeout: 15_000 });
+  await page.getByRole("textbox", { name: "Callsign", exact: true }).fill("Access Pilot");
+  await page.getByRole("button", { name: "Save callsign" }).click();
   await expect(
     page.getByRole("heading", { name: "Start a Mission with a real work shape." }),
   ).toBeVisible({ timeout: 15_000 });
@@ -30,6 +33,16 @@ test("the private-alpha sign-in shell has no serious or critical axe violations"
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Enter the Mission World." })).toBeVisible();
 
+  await expectNoSeriousOrCriticalAxeViolations(page);
+});
+
+test("the callsign setup gate has no serious or critical axe violations", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(`callsign-a11y-${Date.now()}@example.test`);
+  await page.getByLabel("Password").fill("Realworld-browser-test-2026");
+  await page.getByRole("button", { name: "Need an invitation? Create an account" }).click();
+  await page.getByRole("button", { name: "Create private-alpha account" }).click();
+  await expect(page.getByRole("heading", { name: "Choose your callsign" })).toBeVisible({ timeout: 15_000 });
   await expectNoSeriousOrCriticalAxeViolations(page);
 });
 

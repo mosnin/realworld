@@ -1,4 +1,10 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+async function completeCallsign(page: Page, callsign: string) {
+  await expect(page.getByRole("heading", { name: "Choose your callsign" })).toBeVisible({ timeout: 15_000 });
+  await page.getByRole("textbox", { name: "Callsign", exact: true }).fill(callsign);
+  await page.getByRole("button", { name: "Save callsign" }).click();
+}
 
 test.beforeEach(async ({ page }, testInfo) => {
   await page.goto("/");
@@ -17,11 +23,30 @@ test.beforeEach(async ({ page }, testInfo) => {
   const createAccount = page.getByRole("button", { name: "Create private-alpha account" });
   await expect(createAccount).toBeVisible();
   await createAccount.click();
+  await expect(page.getByRole("heading", { name: "Choose your callsign" })).toBeVisible({ timeout: 15_000 });
+  await page.getByRole("textbox", { name: "Callsign", exact: true }).fill("Browser Pilot");
+  await page.getByRole("button", { name: "Save callsign" }).click();
   await expect(
     page.getByRole("heading", { name: "Start a Mission with a real work shape." }),
   ).toBeVisible({ timeout: 15_000 });
   await page.getByRole("button", { name: "Launch Company sprint" }).click();
   await expect(missionHeading).toBeVisible({ timeout: 15_000 });
+});
+
+test("a new participant must complete and retains the callsign setup gate before Mission launch", async ({ page }) => {
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page.getByRole("heading", { name: "Enter the Mission World." })).toBeVisible();
+  await page.getByLabel("Email").fill(`callsign-gate-${Date.now()}@example.test`);
+  await page.getByLabel("Password").fill("Realworld-browser-test-2026");
+  await page.getByRole("button", { name: "Need an invitation? Create an account" }).click();
+  await page.getByRole("button", { name: "Create private-alpha account" }).click();
+  await expect(page.getByRole("heading", { name: "Choose your callsign" })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("button", { name: /Launch Company sprint/ })).toHaveCount(0);
+  await page.getByRole("textbox", { name: "Callsign", exact: true }).fill("Gate Runner");
+  await page.getByRole("button", { name: "Save callsign" }).click();
+  await expect(page.getByRole("heading", { name: "Start a Mission with a real work shape." })).toBeVisible({ timeout: 15_000 });
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Start a Mission with a real work shape." })).toBeVisible({ timeout: 15_000 });
 });
 
 test("a participant can inspect and enter Workshop from the Mission World", async ({ page }) => {
@@ -649,6 +674,7 @@ test("an owner and scoped reviewer complete a reactive Proof handoff", async ({ 
     await reviewer.getByLabel("Password").fill("Realworld-browser-test-2026");
     await reviewer.getByRole("button", { name: "Need an invitation? Create an account" }).click();
     await reviewer.getByRole("button", { name: "Create private-alpha account" }).click();
+    await completeCallsign(reviewer, "Invite Reviewer");
     await expect(reviewer.getByRole("heading", { name: "You have a Mission invitation." })).toBeVisible({ timeout: 15_000 });
     await reviewer.getByRole("button", { name: "Join Mission" }).click();
     await expect(reviewer.getByText("You joined the Mission.")).toBeVisible();
@@ -710,7 +736,7 @@ test("an owner and scoped reviewer complete a reactive Proof handoff", async ({ 
     const activity = pulse.getByLabel("Recent durable Mission activity");
     const verifiedEvent = activity.getByRole("button", { name: /Proof verified/ }).first();
     await expect(verifiedEvent).toBeVisible();
-    await expect(verifiedEvent.locator("small")).toHaveText(/reviewer collaborator · Workshop · (just now|\d+m ago)/);
+    await expect(verifiedEvent.locator("small")).toHaveText(/Invite Reviewer · Workshop · (just now|\d+m ago)/);
   } finally {
     await reviewerContext.close();
   }
@@ -741,6 +767,7 @@ test("a scoped observer receives a stable read-only Mission shell without privat
     await observer.getByLabel("Password").fill("Realworld-browser-test-2026");
     await observer.getByRole("button", { name: "Need an invitation? Create an account" }).click();
     await observer.getByRole("button", { name: "Create private-alpha account" }).click();
+    await completeCallsign(observer, "Invite Observer");
     await expect(observer.getByRole("heading", { name: "You have a Mission invitation." })).toBeVisible({ timeout: 15_000 });
     await observer.getByRole("button", { name: "Join Mission" }).click();
     await expect(observer.getByText("You joined the Mission.")).toBeVisible();
@@ -852,6 +879,7 @@ test("an owner and contributor reactively coordinate a capacity-limited Call", a
     await contributor.getByLabel("Password").fill("Realworld-browser-test-2026");
     await contributor.getByRole("button", { name: "Need an invitation? Create an account" }).click();
     await contributor.getByRole("button", { name: "Create private-alpha account" }).click();
+    await completeCallsign(contributor, "Invite Contributor");
     await expect(contributor.getByRole("heading", { name: "You have a Mission invitation." })).toBeVisible({ timeout: 15_000 });
     await contributor.getByRole("button", { name: "Join Mission" }).click();
     await expect(contributor.getByText("You joined the Mission.")).toBeVisible();
@@ -1018,6 +1046,7 @@ test.describe("a reactive scoped Mission canvas", () => {
       await participant.getByLabel("Password").fill("Realworld-browser-test-2026");
       await participant.getByRole("button", { name: "Need an invitation? Create an account" }).click();
       await participant.getByRole("button", { name: "Create private-alpha account" }).click();
+      await completeCallsign(participant, "Private Participant");
 
       await expect(participant.getByRole("heading", { name: "You have a Mission invitation." })).toBeVisible({ timeout: 15_000 });
       await participant.getByRole("button", { name: "Join Mission" }).click();
@@ -1051,6 +1080,7 @@ test.describe("a reactive scoped Mission canvas", () => {
     await participant.getByLabel("Password").fill("Realworld-browser-test-2026");
     await participant.getByRole("button", { name: "Need an invitation? Create an account" }).click();
     await participant.getByRole("button", { name: "Create private-alpha account" }).click();
+    await completeCallsign(participant, "Live Participant");
 
     await expect(participant.getByRole("heading", { name: "You have a Mission invitation." })).toBeVisible({ timeout: 15_000 });
     await participant.getByRole("button", { name: "Join Mission" }).click();
@@ -1128,6 +1158,7 @@ test.describe("a reactive scoped Mission canvas", () => {
       await builder.getByLabel("Password").fill("Realworld-browser-test-2026");
       await builder.getByRole("button", { name: "Need an invitation? Create an account" }).click();
       await builder.getByRole("button", { name: "Create private-alpha account" }).click();
+      await completeCallsign(builder, "Invite Builder");
       await expect(builder.getByRole("heading", { name: "You have a Mission invitation." })).toBeVisible({ timeout: 15_000 });
       await builder.getByRole("button", { name: "Join Mission" }).click();
       await builder.getByRole("link", { name: "Enter the Mission World" }).click();
@@ -1209,6 +1240,7 @@ test.describe("a reactive scoped Mission canvas", () => {
       await participant.getByLabel("Password").fill("Realworld-browser-test-2026");
       await participant.getByRole("button", { name: "Need an invitation? Create an account" }).click();
       await participant.getByRole("button", { name: "Create private-alpha account" }).click();
+      await completeCallsign(participant, "Invite Participant");
       await expect(participant.getByRole("heading", { name: "You have a Mission invitation." })).toBeVisible({ timeout: 15_000 });
       await participant.getByRole("button", { name: "Join Mission" }).click();
       await participant.getByRole("link", { name: "Enter the Mission World" }).click();

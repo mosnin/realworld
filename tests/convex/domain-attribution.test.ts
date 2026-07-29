@@ -8,6 +8,7 @@ import schema from "../../convex/schema";
 const modules = {
   "../../convex/_generated/api.js": () => import("../../convex/_generated/api.js"),
   "../../convex/missions.ts": () => import("../../convex/missions"),
+  "../../convex/profiles.ts": () => import("../../convex/profiles"),
   "../../convex/proofs.ts": () => import("../../convex/proofs"),
   "../../convex/fractures.ts": () => import("../../convex/fractures"),
   "../../convex/calls.ts": () => import("../../convex/calls"),
@@ -77,6 +78,7 @@ async function grant(
 async function setup() {
   const t = convexTest(schema, modules);
   const asOwner = t.withIdentity(owner);
+  await asOwner.mutation(api.profiles.setMine, { displayName: "Old Owner", idempotencyKey: "attribution-owner-profile" });
   const mission = await asOwner.mutation(api.missions.createPrivateMission, {
     slug: "domain-attribution",
     title: "Domain attribution",
@@ -84,7 +86,6 @@ async function setup() {
     idempotencyKey: "domain-attribution-mission",
     correlationId: "domain-attribution-mission",
   });
-  await setDisplayName(t, owner.tokenIdentifier, "Old Owner");
   const roomId = await t.run(async (ctx) => {
     const now = Date.now();
     return await ctx.db.insert("rooms", {

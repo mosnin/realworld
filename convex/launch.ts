@@ -4,6 +4,7 @@ import { mutation } from "./_generated/server";
 import { requireAuthenticatedTokenIdentifier } from "./lib/auth";
 import { humanAttributionAtAction } from "./lib/human_attribution";
 import { isMissionTemplateKey, missionTemplates } from "./lib/mission_templates";
+import { requireCompletedHumanProfile } from "./profiles";
 
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const roomTitles = { missionCore: "Mission Core", workshop: "Workshop", observatory: "Observatory", branchLab: "Branch Lab", reviewDeck: "Review Deck", signalTower: "Signal Tower", surgeHall: "Surge Hall" } as const;
@@ -18,11 +19,10 @@ export const createMissionFromTemplate = mutation({
     const fingerprint = JSON.stringify({ command: "createMissionFromTemplate", templateKey: args.templateKey, slug: args.slug, title: args.title.trim() });
     const prior = await ctx.db.query("operationReceipts").withIndex("by_scope_and_idempotency_key", q => q.eq("scope", scope).eq("idempotencyKey", args.idempotencyKey)).unique();
     if (prior !== null) { if (prior.commandFingerprint !== fingerprint) throw new Error("Idempotency key reuse with a different command"); return { missionId: prior.missionId, eventId: prior.eventId, currentVersion: prior.resultVersion }; }
+    const principal = await requireCompletedHumanProfile(ctx, "launch a Mission");
     if (await ctx.db.query("missions").withIndex("by_slug", q => q.eq("slug", args.slug)).unique()) throw new Error("Mission could not be created with that slug");
     const now = Date.now();
-    const existing = await ctx.db.query("principals").withIndex("by_token_identifier", q => q.eq("tokenIdentifier", tokenIdentifier)).unique();
-    if (existing !== null && (existing.type !== "human" || existing.state !== "active")) throw new Error("Unauthorized");
-    const principalId = existing?._id ?? await ctx.db.insert("principals", { type: "human", state: "active", tokenIdentifier, createdAt: now, updatedAt: now, schemaVersion: 1 });
+    const principalId = principal._id;
     const template = missionTemplates[args.templateKey];
     const missionId = await ctx.db.insert("missions", { ownerPrincipalId: principalId, slug: args.slug, title: args.title.trim(), summary: template.summary, visibility: "private", lifecycle: "active", currentVersion: 1, templateKey: args.templateKey, createdAt: now, updatedAt: now, schemaVersion: 1 });
     await ctx.db.insert("missionMembers", { missionId, principalId, role: "owner", state: "active", scope: ["mission:*"], grantVersion: 1, createdAt: now, updatedAt: now, schemaVersion: 1 });

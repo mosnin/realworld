@@ -4,6 +4,7 @@ import type { Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import { isActiveMembership, requireActiveMembership, requireAuthenticatedTokenIdentifier, requireExistingHumanPrincipal, requireRole } from "./lib/auth";
 import { humanAttributionAtAction } from "./lib/human_attribution";
+import { requireCompletedHumanProfile } from "./profiles";
 
 const receiptRetentionMs = 30 * 24 * 60 * 60 * 1000;
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -79,6 +80,8 @@ export const createPrivateMission = mutation({
       };
     }
 
+    const existingPrincipal = await requireCompletedHumanProfile(ctx, "create a Mission");
+
     const existingMission = await ctx.db
       .query("missions")
       .withIndex("by_slug", (query) => query.eq("slug", slug))
@@ -87,26 +90,8 @@ export const createPrivateMission = mutation({
       throw new Error("Mission could not be created with that slug");
     }
 
-    const existingPrincipal = await ctx.db
-      .query("principals")
-      .withIndex("by_token_identifier", (query) => query.eq("tokenIdentifier", tokenIdentifier))
-      .unique();
     const now = Date.now();
-    const principalId =
-      existingPrincipal === null
-        ? await ctx.db.insert("principals", {
-            type: "human",
-            state: "active",
-            tokenIdentifier,
-            createdAt: now,
-            updatedAt: now,
-            schemaVersion: 1,
-          })
-        : existingPrincipal._id;
-
-    if (existingPrincipal !== null && (existingPrincipal.type !== "human" || existingPrincipal.state !== "active")) {
-      throw new Error("Unauthorized");
-    }
+    const principalId = existingPrincipal._id;
 
     const missionId = await ctx.db.insert("missions", {
       ownerPrincipalId: principalId,

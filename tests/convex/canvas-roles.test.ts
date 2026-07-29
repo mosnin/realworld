@@ -7,6 +7,7 @@ import schema from "../../convex/schema";
 const modules = {
   "../../convex/_generated/api.js": () => import("../../convex/_generated/api.js"),
   "../../convex/missions.ts": () => import("../../convex/missions"),
+  "../../convex/profiles.ts": () => import("../../convex/profiles"),
   "../../convex/canvas.ts": () => import("../../convex/canvas"),
 };
 
@@ -32,6 +33,7 @@ function createTest() {
 
 async function mission(t = createTest()) {
   const asOwner = t.withIdentity(owner);
+  await asOwner.mutation(api.profiles.setMine, { displayName: "Canvas Owner", idempotencyKey: "canvas-owner-profile" });
   const created = await asOwner.mutation(api.missions.createPrivateMission, {
     slug: `canvas-role-${Math.random().toString(36).slice(2)}`,
     title: "Canvas role test",

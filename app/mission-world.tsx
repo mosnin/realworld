@@ -16,6 +16,7 @@ import { CallSurface } from "@/app/calls/call-surface";
 import { FractureSurface } from "@/app/fractures/fracture-surface";
 import { ProofSurface } from "@/app/proofs/proof-surface";
 import { PulseSurface } from "@/app/pulse/pulse-surface";
+import { CallsignSettings, CallsignSetupGate } from "@/app/profiles/callsign-controls";
 import { Icon, type IconName } from "@/app/ui/icons";
 import type { AblyClientFactory } from "@/lib/realtime/ably-room-transport";
 
@@ -381,6 +382,7 @@ function PreferencePanel({
         </div>
       </fieldset>
       <label className="preference-toggle"><span><strong>Reduced decoration</strong><small>Quiet contours, routes, and shadows.</small></span><input checked={preferences.reducedDecoration} onChange={(event) => onChange({ ...preferences, reducedDecoration: event.target.checked })} type="checkbox" /></label>
+      <CallsignSettings />
     </section>
   );
 }
@@ -392,6 +394,7 @@ export type MissionWorldProps = Readonly<{
 export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps = {}) {
   const templateOptions = [{ key: "companySprint", label: "Company sprint" }, { key: "classroomProject", label: "Classroom project" }, { key: "contentProduction", label: "Content production" }, { key: "openChallenge", label: "Open challenge" }];
   const missions = useQuery(api.missions.listMyMissions, {});
+  const profile = useQuery(api.profiles.getMine, {});
   const [selectedMissionId, setSelectedMissionId] = useState<Id<"missions"> | null>(null);
   const [selectionReady, setSelectionReady] = useState(false);
   const activeMission = selectedMissionId === null ? undefined : missions?.find((mission) => mission._id === selectedMissionId);
@@ -587,6 +590,14 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
 
   if (missions === undefined) {
     return <main id="main-content" className="foundation">Loading your Mission World…</main>;
+  }
+
+  if (profile === undefined) {
+    return <main id="main-content" className="foundation" aria-live="polite">Loading your profile…</main>;
+  }
+
+  if (profile === null) {
+    return <CallsignSetupGate purpose="Choose your callsign before you continue in the Mission World." />;
   }
 
   if (!selectionReady) {

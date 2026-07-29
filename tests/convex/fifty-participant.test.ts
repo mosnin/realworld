@@ -8,6 +8,7 @@ import schema from "../../convex/schema";
 const modules = {
   "../../convex/_generated/api.js": () => import("../../convex/_generated/api.js"),
   "../../convex/missions.ts": () => import("../../convex/missions"),
+  "../../convex/profiles.ts": () => import("../../convex/profiles"),
   "../../convex/canvas.ts": () => import("../../convex/canvas"),
 };
 
@@ -36,6 +37,7 @@ describe("bounded fifty-participant local evidence", () => {
     const startedAt = Date.now();
     const t = convexTest(schema, modules);
     const asOwner = t.withIdentity(owner);
+    await asOwner.mutation(api.profiles.setMine, { displayName: "Fifty Owner", idempotencyKey: "fifty-owner-profile" });
     const created = await asOwner.mutation(api.missions.createPrivateMission, {
       slug: "fifty-participant-evidence",
       title: "Fifty participant evidence",

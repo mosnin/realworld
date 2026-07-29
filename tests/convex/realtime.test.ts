@@ -7,6 +7,7 @@ import schema from "../../convex/schema";
 const modules = {
   "../../convex/_generated/api.js": () => import("../../convex/_generated/api.js"),
   "../../convex/missions.ts": () => import("../../convex/missions"),
+  "../../convex/profiles.ts": () => import("../../convex/profiles"),
   "../../convex/realtime.ts": () => import("../../convex/realtime"),
   "../../convex/realtime_authorization.ts": () => import("../../convex/realtime_authorization"),
 };
@@ -24,6 +25,7 @@ const syntheticAblyKey = "test.00000000000000000000000000000000:synthetic-signin
 async function setup() {
   const t = convexTest(schema, modules);
   const asOwner = t.withIdentity(owner);
+  await asOwner.mutation(api.profiles.setMine, { displayName: "Realtime Owner", idempotencyKey: "realtime-owner-profile" });
   const mission = await asOwner.mutation(api.missions.createPrivateMission, {
     slug: "realtime-kernel",
     title: "Realtime kernel",

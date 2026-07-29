@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 
-import { internalMutation, query } from "./_generated/server";
+import { mutation, query } from "./_generated/server";
 import { requireAuthenticatedTokenIdentifier } from "./lib/auth";
 
 export const displayNameCooldownMs = 24 * 60 * 60 * 1000;
@@ -111,6 +111,30 @@ async function findPrincipalByTokenIdentifier(
     .unique();
 }
 
+/**
+ * Resolves the current human only after they have deliberately completed the
+ * callsign contract. Mission-entry mutations use this instead of treating an
+ * auth-provider display name as a profile, which would leak provider identity
+ * into the product and bypass the explicit setup step.
+ */
+export async function requireCompletedHumanProfile(
+  ctx: Parameters<typeof requireAuthenticatedTokenIdentifier>[0],
+  purpose: "create a Mission" | "accept an invitation" | "launch a Mission",
+) {
+  const tokenIdentifier = await requireAuthenticatedTokenIdentifier(ctx);
+  const principal = await findPrincipalByTokenIdentifier(ctx, tokenIdentifier);
+  if (principal === null) {
+    throw new Error(`Set your callsign before you can ${purpose}`);
+  }
+  if (principal.type !== "human" || principal.state !== "active") {
+    throw new Error("Unauthorized");
+  }
+  if (principal.displayName === undefined || principal.displayNameUpdatedAt === undefined) {
+    throw new Error(`Set your callsign before you can ${purpose}`);
+  }
+  return principal;
+}
+
 /** Returns only the signed-in human's callsign projection, never identity metadata. */
 export const getMine = query({
   args: {},
@@ -132,7 +156,7 @@ export const getMine = query({
  * Sets the active authenticated human's own callsign. It deliberately accepts
  * neither a principal id nor any Mission, role, email, or token argument.
  */
-export const setMine = internalMutation({
+export const setMine = mutation({
   args: { displayName: v.string(), idempotencyKey: v.string() },
   returns: v.object({ displayName: v.string() }),
   handler: async (ctx, args) => {

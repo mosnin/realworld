@@ -7,6 +7,7 @@ import schema from "../../convex/schema";
 const modules = {
   "../../convex/_generated/api.js": () => import("../../convex/_generated/api.js"),
   "../../convex/missions.ts": () => import("../../convex/missions"),
+  "../../convex/profiles.ts": () => import("../../convex/profiles"),
   "../../convex/moves.ts": () => import("../../convex/moves"),
 };
 
@@ -16,6 +17,7 @@ const scopedBuilder = { tokenIdentifier: "https://realworld.test|dependency-buil
 async function setup(slug = "dependency-graph") {
   const t = convexTest(schema, modules);
   const asOwner = t.withIdentity(owner);
+  await asOwner.mutation(api.profiles.setMine, { displayName: "Dependency Owner", idempotencyKey: `${slug}-owner-profile` });
   const created = await asOwner.mutation(api.missions.createPrivateMission, { slug, title: "Dependency graph", summary: "Adversarial dependency graph tests.", idempotencyKey: `${slug}-mission`, correlationId: `${slug}-mission` });
   const roomId = await t.run(async (ctx) => ctx.db.insert("rooms", { missionId: created.missionId, kind: "workshop", title: "Visible", accessPolicy: "mission", mapType: "field", layout: { x: 0, y: 0, width: 220, height: 140 }, layoutVersion: 1, state: "active", currentVersion: 1, createdAt: Date.now(), updatedAt: Date.now(), schemaVersion: 1 }));
   const hiddenRoomId = await t.run(async (ctx) => ctx.db.insert("rooms", { missionId: created.missionId, kind: "observatory", title: "Hidden", accessPolicy: "mission", mapType: "field", layout: { x: 240, y: 0, width: 220, height: 140 }, layoutVersion: 1, state: "active", currentVersion: 1, createdAt: Date.now(), updatedAt: Date.now(), schemaVersion: 1 }));

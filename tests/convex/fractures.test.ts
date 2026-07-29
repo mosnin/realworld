@@ -7,6 +7,7 @@ import schema from "../../convex/schema";
 const modules = {
   "../../convex/_generated/api.js": () => import("../../convex/_generated/api.js"),
   "../../convex/missions.ts": () => import("../../convex/missions"),
+  "../../convex/profiles.ts": () => import("../../convex/profiles"),
   "../../convex/moves.ts": () => import("../../convex/moves"),
   "../../convex/fractures.ts": () => import("../../convex/fractures"),
 };
@@ -20,6 +21,7 @@ function identity(name: string) {
 async function setup() {
   const t = convexTest(schema, modules);
   const asOwner = t.withIdentity(owner);
+  await asOwner.mutation(api.profiles.setMine, { displayName: "Fracture Owner", idempotencyKey: "fracture-owner-profile" });
   const mission = await asOwner.mutation(api.missions.createPrivateMission, {
     slug: "fracture-kernel",
     title: "Fracture kernel",

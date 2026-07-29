@@ -6,6 +6,7 @@ import { useRef, useState } from "react";
 
 import { PrivateAlphaSignIn } from "@/app/auth/private-alpha-sign-in";
 import { api } from "@/convex/_generated/api";
+import { CallsignSetupGate } from "@/app/profiles/callsign-controls";
 
 export function InviteAcceptance({ token }: Readonly<{ token: string }>) {
   return (
@@ -17,7 +18,7 @@ export function InviteAcceptance({ token }: Readonly<{ token: string }>) {
           <PrivateAlphaSignIn />
         </>
       </Unauthenticated>
-      <Authenticated><AcceptInvitation token={token} /></Authenticated>
+      <Authenticated><CallsignSetupGate purpose="Choose your callsign before you accept this Mission invitation."><AcceptInvitation token={token} /></CallsignSetupGate></Authenticated>
     </>
   );
 }

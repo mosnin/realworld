@@ -8,6 +8,7 @@ import schema from "../../convex/schema";
 const modules = {
   "../../convex/_generated/api.js": () => import("../../convex/_generated/api.js"),
   "../../convex/missions.ts": () => import("../../convex/missions"),
+  "../../convex/profiles.ts": () => import("../../convex/profiles"),
   "../../convex/moves.ts": () => import("../../convex/moves"),
   "../../convex/calls.ts": () => import("../../convex/calls"),
   "../../convex/canvas.ts": () => import("../../convex/canvas"),
@@ -29,6 +30,7 @@ type AuthenticatedTest = ReturnType<Test["withIdentity"]>;
 async function setup(): Promise<{ t: Test; asOwner: AuthenticatedTest; missionId: Id<"missions">; roomId: Id<"rooms"> }> {
   const t = convexTest(schema, modules);
   const asOwner = t.withIdentity(owner);
+  await asOwner.mutation(api.profiles.setMine, { displayName: "Participant Owner", idempotencyKey: "call-participant-owner-profile" });
   const mission = await asOwner.mutation(api.missions.createPrivateMission, {
     slug: "call-participants",
     title: "Call participants",

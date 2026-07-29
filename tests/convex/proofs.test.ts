@@ -7,6 +7,7 @@ import schema from "../../convex/schema";
 const modules = {
   "../../convex/_generated/api.js": () => import("../../convex/_generated/api.js"),
   "../../convex/missions.ts": () => import("../../convex/missions"),
+  "../../convex/profiles.ts": () => import("../../convex/profiles"),
   "../../convex/moves.ts": () => import("../../convex/moves"),
   "../../convex/pulse.ts": () => import("../../convex/pulse"),
   "../../convex/proofs.ts": () => import("../../convex/proofs"),
@@ -21,6 +22,7 @@ function identity(name: string) {
 async function setup() {
   const t = convexTest(schema, modules);
   const asOwner = t.withIdentity(owner);
+  await asOwner.mutation(api.profiles.setMine, { displayName: "Proof Owner", idempotencyKey: "proof-owner-profile" });
   const mission = await asOwner.mutation(api.missions.createPrivateMission, {
     slug: "proof-kernel",
     title: "Proof kernel",

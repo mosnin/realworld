@@ -9,6 +9,7 @@ import schema from "../../convex/schema";
 const modules = {
   "../../convex/_generated/api.js": () => import("../../convex/_generated/api.js"),
   "../../convex/missions.ts": () => import("../../convex/missions"),
+  "../../convex/profiles.ts": () => import("../../convex/profiles"),
   "../../convex/invites.ts": () => import("../../convex/invites"),
   "../../convex/canvas.ts": () => import("../../convex/canvas"),
   "../../convex/launch.ts": () => import("../../convex/launch"),
@@ -42,6 +43,7 @@ const createArgs = {
 
 async function createMission(t = createTest()) {
   const asOwner = t.withIdentity(ownerIdentity);
+  await asOwner.mutation(api.profiles.setMine, { displayName: "Mission Owner", idempotencyKey: "mission-owner-profile" });
   const result = await asOwner.mutation(api.missions.createPrivateMission, createArgs);
   return { t, asOwner, result };
 }
@@ -363,7 +365,9 @@ describe("invites and durable canvas", () => {
   it("creates, accepts, replays, and revokes a scoped contributor invite without storing the token", async () => {
     const { t, asOwner, result } = await createMission(); const roomId = await roomFor(t, result.missionId); const token = "a".repeat(40);
     const invite = await asOwner.mutation(api.invites.createInvite, { missionId: result.missionId, role: "contributor", roomIds: [roomId], expiresAt: Date.now() + 60_000, maxUses: 1, inviteToken: token, idempotencyKey: "invite-1", correlationId: "invite-c" });
-    const guest = t.withIdentity(contributorIdentity); const accepted = await guest.mutation(api.invites.acceptInvite, { inviteToken: token, idempotencyKey: "accept-1", correlationId: "accept-c" });
+    const guest = t.withIdentity(contributorIdentity);
+    await guest.mutation(api.profiles.setMine, { displayName: "Mission Contributor", idempotencyKey: "mission-contributor-profile" });
+    const accepted = await guest.mutation(api.invites.acceptInvite, { inviteToken: token, idempotencyKey: "accept-1", correlationId: "accept-c" });
     expect(accepted.role).toBe("contributor"); expect(await guest.mutation(api.invites.acceptInvite, { inviteToken: token, idempotencyKey: "accept-1", correlationId: "accept-c" })).toEqual(accepted);
     await asOwner.mutation(api.invites.revokeInvite, { inviteId: invite.inviteId, idempotencyKey: "revoke-1", correlationId: "revoke-c" });
     await t.run(async (ctx) => { const stored = await ctx.db.get(invite.inviteId); expect(stored?.tokenHash).not.toBe(token); expect(stored).toMatchObject({ uses: 1, state: "revoked" }); });
@@ -440,12 +444,18 @@ describe("invites and durable canvas", () => {
     const revokedToken = "d".repeat(40);
     const revoked = await asOwner.mutation(api.invites.createInvite, { missionId: result.missionId, role: "observer", roomIds: [roomId], expiresAt: Date.now() + 60_000, maxUses: 2, inviteToken: revokedToken, idempotencyKey: "revoked-invite", correlationId: "revoked-c" });
     await asOwner.mutation(api.invites.revokeInvite, { inviteId: revoked.inviteId, idempotencyKey: "revoke-before-accept", correlationId: "revoke-c" });
-    await expect(t.withIdentity(contributorIdentity).mutation(api.invites.acceptInvite, { inviteToken: revokedToken, idempotencyKey: "revoked-accept", correlationId: "revoked-accept-c" })).rejects.toThrow("Invite is unavailable");
+    const revokedGuest = t.withIdentity(contributorIdentity);
+    await revokedGuest.mutation(api.profiles.setMine, { displayName: "Mission Contributor", idempotencyKey: "revoked-contributor-profile" });
+    await expect(revokedGuest.mutation(api.invites.acceptInvite, { inviteToken: revokedToken, idempotencyKey: "revoked-accept", correlationId: "revoked-accept-c" })).rejects.toThrow("Invite is unavailable");
 
     const limitedToken = "e".repeat(40);
     await asOwner.mutation(api.invites.createInvite, { missionId: result.missionId, role: "observer", roomIds: [roomId], expiresAt: Date.now() + 60_000, maxUses: 1, inviteToken: limitedToken, idempotencyKey: "limited-invite", correlationId: "limited-c" });
-    await t.withIdentity(contributorIdentity).mutation(api.invites.acceptInvite, { inviteToken: limitedToken, idempotencyKey: "limited-first", correlationId: "limited-first-c" });
-    await expect(t.withIdentity({ ...contributorIdentity, tokenIdentifier: "https://realworld.test|second-guest", subject: "second-guest" }).mutation(api.invites.acceptInvite, { inviteToken: limitedToken, idempotencyKey: "limited-second", correlationId: "limited-second-c" })).rejects.toThrow("Invite is unavailable");
+    const limitedGuest = t.withIdentity(contributorIdentity);
+    await limitedGuest.mutation(api.profiles.setMine, { displayName: "Mission Contributor", idempotencyKey: "limited-contributor-profile" });
+    await limitedGuest.mutation(api.invites.acceptInvite, { inviteToken: limitedToken, idempotencyKey: "limited-first", correlationId: "limited-first-c" });
+    const secondGuest = t.withIdentity({ ...contributorIdentity, tokenIdentifier: "https://realworld.test|second-guest", subject: "second-guest" });
+    await secondGuest.mutation(api.profiles.setMine, { displayName: "Second Guest", idempotencyKey: "second-guest-profile" });
+    await expect(secondGuest.mutation(api.invites.acceptInvite, { inviteToken: limitedToken, idempotencyKey: "limited-second", correlationId: "limited-second-c" })).rejects.toThrow("Invite is unavailable");
   });
 
   it("freezes room and invitation writes while a Mission is archived", async () => {

@@ -7,6 +7,7 @@ import schema from "../../convex/schema";
 const modules = {
   "../../convex/_generated/api.js": () => import("../../convex/_generated/api.js"),
   "../../convex/missions.ts": () => import("../../convex/missions"),
+  "../../convex/profiles.ts": () => import("../../convex/profiles"),
 };
 
 const ownerIdentity = {
@@ -18,6 +19,7 @@ const ownerIdentity = {
 async function createMission() {
   const t = convexTest(schema, modules);
   const owner = t.withIdentity(ownerIdentity);
+  await owner.mutation(api.profiles.setMine, { displayName: "Constitution Owner", idempotencyKey: "constitution-owner-profile" });
   const mission = await owner.mutation(api.missions.createPrivateMission, {
     slug: "constitution-test-mission",
     title: "Constitution test Mission",
