@@ -721,6 +721,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   );
   const selectedRoomHash = selectedRoom?.id;
   const visibleRooms = canvasRooms;
+  const cameraIsFit = canvas.zoom === 1 && canvas.panX === 0 && canvas.panY === 0;
 
   function cancelRoomWorkExitFocus() {
     if (roomWorkExitFocusFrameRef.current !== null) {
@@ -1126,9 +1127,13 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
           <button className={showDirectory ? "is-active" : ""} onClick={() => setShowDirectory(true)} type="button">Room directory</button>
           <button aria-label="Zoom out" onClick={() => setCanvas((current) => ({ ...current, zoom: clamp(current.zoom - 0.1, 0.7, 1.35) }))} type="button">−</button>
           <button aria-label="Zoom in" onClick={() => setCanvas((current) => ({ ...current, zoom: clamp(current.zoom + 0.1, 0.7, 1.35) }))} type="button">+</button>
-          <button onClick={() => setCanvas(defaultCanvasState)} type="button">Fit world</button>
+          <button aria-label="Pan canvas left" onClick={() => setCanvas((current) => ({ ...current, panX: clamp(current.panX - 5, -18, 18) }))} type="button">←</button>
+          <button aria-label="Pan canvas right" onClick={() => setCanvas((current) => ({ ...current, panX: clamp(current.panX + 5, -18, 18) }))} type="button">→</button>
+          <button aria-label="Pan canvas up" onClick={() => setCanvas((current) => ({ ...current, panY: clamp(current.panY - 5, -18, 18) }))} type="button">↑</button>
+          <button aria-label="Pan canvas down" onClick={() => setCanvas((current) => ({ ...current, panY: clamp(current.panY + 5, -18, 18) }))} type="button">↓</button>
+          <button onClick={() => setCanvas((current) => ({ ...current, zoom: 1, panX: 0, panY: 0 }))} type="button">Fit world</button>
           <button aria-pressed={canvas.locked} disabled={!canManageCanvas} onClick={() => setCanvas((current) => ({ ...current, locked: !current.locked }))} type="button">{canvas.locked ? "Layout locked" : "Layout unlocked"}</button>
-          <span>Alt + arrows moves a focused Room</span>
+          <span>{cameraIsFit ? "Alt + arrows moves a focused Room" : "Fit world to move Rooms"}</span>
         </div>
         {canManageCanvas ? <form className="room-create" onSubmit={(event) => { event.preventDefault(); void createRoom(); }}>
           <label htmlFor="new-room-name">New room</label><input id="new-room-name" onChange={(event) => setNewRoomName(event.target.value)} placeholder="e.g. Sound check" value={newRoomName} /><button type="submit">Create room</button>
@@ -1147,12 +1152,12 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
             </ul>
           </section>
         ) : (
-          <div className={`world-map ${canvas.locked ? "is-locked" : ""}`} aria-label="Customizable spatial Mission canvas. Select a Room to inspect it; press Enter on the selected Room to enter it.">
+          <div className={`world-map ${canvas.locked || !canManageCanvas || !cameraIsFit ? "is-locked" : ""}`} aria-label="Customizable spatial Mission canvas. Select a Room to inspect it; press Enter on the selected Room to enter it.">
             <div className="world-map__canvas" style={{ transform: `translate(${canvas.panX}%, ${canvas.panY}%) scale(${canvas.zoom})` }}>
               <svg className="world-routes" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
                 {visibleRooms.filter((room) => room.id !== "core").map((room) => <path className={activeMission.lifecycle === "active" && room.moveSignal.hasNonterminalMove ? "world-routes__active" : undefined} d={`M ${visibleRooms.find((candidate) => candidate.id === "core")?.x ?? 50} ${visibleRooms.find((candidate) => candidate.id === "core")?.y ?? 46} L ${room.x} ${room.y}`} key={room.id} />)}
               </svg>
-              {visibleRooms.map((room) => <RoomLandmark key={room.id} locked={canvas.locked || !canManageCanvas} navigationRooms={visibleRooms} onReposition={repositionRoom} room={room} selected={selectedRoom.id === room.id} onSelect={setSelectedRoomId} onEnter={enterRoom} />)}
+              {visibleRooms.map((room) => <RoomLandmark key={room.id} locked={canvas.locked || !canManageCanvas || !cameraIsFit} navigationRooms={visibleRooms} onReposition={repositionRoom} room={room} selected={selectedRoom.id === room.id} onSelect={setSelectedRoomId} onEnter={enterRoom} />)}
               <CallSurface
                 createCallRequest={createCallRequest}
                 inspectCallRequest={inspectCallRequest}

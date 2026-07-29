@@ -492,6 +492,21 @@ test.describe("on a phone-sized Mission World", () => {
     await page.goto("/");
 
     await expect(page.getByRole("heading", { name: "Company sprint" })).toBeVisible();
+    const mobileToolbar = page.getByLabel("Mission World view controls");
+    await expect.poll(() => mobileToolbar.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    const viewport = page.viewportSize();
+    expect(viewport).not.toBeNull();
+    for (const name of ["Pan canvas left", "Pan canvas right", "Pan canvas up", "Pan canvas down", "Fit world", "Layout unlocked"]) {
+      const control = page.getByRole("button", { name });
+      await expect(control).toBeVisible();
+      const bounds = await control.boundingBox();
+      expect(bounds).not.toBeNull();
+      if (bounds === null || viewport === null) throw new Error(`Missing mobile bounds for ${name}.`);
+      expect(bounds.x).toBeGreaterThanOrEqual(0);
+      expect(bounds.y).toBeGreaterThanOrEqual(0);
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(viewport.width);
+      expect(bounds.y + bounds.height).toBeLessThanOrEqual(viewport.height);
+    }
     await page.getByRole("button", { name: "Room directory" }).click();
     await expect(page.getByRole("heading", { name: "Mission rooms" })).toBeVisible();
 
@@ -557,13 +572,45 @@ test("a participant can customize and persist a personal canvas layout", async (
 
   const customRoom = page.getByRole("button", { name: /^Launch Cabin\./ });
   await customRoom.focus();
+  const canvas = page.locator(".world-map__canvas");
+  await expect.poll(() => canvas.evaluate((element) => (element as HTMLElement).style.transform)).toBe("translate(0%, 0%) scale(1)");
+  await page.getByRole("button", { name: "Pan canvas right" }).click();
+  await expect.poll(() => canvas.evaluate((element) => (element as HTMLElement).style.transform)).toBe("translate(5%, 0%) scale(1)");
+  const positionBeforeBlockedPan = await customRoom.evaluate((element) => ({
+    left: (element as HTMLElement).style.left,
+    top: (element as HTMLElement).style.top,
+  }));
+  await customRoom.focus();
   await page.keyboard.press("Alt+ArrowRight");
-  await page.getByRole("button", { name: "Zoom in" }).click();
+  expect(await customRoom.evaluate((element) => ({
+    left: (element as HTMLElement).style.left,
+    top: (element as HTMLElement).style.top,
+  }))).toEqual(positionBeforeBlockedPan);
+  await page.getByRole("button", { name: "Fit world" }).click();
+  await expect.poll(() => canvas.evaluate((element) => (element as HTMLElement).style.transform)).toBe("translate(0%, 0%) scale(1)");
+  await customRoom.focus();
+  await page.keyboard.press("Alt+ArrowRight");
+  await expect.poll(async () => customRoom.evaluate((element) => ({
+    left: (element as HTMLElement).style.left,
+    top: (element as HTMLElement).style.top,
+  }))).not.toEqual(positionBeforeBlockedPan);
+  await page.getByRole("button", { name: "Pan canvas right" }).click();
+  await expect.poll(() => canvas.evaluate((element) => (element as HTMLElement).style.transform)).toBe("translate(5%, 0%) scale(1)");
   await page.getByRole("button", { name: "Layout unlocked" }).click();
   await page.reload();
 
   await expect(page.getByRole("button", { name: /^Launch Cabin\./ })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Layout locked" })).toBeVisible();
+  const layoutLock = page.getByRole("button", { name: "Layout locked" });
+  await expect(layoutLock).toBeVisible();
+  await expect(layoutLock).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(() => canvas.evaluate((element) => (element as HTMLElement).style.transform)).toBe("translate(5%, 0%) scale(1)");
+  await page.getByRole("button", { name: "Zoom in" }).click();
+  await page.getByRole("button", { name: "Pan canvas down" }).click();
+  await expect.poll(() => canvas.evaluate((element) => (element as HTMLElement).style.transform)).toBe("translate(5%, 5%) scale(1.1)");
+  await page.getByRole("button", { name: "Fit world" }).click();
+  await expect.poll(() => canvas.evaluate((element) => (element as HTMLElement).style.transform)).toBe("translate(0%, 0%) scale(1)");
+  await expect(layoutLock).toBeVisible();
+  await expect(layoutLock).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: /^Launch Cabin\./ }).click();
   await page.getByRole("button", { name: "Archive room" }).click();
   await expect(page.getByRole("button", { name: /^Launch Cabin\./ })).toHaveCount(0);
@@ -591,6 +638,7 @@ test("an owner can archive a Mission into a read-only world, restore it, and kee
   await expect(page.getByLabel("Room name")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Archive room" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Layout unlocked" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Pan canvas right" })).toBeEnabled();
   await expect(page.getByRole("button", { name: /Workshop — 3 proposed Moves/ })).toBeVisible();
   await expect(page.locator(".world-routes path.world-routes__active")).toHaveCount(0);
 
