@@ -1,5 +1,5 @@
 /**
- * Development-only Ably bridge for disposable Mission-room signals.
+ * Non-production Ably bridge for disposable Mission-room signals.
  *
  * The adapter consumes a signed TokenRequest already issued by the trusted
  * Convex boundary. It deliberately does not read environment variables, mint
@@ -30,8 +30,8 @@ type AblyOperation = "publish" | "subscribe" | "presence";
 type AblyDevelopmentEnvironment = "development" | "test" | "preview";
 export type AblyAdapterEnvironment = AblyDevelopmentEnvironment | "production";
 
-type AblyInboundMessage = Readonly<{ data: unknown; name?: string; clientId?: string }>;
-type AblyConnectionState = Readonly<{ current?: string; reason?: unknown }>;
+export type AblyInboundMessage = Readonly<{ data: unknown; name?: string; clientId?: string }>;
+export type AblyConnectionState = Readonly<{ current?: string; reason?: unknown }>;
 export type AblyConnectionTimer = Readonly<{
   setTimeout: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>;
   clearTimeout: (timer: ReturnType<typeof setTimeout>) => void;

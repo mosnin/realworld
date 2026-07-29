@@ -11,7 +11,7 @@ export default async function HomePage() {
 
   return (
     <MissionAccessGate initialAuthenticated={initialAuthenticated}>
-      <MissionWorld />
+      <MissionWorld realtimeEnvironment={process.env.NEXT_PUBLIC_APP_ENV} />
     </MissionAccessGate>
   );
 }

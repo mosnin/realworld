@@ -54,7 +54,7 @@ function hasBoundConnectScope(
 }
 
 /**
- * Injected development-only provider composition for the Ably adapter. A client
+ * Injected non-production provider composition for the Ably adapter. A client
  * factory must be injected; no ambient environment, key, or client is read or
  * created until a future room-session factory invokes this result.
  */

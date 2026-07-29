@@ -6,6 +6,7 @@ import { useAction, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { SessionControl } from "@/app/auth/session-control";
+import { createBrowserAblyClientFactory } from "@/app/realtime/browser-ably-client-factory";
 import { createDevelopmentAblyTransportFactory } from "@/app/realtime/development-ably-transport-factory";
 import { AuthenticatedMissionRealtimeLifecycle } from "@/app/realtime/authenticated-mission-lifecycle";
 import { OwnerInvitePanel } from "@/app/invitations/owner-invite-panel";
@@ -642,9 +643,10 @@ function PreferencePanel({
 
 export type MissionWorldProps = Readonly<{
   developmentAblyClientFactory?: AblyClientFactory;
+  realtimeEnvironment?: unknown;
 }>;
 
-export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps = {}) {
+export function MissionWorld({ developmentAblyClientFactory, realtimeEnvironment }: MissionWorldProps = {}) {
   const templateOptions = [{ key: "companySprint", label: "Company sprint" }, { key: "classroomProject", label: "Classroom project" }, { key: "contentProduction", label: "Content production" }, { key: "openChallenge", label: "Open challenge" }, { key: "blankCanvas", label: "Blank canvas" }] as const;
   const missions = useQuery(api.missions.listMyMissions, {});
   const profile = useQuery(api.profiles.getMine, {});
@@ -663,13 +665,17 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   const updateRoomLayout = useMutation(api.canvas.updateRoomLayout);
   const renameRoomMutation = useMutation(api.canvas.renameRoom);
   const archiveRoomMutation = useMutation(api.canvas.archiveRoom);
+  const browserAblyClientFactory = useMemo(
+    () => developmentAblyClientFactory ?? createBrowserAblyClientFactory(realtimeEnvironment),
+    [developmentAblyClientFactory, realtimeEnvironment],
+  );
   const developmentRealtimeTransportFactory = useMemo(
     () => createDevelopmentAblyTransportFactory(
-      developmentAblyClientFactory === undefined
+      browserAblyClientFactory === undefined
         ? undefined
-        : { environment: "development", clientFactory: developmentAblyClientFactory },
+        : { environment: realtimeEnvironment, clientFactory: browserAblyClientFactory },
     ),
-    [developmentAblyClientFactory],
+    [browserAblyClientFactory, realtimeEnvironment],
   );
   const issueRealtimeTokenRequest = useAction(api.realtime.issueTokenRequest);
   const requestAuthenticatedRealtimeToken = useCallback(async ({ missionId, roomId }: { missionId: string; roomId: string }) => {

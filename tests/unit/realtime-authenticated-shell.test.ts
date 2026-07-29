@@ -189,6 +189,19 @@ describe("authenticated Mission realtime shell", () => {
     expect(lifecycle.stop).toHaveBeenCalledTimes(1);
   });
 
+  it("preserves the exact preview namespace through authenticated composition", () => {
+    setEnvironment("preview", "enabled");
+    const sessionFactory = vi.fn(() => ({ start: vi.fn(), stop: vi.fn() }));
+    const lifecycle = { start: vi.fn(), stop: vi.fn() };
+    seams.publicationPolicy.mockReturnValue({ decide: vi.fn() });
+    seams.composition.mockReturnValue(lifecycle);
+
+    expect(AuthenticatedMissionRealtimeLifecycle({ readiness: readiness(), membershipGrantVersion: 3, expectedMissionId: "mission_a", expectedRoomId: "room_a", sessionFactory })).toBeNull();
+
+    expect(seams.composition).toHaveBeenCalledWith(expect.objectContaining({ environment: "preview" }));
+    expect(lifecycle.start).toHaveBeenCalledTimes(1);
+  });
+
   it("stops the old lifecycle before each Mission, room, or grant-version rebind and disposes a stale async start", () => {
     setEnvironment("development", "enabled");
     let resolveOldStart: (() => void) | undefined;

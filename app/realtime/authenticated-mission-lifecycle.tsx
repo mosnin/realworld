@@ -35,9 +35,12 @@ export type AuthenticatedMissionRealtimeLifecycleProps = Readonly<{
 
 export type { DurableRoomReadiness } from "./durable-room-session-factory";
 
-function developmentRealtimeIsExplicitlyEnabled() {
-  return process.env.NEXT_PUBLIC_APP_ENV === "development"
-    && process.env.NEXT_PUBLIC_REALTIME_LIFECYCLE === "enabled";
+function developmentRealtimeEnvironment(): "development" | "test" | "preview" | undefined {
+  const environment = process.env.NEXT_PUBLIC_APP_ENV;
+  if (process.env.NEXT_PUBLIC_REALTIME_LIFECYCLE !== "enabled") return undefined;
+  return environment === "development" || environment === "test" || environment === "preview"
+    ? environment
+    : undefined;
 }
 
 function isDurableRoomReadiness(
@@ -83,7 +86,8 @@ export function AuthenticatedMissionRealtimeLifecycle({
   const grantVersion = durableReadiness?.grantVersion;
 
   useEffect(() => {
-    if (!developmentRealtimeIsExplicitlyEnabled() || !missionId || !roomId || grantVersion === undefined) return;
+    const realtimeEnvironment = developmentRealtimeEnvironment();
+    if (realtimeEnvironment === undefined || !missionId || !roomId || grantVersion === undefined) return;
     const scopedReadiness: DurableRoomReadiness = {
       missionId,
       roomId,
@@ -103,7 +107,7 @@ export function AuthenticatedMissionRealtimeLifecycle({
     if (typeof resolvedSessionFactory !== "function") return;
 
     const lifecycle = createBrowserRealtimeComposition({
-      environment: "development",
+      environment: realtimeEnvironment,
       rawEnabledFlag: "enabled",
       sourceFactory: createDomBrowserLifecycleSourceFromGlobals,
       sessionFactory: () => resolvedSessionFactory(scopedReadiness),

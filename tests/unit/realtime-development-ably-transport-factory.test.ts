@@ -231,22 +231,28 @@ describe("development Ably transport factory", () => {
     expect(clientFactory.mock.calls).toEqual([[firstToken.tokenRequest], [secondToken.tokenRequest]]);
   });
 
-  it("has no ambient provider, credential, or network path while Mission World composes only injected development realtime seams", async () => {
-    const [factorySource, missionWorldSource, pageSource] = await Promise.all([
+  it("keeps the durable transport seam free of ambient credentials while page composition supplies only a public environment", async () => {
+    const [factorySource, missionWorldSource, pageSource, browserFactorySource] = await Promise.all([
       readFile(new URL("../../app/realtime/development-ably-transport-factory.ts", import.meta.url), "utf8"),
       readFile(new URL("../../app/mission-world.tsx", import.meta.url), "utf8"),
       readFile(new URL("../../app/page.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../../app/realtime/browser-ably-client-factory.ts", import.meta.url), "utf8"),
     ]);
 
     expect(factorySource).not.toMatch(/process\.env|import\(["']ably["']\)|\bfetch\s*\(/);
     expect(factorySource).toContain("clientFactory?: unknown");
     expect(missionWorldSource).toContain('useAction(api.realtime.issueTokenRequest)');
     expect(missionWorldSource).toMatch(/<AuthenticatedMissionRealtimeLifecycle[^>]*authenticatedTokenRequester=\{requestAuthenticatedRealtimeToken\}/s);
-    expect(missionWorldSource).toMatch(/export\s+type\s+MissionWorldProps\s*=\s*Readonly<\{[\s\S]*developmentAblyClientFactory\?:\s*AblyClientFactory[\s\S]*\}>/);
-    expect(missionWorldSource).toMatch(/export\s+function\s+MissionWorld\s*\(\s*\{\s*developmentAblyClientFactory\s*\}\s*:\s*MissionWorldProps\s*=\s*\{\}\s*\)/);
-    expect(missionWorldSource).toMatch(/createDevelopmentAblyTransportFactory\s*\([\s\S]*environment:\s*["']development["'][\s\S]*clientFactory:\s*developmentAblyClientFactory/);
+    expect(missionWorldSource).toMatch(/export\s+type\s+MissionWorldProps\s*=\s*Readonly<\{[\s\S]*developmentAblyClientFactory\?:\s*AblyClientFactory[\s\S]*realtimeEnvironment\?:\s*unknown[\s\S]*\}>/);
+    expect(missionWorldSource).toMatch(/export\s+function\s+MissionWorld\s*\(\s*\{\s*developmentAblyClientFactory,\s*realtimeEnvironment\s*\}\s*:\s*MissionWorldProps\s*=\s*\{\}\s*\)/);
+    expect(missionWorldSource).toMatch(/createBrowserAblyClientFactory\(realtimeEnvironment\)/);
+    expect(missionWorldSource).toMatch(/createDevelopmentAblyTransportFactory\s*\([\s\S]*environment:\s*realtimeEnvironment[\s\S]*clientFactory:\s*browserAblyClientFactory/);
     expect(missionWorldSource.match(/<AuthenticatedMissionRealtimeLifecycle[^>]*transportFactory=\{[^}]+\}/gs)).toHaveLength(2);
-    expect(pageSource).toMatch(/<MissionWorld\s*\/>/);
+    expect(pageSource).toMatch(/<MissionWorld\s+realtimeEnvironment=\{process\.env\.NEXT_PUBLIC_APP_ENV\}\s*\/>/);
     expect(missionWorldSource).not.toMatch(/from\s+["']ably["']|import\(["']ably["']\)|ABLY_API_KEY|process\.env|sessionFactory=/);
+    expect(browserFactorySource).toContain('import type { RealtimeChannel, TokenRequest } from "ably"');
+    expect(browserFactorySource).toContain('await import("ably")');
+    expect(browserFactorySource).not.toContain("ABLY_API_KEY");
+    expect(browserFactorySource).not.toMatch(/process\.env|fetch\s*\(/);
   });
 });
