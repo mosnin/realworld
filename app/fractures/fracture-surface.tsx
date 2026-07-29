@@ -15,6 +15,7 @@ type Mission = { _id: Id<"missions">; lifecycle: string; role: string };
 type RoomOption = { _id: Id<"rooms">; title: string; x: number; y: number };
 type MoveOption = { _id: Id<"moves">; title: string; roomId?: Id<"rooms"> };
 type CreateFractureRequest = { roomId: Id<"rooms">; moveId: Id<"moves">; nonce: string };
+type InspectFractureRequest = { fractureId: Id<"fractures">; roomId: Id<"rooms">; nonce: string };
 
 const transitions: Record<FractureStatus, FractureStatus[]> = {
   open: ["investigating", "resolved", "dismissed"],
@@ -38,6 +39,9 @@ export function FractureSurface({
   createFractureRequest,
   onCreateFractureRequestHandled,
   onCreateFractureRequestUnavailable,
+  inspectFractureRequest,
+  onInspectFractureRequestHandled,
+  onInspectFractureRequestUnavailable,
 }: Readonly<{
   mission: Mission;
   rooms: RoomOption[];
@@ -45,6 +49,9 @@ export function FractureSurface({
   createFractureRequest?: CreateFractureRequest | null;
   onCreateFractureRequestHandled?: () => void;
   onCreateFractureRequestUnavailable?: () => void;
+  inspectFractureRequest?: InspectFractureRequest | null;
+  onInspectFractureRequestHandled?: () => void;
+  onInspectFractureRequestUnavailable?: () => void;
 }>) {
   const fractures = useQuery(api.fractures.listMissionFractures, { missionId: mission._id });
   const createFracture = useMutation(api.fractures.createFracture);
@@ -149,9 +156,36 @@ export function FractureSurface({
 
   useLayoutEffect(() => {
     if (handoffFocusNonce === null || !open || pendingHandoffFocusRef.current !== handoffFocusNonce) return;
-    firstFieldRef.current?.focus();
+    const firstInteractive = panelRef.current?.querySelector<HTMLElement>("button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled])");
+    (firstFieldRef.current ?? firstInteractive)?.focus();
     pendingHandoffFocusRef.current = null;
   }, [handoffFocusNonce, open]);
+
+  useEffect(() => {
+    if (inspectFractureRequest === undefined || inspectFractureRequest === null || fractures === undefined) return;
+    const requestedFracture = rooms.some((room) => room._id === inspectFractureRequest.roomId)
+      ? fractures.find((fracture) => fracture._id === inspectFractureRequest.fractureId && fracture.roomId === inspectFractureRequest.roomId)
+      : undefined;
+    const frame = window.requestAnimationFrame(() => {
+      if (requestedFracture !== undefined) {
+        openerRef.current = triggerRef.current;
+        setSelectedFractureId(requestedFracture._id);
+        setTitle(requestedFracture.title);
+        setDetail(requestedFracture.detail);
+        setSeverity(requestedFracture.severity);
+        setRoomId(requestedFracture.roomId ?? "");
+        setLinkedMoveId(requestedFracture.linkedMoveId ?? "");
+        setStatus(null);
+        pendingHandoffFocusRef.current = inspectFractureRequest.nonce;
+        setHandoffFocusNonce(inspectFractureRequest.nonce);
+        setOpen(true);
+      } else {
+        onInspectFractureRequestUnavailable?.();
+      }
+      onInspectFractureRequestHandled?.();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [fractures, inspectFractureRequest, onInspectFractureRequestHandled, onInspectFractureRequestUnavailable, rooms]);
 
   function openComposer(event: React.MouseEvent<HTMLButtonElement>) {
     openerRef.current = event.currentTarget;
