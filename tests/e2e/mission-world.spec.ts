@@ -716,6 +716,72 @@ test("an owner and scoped reviewer complete a reactive Proof handoff", async ({ 
   }
 });
 
+test("a scoped observer receives a stable read-only Mission shell without private work feeds", async ({ browser, page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Invite collaborators" }).click();
+  const invitations = page.getByRole("dialog", { name: "Invite collaborators" });
+  await invitations.getByLabel("Role").selectOption("observer");
+  await invitations.getByRole("checkbox", { name: /Workshop/i }).check();
+  await invitations.getByRole("button", { name: "Create invitation" }).click();
+  const inviteUrl = await invitations.getByLabel("Invitation link").inputValue();
+
+  const observerContext = await browser.newContext();
+  try {
+    const observer = await observerContext.newPage();
+    const runtimeErrors: string[] = [];
+    observer.on("pageerror", (error) => runtimeErrors.push(error.message));
+    observer.on("console", (message) => {
+      if (message.type() === "error") runtimeErrors.push(message.text());
+    });
+
+    await observer.goto(inviteUrl);
+    await observer.getByLabel("Email").fill(
+      `observer-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`,
+    );
+    await observer.getByLabel("Password").fill("Realworld-browser-test-2026");
+    await observer.getByRole("button", { name: "Need an invitation? Create an account" }).click();
+    await observer.getByRole("button", { name: "Create private-alpha account" }).click();
+    await expect(observer.getByRole("heading", { name: "You have a Mission invitation." })).toBeVisible({ timeout: 15_000 });
+    await observer.getByRole("button", { name: "Join Mission" }).click();
+    await expect(observer.getByText("You joined the Mission.")).toBeVisible();
+    await observer.getByRole("link", { name: "Enter the Mission World" }).click();
+    await expect(observer.getByRole("heading", { name: "Company sprint" })).toBeVisible();
+    await expect(observer.getByText("observer", { exact: true })).toBeVisible();
+
+    await expect(observer.getByRole("button", { name: /Workshop\. 4 active people/i })).toBeVisible();
+    await expect(observer.getByRole("button", { name: /Mission Core\./i })).toHaveCount(0);
+    await expect(observer.getByLabel("New room")).toHaveCount(0);
+    await expect(observer.getByRole("button", { name: "Layout unlocked" })).toBeDisabled();
+    await expect(observer.locator(".fracture-surface")).toHaveCount(0);
+    await expect(observer.locator(".proof-surface")).toHaveCount(0);
+    await expect(observer.getByLabel("Mission activity Pulse")).toHaveCount(0);
+    await expect(observer.getByLabel(/Mission Momentum/)).toHaveCount(0);
+
+    await observer.getByRole("button", { name: /Open Moves/ }).click();
+    const moves = observer.getByRole("dialog", { name: "Turn intent into progress" });
+    await expect(moves.getByLabel("Mission Moves read-only")).toBeVisible();
+    await expect(moves.getByLabel("Move title")).toHaveCount(0);
+    await moves.getByRole("button", { name: "Close Moves" }).click();
+
+    await observer.getByRole("button", { name: /View Calls/ }).click();
+    const calls = observer.getByRole("dialog", { name: "Ask for a hand, in context" });
+    await expect(calls.getByLabel("Mission Calls read-only")).toBeVisible();
+    await calls.getByRole("button", { name: "Close Calls" }).click();
+
+    await observer.getByRole("button", { name: /Workshop\. 4 active people/i }).click();
+    await observer.getByRole("button", { name: "Enter Workshop" }).click();
+    await expect(observer.getByText("Read-only observer view", { exact: true })).toBeVisible();
+    await expect(observer.getByRole("button", { name: "Review changes" })).toHaveCount(0);
+    await expect(observer.getByRole("button", { name: "Prepare Proof" })).toHaveCount(0);
+    await expect(observer.getByLabel("Mission activity Pulse")).toHaveCount(0);
+    await observer.getByRole("button", { name: "Mission World" }).click();
+    await expect(observer.getByRole("heading", { name: "Company sprint" })).toBeVisible();
+    expect(runtimeErrors).toEqual([]);
+  } finally {
+    await observerContext.close();
+  }
+});
+
 test("a durable Workshop Move appears in Pulse and remains readable after reload and archive", async ({ page }) => {
   const moveTitle = "Record the Pulse handoff";
 

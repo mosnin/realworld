@@ -291,7 +291,8 @@ function PersonToken({ name, index }: Readonly<{ name: string; index: number }>)
   );
 }
 
-function Workshop({ mission, onExit }: Readonly<{ mission: { _id: Id<"missions"> }; onExit: () => void }>) {
+function Workshop({ mission, onExit }: Readonly<{ mission: { _id: Id<"missions">; role: string }; onExit: () => void }>) {
+  const canAct = mission.role !== "observer";
   return (
     <div className="workshop-view" aria-labelledby="workshop-heading">
       <header className="room-topbar">
@@ -320,8 +321,7 @@ function Workshop({ mission, onExit }: Readonly<{ mission: { _id: Id<"missions">
         <main className="artifact-canvas" id="main-content" tabIndex={-1}>
           <div className="artifact-toolbar" aria-label="Artifact tools">
             <span className="artifact-kind">Interaction brief</span>
-            <button type="button">Share</button>
-            <button type="button">Versions</button>
+            {canAct ? <><button type="button">Share</button><button type="button">Versions</button></> : <span>Read-only observer view</span>}
           </div>
           <article className="artifact-paper" aria-label="Room entry interaction brief">
             <p className="eyebrow">Draft · 3 contributors</p>
@@ -341,11 +341,10 @@ function Workshop({ mission, onExit }: Readonly<{ mission: { _id: Id<"missions">
           <h2>Review the room transition</h2>
           <p>Evidence: experience specification, map interaction model, keyboard path.</p>
           <div className="agent-status"><span aria-hidden="true"><Icon name="agent" /></span><div><strong>SonicAgent</strong><small>Waiting for review</small></div></div>
-          <button className="primary-button" type="button">Review changes</button>
-          <button className="secondary-button" type="button">Prepare Proof</button>
+          {canAct ? <><button className="primary-button" type="button">Review changes</button><button className="secondary-button" type="button">Prepare Proof</button></> : null}
         </aside>
       </div>
-      <PulseSurface mission={mission} />
+      {mission.role === "observer" ? null : <PulseSurface mission={mission} />}
     </div>
   );
 }
@@ -396,9 +395,11 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   const [selectedMissionId, setSelectedMissionId] = useState<Id<"missions"> | null>(null);
   const [selectionReady, setSelectionReady] = useState(false);
   const activeMission = selectedMissionId === null ? undefined : missions?.find((mission) => mission._id === selectedMissionId);
+  const isObserver = activeMission?.role === "observer";
+  const canManageCanvas = activeMission?.lifecycle === "active" && ["owner", "steward", "builder"].includes(activeMission.role);
   const roomRecords = useQuery(api.canvas.roomLayouts, activeMission === undefined ? "skip" : { missionId: activeMission._id });
   const missionMoves = useQuery(api.moves.listMissionMoves, activeMission === undefined ? "skip" : { missionId: activeMission._id });
-  const missionFractures = useQuery(api.fractures.listMissionFractures, activeMission === undefined ? "skip" : { missionId: activeMission._id });
+  const missionFractures = useQuery(api.fractures.listMissionFractures, activeMission === undefined || isObserver ? "skip" : { missionId: activeMission._id });
   const launch = useMutation(api.launch.createMissionFromTemplate);
   const createRoomMutation = useMutation(api.canvas.createRoom);
   const updateRoomLayout = useMutation(api.canvas.updateRoomLayout);
@@ -547,6 +548,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   }
 
   async function repositionRoom(roomId: RoomId, x: number, y: number) {
+    if (!canManageCanvas) return;
     const room = canvasRooms.find((candidate) => candidate.id === roomId);
     if (!room?.layout || room.layoutVersion === undefined) return;
     setRoomError(null);
@@ -558,6 +560,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   }
 
   async function createRoom() {
+    if (!canManageCanvas) return;
     const name = newRoomName.trim();
     if (!name) return;
     if (activeMission === undefined) return;
@@ -647,9 +650,9 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
             {missions.map((mission) => <option key={mission._id} value={mission._id}>{mission.title}{mission.lifecycle === "archived" ? " (archived)" : ""}</option>)}
           </select>
         </label>
-        <div className="momentum" aria-label={`Mission Momentum: strong. ${activeFractureCount} active ${activeFractureCount === 1 ? "fracture" : "fractures"}. Surge opening in one minute and twenty-four seconds.`}>
+        {isObserver ? null : <div className="momentum" aria-label={`Mission Momentum: strong. ${activeFractureCount} active ${activeFractureCount === 1 ? "fracture" : "fractures"}. Surge opening in one minute and twenty-four seconds.`}>
           <span className="momentum__mark"><Icon name="spark" /></span><strong>Mission Momentum</strong><span className="momentum__bars" aria-hidden="true"><i /><i /><i /><i /><i /></span><b>Strong</b><span>Fractures <em>{activeFractureCount}</em></span><span>Surge opening <time>01:24</time></span>
-        </div>
+        </div>}
         <button className="create-button" onClick={() => setNewMissionOpen(true)} type="button">
           <Icon name="plus" /> New Mission
         </button>
@@ -706,10 +709,10 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
           <button aria-label="Zoom out" onClick={() => setCanvas((current) => ({ ...current, zoom: clamp(current.zoom - 0.1, 0.7, 1.35) }))} type="button">−</button>
           <button aria-label="Zoom in" onClick={() => setCanvas((current) => ({ ...current, zoom: clamp(current.zoom + 0.1, 0.7, 1.35) }))} type="button">+</button>
           <button onClick={() => setCanvas(defaultCanvasState)} type="button">Fit world</button>
-          <button aria-pressed={canvas.locked} disabled={!missionWritable} onClick={() => setCanvas((current) => ({ ...current, locked: !current.locked }))} type="button">{canvas.locked ? "Layout locked" : "Layout unlocked"}</button>
+          <button aria-pressed={canvas.locked} disabled={!canManageCanvas} onClick={() => setCanvas((current) => ({ ...current, locked: !current.locked }))} type="button">{canvas.locked ? "Layout locked" : "Layout unlocked"}</button>
           <span>Alt + arrows moves a focused Room</span>
         </div>
-        {missionWritable ? <form className="room-create" onSubmit={(event) => { event.preventDefault(); void createRoom(); }}>
+        {canManageCanvas ? <form className="room-create" onSubmit={(event) => { event.preventDefault(); void createRoom(); }}>
           <label htmlFor="new-room-name">New room</label><input id="new-room-name" onChange={(event) => setNewRoomName(event.target.value)} placeholder="e.g. Sound check" value={newRoomName} /><button type="submit">Create room</button>
         </form> : null}
         <div className="contours" aria-hidden="true" />
@@ -732,25 +735,25 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
                 {visibleRooms.filter((room) => room.id !== "core").map((room) => <path d={`M ${visibleRooms.find((candidate) => candidate.id === "core")?.x ?? 50} ${visibleRooms.find((candidate) => candidate.id === "core")?.y ?? 46} L ${room.x} ${room.y}`} key={room.id} />)}
                 <path className="world-routes__active" d={`M ${visibleRooms.find((room) => room.id === "core")?.x ?? 50} ${visibleRooms.find((room) => room.id === "core")?.y ?? 46} L ${visibleRooms.find((room) => room.id === "workshop")?.x ?? 74} ${visibleRooms.find((room) => room.id === "workshop")?.y ?? 19}`} />
               </svg>
-              {visibleRooms.map((room) => <RoomLandmark key={room.id} locked={canvas.locked || !missionWritable} navigationRooms={visibleRooms} onReposition={repositionRoom} room={room} selected={selectedRoom.id === room.id} onSelect={setSelectedRoomId} onEnter={missionWritable ? enterRoom : () => undefined} />)}
+              {visibleRooms.map((room) => <RoomLandmark key={room.id} locked={canvas.locked || !canManageCanvas} navigationRooms={visibleRooms} onReposition={repositionRoom} room={room} selected={selectedRoom.id === room.id} onSelect={setSelectedRoomId} onEnter={missionWritable ? enterRoom : () => undefined} />)}
               <CallSurface
                 key={activeMission._id}
                 mission={activeMission}
                 moves={(missionMoves ?? []).map((move) => ({ _id: move._id, title: move.title, roomId: move.roomId }))}
                 rooms={canvasRooms.map((room) => ({ _id: room.id as Id<"rooms">, title: room.name, x: room.x, y: room.y }))}
               />
-              <FractureSurface
+              {isObserver ? null : <FractureSurface
                 key={`fractures-${activeMission._id}`}
                 mission={activeMission}
                 moves={(missionMoves ?? []).map((move) => ({ _id: move._id, title: move.title, roomId: move.roomId }))}
                 rooms={canvasRooms.map((room) => ({ _id: room.id as Id<"rooms">, title: room.name, x: room.x, y: room.y }))}
-              />
-              <ProofSurface
+              />}
+              {isObserver ? null : <ProofSurface
                 key={`proofs-${activeMission._id}`}
                 mission={activeMission}
                 moves={(missionMoves ?? []).map((move) => ({ _id: move._id, title: move.title, roomId: move.roomId }))}
                 rooms={canvasRooms.map((room) => ({ _id: room.id as Id<"rooms">, title: room.name, x: room.x, y: room.y }))}
-              />
+              />}
             </div>
           </div>
         )}
@@ -771,7 +774,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
           <button className="secondary-button" type="button">Follow Priya</button>
         </aside>
       </main>
-      <PulseSurface mission={activeMission} />
+      {isObserver ? null : <PulseSurface mission={activeMission} />}
     </div>
   );
 }
