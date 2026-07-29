@@ -321,6 +321,7 @@ type WorkshopMove = {
 type WorkshopCall = {
   _id: Id<"calls">;
   roomId?: Id<"rooms">;
+  linkedMoveId?: Id<"moves">;
   title: string;
   detail: string;
   status: string;
@@ -356,9 +357,9 @@ type WorkshopProof = {
 
 type WorkshopContext =
   | { key: string; kind: "Move"; moveId: Id<"moves">; title: string; detail: string; state: string; version: number; updatedAt: number }
-  | { key: string; kind: "Call"; callId: Id<"calls">; title: string; detail: string; state: string; joinedCount: number; maxParticipants: number; version: number; updatedAt: number }
-  | { key: string; kind: "Fracture"; fractureId: Id<"fractures">; title: string; detail: string; state: string; severity: string; linkedMoveTitle: string | null; version: number; updatedAt: number }
-  | { key: string; kind: "Proof"; proofId: Id<"proofs">; title: string; claim: string; evidenceNote: string; state: string; linkedMoveTitle: string | null; version: number; updatedAt: number };
+  | { key: string; kind: "Call"; callId: Id<"calls">; linkedMoveId?: Id<"moves">; linkedMoveTitle: string | null; title: string; detail: string; state: string; joinedCount: number; maxParticipants: number; version: number; updatedAt: number }
+  | { key: string; kind: "Fracture"; fractureId: Id<"fractures">; linkedMoveId?: Id<"moves">; title: string; detail: string; state: string; severity: string; linkedMoveTitle: string | null; version: number; updatedAt: number }
+  | { key: string; kind: "Proof"; proofId: Id<"proofs">; linkedMoveId?: Id<"moves">; title: string; claim: string; evidenceNote: string; state: string; linkedMoveTitle: string | null; version: number; updatedAt: number };
 
 function Workshop({
   mission,
@@ -412,6 +413,8 @@ function Workshop({
       key: `call:${call._id}`,
       kind: "Call" as const,
       callId: call._id,
+      linkedMoveId: call.linkedMoveId,
+      linkedMoveTitle: moves?.find((move) => move._id === call.linkedMoveId && move.roomId === call.roomId)?.title ?? null,
       title: call.title,
       detail: call.detail,
       state: call.status,
@@ -424,6 +427,7 @@ function Workshop({
       key: `fracture:${fracture._id}`,
       kind: "Fracture" as const,
       fractureId: fracture._id,
+      linkedMoveId: fracture.linkedMoveId,
       title: fracture.title,
       detail: fracture.detail,
       state: fracture.status,
@@ -436,6 +440,7 @@ function Workshop({
       key: `proof:${proof._id}`,
       kind: "Proof" as const,
       proofId: proof._id,
+      linkedMoveId: proof.linkedMoveId,
       title: proof.title,
       claim: proof.claim,
       evidenceNote: proof.evidenceNote,
@@ -446,6 +451,9 @@ function Workshop({
     })),
   ].sort((left, right) => right.updatedAt - left.updatedAt);
   const selectedContext = availableContext.find((context) => context.key === selectedContextKey) ?? null;
+  const linkedMoveTrail = selectedContext?.kind === "Move"
+    ? availableContext.filter((context) => context.kind !== "Move" && context.linkedMoveId === selectedContext.moveId)
+    : [];
   const selectedUpdatedAt = selectedContext === null
     ? null
     : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(selectedContext.updatedAt);
@@ -500,12 +508,24 @@ function Workshop({
               {selectedContext.kind === "Proof" ? <><p><strong>Claim</strong> {selectedContext.claim}</p><p><strong>Evidence note</strong> {selectedContext.evidenceNote}</p></> : <p>{selectedContext.detail}</p>}
               <dl className="workshop-context-facts">
                 <div><dt>State</dt><dd>{selectedContext.state}</dd></div>
-                {selectedContext.kind === "Call" ? <div><dt>Joined participants</dt><dd>{selectedContext.joinedCount} / {selectedContext.maxParticipants}</dd></div> : null}
+                {selectedContext.kind === "Call" ? <><div><dt>Joined participants</dt><dd>{selectedContext.joinedCount} / {selectedContext.maxParticipants}</dd></div><div><dt>Linked Move</dt><dd>{selectedContext.linkedMoveTitle ?? "None"}</dd></div></> : null}
                 {selectedContext.kind === "Fracture" ? <><div><dt>Severity</dt><dd>{selectedContext.severity}</dd></div><div><dt>Linked Move</dt><dd>{selectedContext.linkedMoveTitle ?? "None"}</dd></div></> : null}
                 {selectedContext.kind === "Proof" ? <div><dt>Linked Move</dt><dd>{selectedContext.linkedMoveTitle ?? "None"}</dd></div> : null}
                 <div><dt>Version</dt><dd>{selectedContext.version}</dd></div>
                 <div><dt>Updated</dt><dd>{selectedUpdatedAt}</dd></div>
               </dl>
+              {selectedContext.kind === "Move" ? <section className="workshop-move-trail" aria-labelledby="move-trail-heading">
+                <h3 id="move-trail-heading">Move Trail</h3>
+                {linkedMoveTrail.length === 0 ? <p>No linked Calls, Fractures, or Proofs are scoped to this Move.</p> : <ul className="workshop-move-trail__list">
+                  {linkedMoveTrail.map((context) => <li key={context.key}>
+                    <button onClick={() => setSelectedContextKey(context.key)} type="button">
+                      <span>{context.kind}</span>
+                      <strong>{context.title}</strong>
+                      <small>{context.state}</small>
+                    </button>
+                  </li>)}
+                </ul>}
+              </section> : null}
               {selectedContext.kind === "Move" && canAskForHelp ? <button className="secondary-button" onClick={() => onAskForHelp(selectedContext.moveId)} type="button">Ask for help</button> : null}
               {selectedContext.kind === "Move" && canReportFracture ? <button className="secondary-button" onClick={() => onReportFracture(selectedContext.moveId)} type="button">Report a Fracture</button> : null}
               {selectedContext.kind === "Move" && canSubmitProof ? <button className="secondary-button" onClick={() => onSubmitProof(selectedContext.moveId)} type="button">Submit Proof</button> : null}
