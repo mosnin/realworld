@@ -361,7 +361,7 @@ export function MoveBoard({
               }}
               type="button"
             >
-              View Workshop
+              View room work
             </button>
           )}
           {moves === undefined ? (

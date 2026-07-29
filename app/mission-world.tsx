@@ -105,7 +105,7 @@ const rooms: Room[] = [
     description: "Build Realworld into a production multiplayer work platform for humans and agents.",
     accent: "blue",
     icon: "spark",
-    action: "Open Mission brief",
+    action: "Open room work",
     position: "core",
     x: 50,
     y: 46,
@@ -118,7 +118,7 @@ const rooms: Room[] = [
     description: "Shape the working artifact, hand off a Move, and prepare a Proof.",
     accent: "azure",
     icon: "workshop",
-    action: "Enter Workshop",
+    action: "Open room work",
     position: "workshop",
     x: 74,
     y: 19,
@@ -131,7 +131,7 @@ const rooms: Room[] = [
     description: "Validate the assumptions behind the next release.",
     accent: "teal",
     icon: "observatory",
-    action: "Explore evidence",
+    action: "Open room work",
     position: "observatory",
     x: 19,
     y: 47,
@@ -144,7 +144,7 @@ const rooms: Room[] = [
     description: "Compare two approaches before a durable merge.",
     accent: "coral",
     icon: "branch",
-    action: "Compare branches",
+    action: "Open room work",
     position: "branch",
     x: 84,
     y: 50,
@@ -157,7 +157,7 @@ const rooms: Room[] = [
     description: "Keep the useful things this Mission has already learned.",
     accent: "amber",
     icon: "library",
-    action: "Browse artifacts",
+    action: "Open room work",
     position: "library",
     x: 18,
     y: 82,
@@ -170,7 +170,7 @@ const rooms: Room[] = [
     description: "A voluntary, time-boxed push with a clear shared outcome.",
     accent: "violet",
     icon: "surge",
-    action: "Join Surge",
+    action: "Open room work",
     position: "surge",
     x: 61,
     y: 84,
@@ -198,7 +198,7 @@ function canvasRoom(record: { _id: Id<"rooms">; title: string; kind: string; lay
     layoutVersion: record.layoutVersion,
     currentVersion: record.currentVersion,
     moveSignal,
-    ...(isCustom ? { accent: "blue" as const, icon: "spark" as const, position: "custom" as const, description: "A room shaped for this Mission's next mode of work.", eyebrow: "Custom room", action: "Open room", custom: true } : {}),
+    ...(isCustom ? { accent: "blue" as const, icon: "spark" as const, position: "custom" as const, description: "A room shaped for this Mission's next mode of work.", eyebrow: "Custom room", action: "Open room work", custom: true } : {}),
   };
 }
 
@@ -485,7 +485,7 @@ function Workshop({
         <strong>{roomTitle}</strong>
       </header>
       <div className="workshop-layout">
-        <aside className="workshop-rail" aria-label="Workshop context">
+        <aside className="workshop-rail" aria-label="Room work context">
           <p className="eyebrow">Room context</p>
           <h1 id="workshop-heading">Durable work in {roomTitle}.</h1>
           <p>Moves, Calls, Fractures, and Proofs below are scoped to this room. They are not live presence or a Mission-wide feed.</p>
@@ -552,7 +552,7 @@ function Workshop({
         <aside className="workshop-inspector" aria-label="Durable context guide">
           <p className="eyebrow">Read-only context</p>
           <h2>Inspect, then act in the Mission World.</h2>
-          <p>Workshop does not create or change work. Use the Mission World controls to make a durable Move, Call, Fracture, or Proof.</p>
+          <p>This room view does not create or change work. Use the Mission World controls to make a durable Move, Call, Fracture, or Proof.</p>
           <p>Joined participant counts are durable participation records, not live presence.</p>
         </aside>
       </div>
@@ -659,6 +659,8 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   const [canvas, setCanvas] = useState<CanvasState>(defaultCanvasState);
   const [newRoomName, setNewRoomName] = useState("");
   const [roomError, setRoomError] = useState<string | null>(null);
+  const roomWorkExitFocusFrameRef = useRef<number | null>(null);
+  const roomWorkExitFocusTargetRef = useRef<{ missionId: Id<"missions">; roomId: RoomId } | null>(null);
   const handleCreateMoveRequestHandled = useCallback(() => setCreateMoveRequest(null), [setCreateMoveRequest]);
   const handleCreateMoveRequestUnavailable = useCallback(() => setRoomError("That room is no longer available."), [setRoomError]);
   const handleCreateCallRequestHandled = useCallback(() => setCreateCallRequest(null), [setCreateCallRequest]);
@@ -719,6 +721,16 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   );
   const selectedRoomHash = selectedRoom?.id;
   const visibleRooms = canvasRooms;
+
+  function cancelRoomWorkExitFocus() {
+    if (roomWorkExitFocusFrameRef.current !== null) {
+      window.cancelAnimationFrame(roomWorkExitFocusFrameRef.current);
+      roomWorkExitFocusFrameRef.current = null;
+    }
+    roomWorkExitFocusTargetRef.current = null;
+  }
+
+  useEffect(() => () => cancelRoomWorkExitFocus(), [activeMission?._id]);
 
   useEffect(() => {
     if (!isObserver) return;
@@ -805,11 +817,29 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   }, [roomRecords, selectedRoomRecord, view]);
 
   function enterRoom(roomId: RoomId) {
+    if (!canvasRooms.some((room) => room.id === roomId)) return;
+    cancelRoomWorkExitFocus();
     setSelectedRoomId(roomId);
-    if (canvasRooms.find((room) => room.id === roomId)?.position === "workshop") {
-      setView("workshop");
-      requestAnimationFrame(() => document.getElementById("main-content")?.focus());
+    setView("workshop");
+    requestAnimationFrame(() => document.getElementById("main-content")?.focus());
+  }
+
+  function exitRoomWork(roomId: RoomId) {
+    if (activeMission === undefined || !canvasRooms.some((room) => room.id === roomId)) {
+      setView("world");
+      return;
     }
+    cancelRoomWorkExitFocus();
+    roomWorkExitFocusTargetRef.current = { missionId: activeMission._id, roomId };
+    setShowDirectory(false);
+    setView("world");
+    roomWorkExitFocusFrameRef.current = window.requestAnimationFrame(() => {
+      const target = roomWorkExitFocusTargetRef.current;
+      roomWorkExitFocusFrameRef.current = null;
+      roomWorkExitFocusTargetRef.current = null;
+      if (target === null || activeMission._id !== target.missionId || selectedRoomId !== target.roomId || !canvasRooms.some((room) => room.id === target.roomId)) return;
+      document.getElementById(`room-${target.roomId}`)?.focus();
+    });
   }
 
   function createFirstMoveFromWorkshop() {
@@ -882,6 +912,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   }
 
   function selectMission(missionId: Id<"missions">) {
+    cancelRoomWorkExitFocus();
     setSelectedMissionId(missionId);
     setSelectedRoomId("");
     setView("world");
@@ -1014,7 +1045,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   const missionWritable = activeMission.lifecycle === "active";
 
   if (view === "workshop" && selectedRoomRecord !== undefined) {
-    return <><AuthenticatedMissionRealtimeLifecycle authenticatedTokenRequester={requestAuthenticatedRealtimeToken} expectedMissionId={activeMission._id} expectedRoomId={selectedRoomRecord.id} membershipGrantVersion={activeMission.grantVersion} readiness={realtimeRoomReadiness} transportFactory={developmentRealtimeTransportFactory} /><Workshop calls={missionCalls} fractures={isObserver ? [] : missionFractures} initialSelectedContextKey={workshopContextRequest?.roomId === selectedRoomRecord.id ? workshopContextRequest.key : null} mission={activeMission} moves={missionMoves} onAskForHelp={askForHelpFromWorkshop} onCreateFirstMove={createFirstMoveFromWorkshop} onExit={() => setView("world")} onOpenCall={openCallFromWorkshop} onOpenFracture={openFractureFromWorkshop} onOpenMove={openMoveFromWorkshop} onOpenProof={openProofFromWorkshop} onReportFracture={reportFractureFromWorkshop} onSubmitProof={submitProofFromWorkshop} proofs={isObserver ? [] : missionProofs} roomId={selectedRoomRecord.id as Id<"rooms">} roomTitle={selectedRoomRecord.name} /></>;
+    return <><AuthenticatedMissionRealtimeLifecycle authenticatedTokenRequester={requestAuthenticatedRealtimeToken} expectedMissionId={activeMission._id} expectedRoomId={selectedRoomRecord.id} membershipGrantVersion={activeMission.grantVersion} readiness={realtimeRoomReadiness} transportFactory={developmentRealtimeTransportFactory} /><Workshop calls={missionCalls} fractures={isObserver ? [] : missionFractures} initialSelectedContextKey={workshopContextRequest?.roomId === selectedRoomRecord.id ? workshopContextRequest.key : null} mission={activeMission} moves={missionMoves} onAskForHelp={askForHelpFromWorkshop} onCreateFirstMove={createFirstMoveFromWorkshop} onExit={() => exitRoomWork(selectedRoomRecord.id)} onOpenCall={openCallFromWorkshop} onOpenFracture={openFractureFromWorkshop} onOpenMove={openMoveFromWorkshop} onOpenProof={openProofFromWorkshop} onReportFracture={reportFractureFromWorkshop} onSubmitProof={submitProofFromWorkshop} proofs={isObserver ? [] : missionProofs} roomId={selectedRoomRecord.id as Id<"rooms">} roomTitle={selectedRoomRecord.name} /></>;
   }
 
   return (
@@ -1110,7 +1141,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
               {visibleRooms.map((room) => (
                 <li key={room.id} className={selectedRoom.id === room.id ? "is-selected" : ""}>
                   <button aria-label={`${room.description} ${roomMoveSignalLabel(room)}`} onClick={() => setSelectedRoomId(room.id)} type="button"><span className={`directory-icon directory-icon--${room.accent}`}><Icon name={room.icon} /></span><span><strong>{room.name}</strong><small>{room.description}</small><em>{moveSignalText(room.moveSignal)}</em></span></button>
-                  <button className="directory-enter" disabled={!missionWritable && room.position !== "workshop"} onClick={() => enterRoom(room.id)} type="button">{room.action}</button>
+                  <button className="directory-enter" onClick={() => enterRoom(room.id)} type="button">{room.action}</button>
                 </li>
               ))}
             </ul>
@@ -1171,7 +1202,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
             <h3 id="latest-durable-move-heading">Latest durable Move</h3>
             {missionMoves === undefined ? <p aria-live="polite">Loading durable Moves…</p> : latestSelectedRoomMove === undefined ? <p>No durable Moves in this room.</p> : <>
               <p><strong>{latestSelectedRoomMove.title}</strong><span>{moveStateLabel(latestSelectedRoomMove.state)}</span></p>
-              <button className="secondary-button" onClick={() => inspectWorkshopContext(selectedRoom.id as Id<"rooms">, `move:${latestSelectedRoomMove._id}`)} type="button">Inspect in Workshop</button>
+              <button className="secondary-button" onClick={() => inspectWorkshopContext(selectedRoom.id as Id<"rooms">, `move:${latestSelectedRoomMove._id}`)} type="button">Inspect room work</button>
             </>}
           </section>
           <section><h3>Room activity</h3><p>Live occupants are not represented until a realtime presence provider is connected.</p></section>
@@ -1181,7 +1212,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
             setRoomError(null);
             void archiveRoomMutation({ roomId: selectedRoom.id as Id<"rooms">, expectedVersion: selectedRoom.currentVersion, idempotencyKey: crypto.randomUUID() }).then(() => setSelectedRoomId("")).catch(() => setRoomError("That room changed elsewhere. The live map has been refreshed."));
           }} type="button">Archive room</button></section> : null}
-          <button className="primary-button" disabled={!missionWritable && selectedRoom.position !== "workshop"} onClick={() => enterRoom(selectedRoom.id)} type="button">{selectedRoom.action}</button>
+          <button className="primary-button" onClick={() => enterRoom(selectedRoom.id)} type="button">{selectedRoom.action}</button>
         </aside>
       </main>
       {isObserver ? null : <PulseSurface mission={activeMission} />}

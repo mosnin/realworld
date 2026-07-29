@@ -8,7 +8,7 @@ async function completeCallsign(page: Page, callsign: string) {
 
 async function enterWorkshop(page: Page) {
   await page.getByRole("button", { name: /^Workshop\./ }).click();
-  await page.getByRole("complementary", { name: "Workshop" }).getByRole("button", { name: "Enter Workshop" }).click();
+  await page.getByRole("complementary", { name: "Workshop" }).getByRole("button", { name: "Open room work" }).click();
 }
 
 async function expectWorkshopContext(page: Page) {
@@ -99,7 +99,7 @@ test("an authenticated owner can launch an honest empty Blank canvas Workshop", 
   await expect(page.getByText("No durable Moves, Calls, Fractures, or Proofs are scoped to this room yet.")).toBeVisible();
   await expect(page.getByRole("list", { name: "Available durable work" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Select a Move, Call, Fracture, or Proof." })).toBeVisible();
-  await expect(page.getByRole("button", { name: "View Workshop" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "View room work" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Ask for help" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Report a Fracture" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Submit Proof" })).toHaveCount(0);
@@ -121,7 +121,7 @@ test("an authenticated owner can launch an honest empty Blank canvas Workshop", 
   await moveBoard.getByRole("button", { name: "Create Move" }).click();
   await expect(moveBoard.getByText("Move created.")).toBeVisible();
 
-  const viewWorkshop = page.getByRole("button", { name: "View Workshop" });
+  const viewWorkshop = page.getByRole("button", { name: "View room work" });
   await expect(viewWorkshop).toBeVisible();
   await viewWorkshop.focus();
   await expect(viewWorkshop).toBeFocused();
@@ -191,7 +191,7 @@ test("an authenticated owner can launch an honest empty Blank canvas Workshop", 
   await expect(latestMove).toContainText("proposed");
   await expect(page.locator(".world-routes path.world-routes__active")).toHaveCount(1);
 
-  const inspectInWorkshop = workshopInspector.getByRole("button", { name: "Inspect in Workshop" });
+  const inspectInWorkshop = workshopInspector.getByRole("button", { name: "Inspect room work" });
   await inspectInWorkshop.focus();
   await expect(inspectInWorkshop).toBeFocused();
   await page.keyboard.press("Enter");
@@ -426,7 +426,7 @@ test("a participant can inspect and enter Workshop from the Mission World", asyn
   await expect(page.getByText(/Priya|Marco|SonicAgent|active people/i)).toHaveCount(0);
   await page.getByRole("button", { name: /^Workshop\./ }).click();
   await expect(page.getByRole("heading", { name: "Workshop" })).toBeVisible();
-  await page.getByRole("complementary", { name: "Workshop" }).getByRole("button", { name: "Enter Workshop" }).click();
+  await page.getByRole("complementary", { name: "Workshop" }).getByRole("button", { name: "Open room work" }).click();
   await expectWorkshopContext(page);
   await page.getByRole("button", { name: "Mission World" }).click();
   await expect(page.getByRole("heading", { name: "Company sprint" })).toBeVisible();
@@ -437,8 +437,31 @@ test("the room directory provides a non-spatial path to Workshop", async ({ page
 
   await page.getByRole("button", { name: "Room directory" }).click();
   await expect(page.getByRole("heading", { name: "Mission rooms" })).toBeVisible();
-  await page.locator(".room-directory").getByRole("button", { name: "Enter Workshop" }).click();
+  await page.locator(".room-directory").getByRole("listitem").filter({ hasText: "Workshop" }).getByRole("button", { name: "Open room work" }).click();
   await expectWorkshopContext(page);
+});
+
+test("a participant can keyboard-enter an exact non-Workshop room without work leakage", async ({ page }) => {
+  await page.goto("/");
+
+  const missionCore = page.getByRole("button", { name: /^Mission Core\./ });
+  await expect(missionCore).toHaveAttribute("aria-pressed", "true");
+  await missionCore.focus();
+  await expect(missionCore).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Durable work in Mission Core." })).toBeVisible();
+  await expect(page.locator("#main-content")).toBeFocused();
+  await expect(page.getByText("No durable Moves, Calls, Fractures, or Proofs are scoped to this room yet.")).toBeVisible();
+  await expect(page.getByRole("list", { name: "Available durable work" })).toHaveCount(0);
+  await expect(page.getByText("Set the sprint outcome", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Brief|Evidence|Artifact|Surge/ })).toHaveCount(0);
+
+  const returnToWorld = page.getByRole("button", { name: "Mission World" });
+  await returnToWorld.focus();
+  await expect(returnToWorld).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Company sprint" })).toBeVisible();
+  await expect(missionCore).toBeFocused();
 });
 
 test("a renamed Workshop keeps its durable room context after reload", async ({ page }) => {
@@ -453,7 +476,7 @@ test("a renamed Workshop keeps its durable room context after reload", async ({ 
   await page.reload();
 
   await page.getByRole("button", { name: new RegExp(`^${renamedWorkshop}\\.`) }).click();
-  await page.getByRole("complementary", { name: renamedWorkshop }).getByRole("button", { name: "Enter Workshop" }).click();
+  await page.getByRole("complementary", { name: renamedWorkshop }).getByRole("button", { name: "Open room work" }).click();
   await expect(page.getByRole("heading", { name: `Durable work in ${renamedWorkshop}.` })).toBeVisible();
   await expect(page.getByRole("list", { name: "Available durable work" })).toBeVisible();
 });
@@ -472,7 +495,7 @@ test.describe("on a phone-sized Mission World", () => {
     await page.getByRole("button", { name: "Room directory" }).click();
     await expect(page.getByRole("heading", { name: "Mission rooms" })).toBeVisible();
 
-    await page.locator(".room-directory").getByRole("button", { name: "Enter Workshop" }).click();
+    await page.locator(".room-directory").getByRole("listitem").filter({ hasText: "Workshop" }).getByRole("button", { name: "Open room work" }).click();
     await expectWorkshopContext(page);
 
     await page.getByRole("button", { name: "Mission World" }).click();
@@ -587,7 +610,7 @@ test("an owner can archive a Mission into a read-only world, restore it, and kee
   await archivedWorkshop.click();
   const archivedLatestMove = page.getByRole("complementary", { name: "Workshop" }).locator(".latest-durable-move");
   await expect(archivedLatestMove).toContainText("proposed");
-  await archivedLatestMove.getByRole("button", { name: "Inspect in Workshop" }).press("Enter");
+  await archivedLatestMove.getByRole("button", { name: "Inspect room work" }).press("Enter");
   await expect(page.getByRole("status", { name: "Archived room read-only" })).toBeVisible();
   await expect(page.getByRole("button", { name: /Open Moves/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Ask for help" })).toHaveCount(0);
@@ -596,7 +619,7 @@ test("an owner can archive a Mission into a read-only world, restore it, and kee
   await page.getByRole("button", { name: "Mission World" }).click();
 
   await page.getByRole("button", { name: "Room directory" }).click();
-  const enterArchivedWorkshop = page.locator(".room-directory").getByRole("button", { name: "Enter Workshop" });
+  const enterArchivedWorkshop = page.locator(".room-directory").getByRole("listitem").filter({ hasText: "Workshop" }).getByRole("button", { name: "Open room work" });
   await expect(enterArchivedWorkshop).toBeEnabled();
   await enterArchivedWorkshop.click();
   await expect(page.getByRole("status", { name: "Archived room read-only" })).toHaveText("Archived Mission — read-only durable room context.");
@@ -606,6 +629,20 @@ test("an owner can archive a Mission into a read-only world, restore it, and kee
   await expect(page.getByRole("button", { name: "Submit Proof" })).toHaveCount(0);
   await page.getByRole("button", { name: "Mission World" }).click();
   await expect(page.getByRole("status", { name: "Archived Mission read-only" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Room directory" }).click();
+  const enterArchivedCore = page.locator(".room-directory").getByRole("listitem").filter({ hasText: "Mission Core" }).getByRole("button", { name: "Open room work" });
+  await expect(enterArchivedCore).toBeEnabled();
+  await enterArchivedCore.focus();
+  await expect(enterArchivedCore).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Durable work in Mission Core." })).toBeVisible();
+  await expect(page.locator("#main-content")).toBeFocused();
+  await expect(page.getByRole("status", { name: "Archived room read-only" })).toBeVisible();
+  await expect(page.getByText("No durable Moves, Calls, Fractures, or Proofs are scoped to this room yet.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create first Move" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Brief|Evidence|Artifact|Surge/ })).toHaveCount(0);
+  await page.getByRole("button", { name: "Mission World" }).click();
 
   await page.getByRole("button", { name: "Manage Mission" }).click();
   await page.getByRole("button", { name: "Restore Mission" }).click();
@@ -752,7 +789,7 @@ test("an owner can create, link, advance, and reload durable Moves", async ({ pa
   await board.getByLabel("Room").selectOption({ label: "Workshop" });
   await board.getByRole("button", { name: "Create Move" }).click();
   await expect(board.getByText("Move created.")).toBeVisible();
-  await expect(board.getByRole("button", { name: "View Workshop" })).toHaveCount(0);
+  await expect(board.getByRole("button", { name: "View room work" })).toHaveCount(0);
 
   const createdMove = board.getByRole("article", { name: `Move ${initialTitle}` });
   const editCreatedMove = createdMove.getByRole("button", { name: `Edit Move ${initialTitle}` });
