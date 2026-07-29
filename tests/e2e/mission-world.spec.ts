@@ -81,6 +81,7 @@ test("an authenticated owner can launch an honest empty Blank canvas Workshop", 
   await expect(page.getByRole("button", { name: /^Mission Core\./ })).toHaveCount(1);
   await expect(page.getByRole("button", { name: /^Workshop\./ })).toHaveCount(1);
   await expect(page.getByRole("button", { name: /^(Review Deck|Observatory|Surge Hall)\./ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Workshop — No Moves/ })).toBeVisible();
 
   await enterWorkshop(page);
   await expect(page.getByRole("heading", { name: "Durable work in Workshop." })).toBeVisible();
@@ -125,8 +126,22 @@ test("an authenticated owner can launch an honest empty Blank canvas Workshop", 
   await expect(page.getByLabel("Selected durable context")).toContainText(firstMoveTitle);
   await expect(page.getByLabel("Selected durable context")).toContainText(firstMoveIntent);
 
+  await page.getByRole("button", { name: "Mission World" }).click();
+  const proposedWorkshop = page.getByRole("button", { name: /Workshop — 1 proposed Move/ });
+  await expect(proposedWorkshop).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "Workshop" })).toContainText("1 proposed Move");
+  await expect(page.locator(".world-routes path.world-routes__active")).toHaveCount(1);
+
+  await page.getByRole("button", { name: "Room directory" }).click();
+  const directory = page.getByRole("region", { name: "Mission rooms" });
+  await expect(directory.getByRole("button", { name: /Workshop — 1 proposed Move/ })).toBeVisible();
+  await expect(directory.getByRole("button", { name: /Mission Core — No Moves/ })).toBeVisible();
+  await page.getByRole("button", { name: "Map" }).click();
+
   await page.reload();
   await expect(page.getByRole("heading", { name: "Blank canvas" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Workshop — 1 proposed Move/ })).toBeVisible();
+  await expect(page.locator(".world-routes path.world-routes__active")).toHaveCount(1);
   await enterWorkshop(page);
   const reloadedWorkshopWork = page.getByRole("list", { name: "Available durable work" });
   await expect(page.getByText("No durable Moves or Calls are scoped to this room yet.")).toHaveCount(0);
@@ -268,6 +283,13 @@ test("a participant can customize and persist a personal canvas layout", async (
 test("an owner can archive a Mission into a read-only world, restore it, and keep it active", async ({ page }) => {
   await page.goto("/");
 
+  const activeWorkshop = page.getByRole("button", { name: /Workshop — 3 proposed Moves/ });
+  await expect(activeWorkshop).toBeVisible();
+  await expect(page.locator(".world-routes")).toHaveCSS("pointer-events", "none");
+  await activeWorkshop.click();
+  await expect(page.getByRole("complementary", { name: "Workshop" })).toContainText("3 proposed Moves");
+  await expect(page.locator(".world-routes path.world-routes__active")).toHaveCount(1);
+
   await page.getByRole("button", { name: "Manage Mission" }).click();
   await expect(page.getByRole("button", { name: "Archive Mission" })).toBeVisible();
   await page.getByRole("button", { name: "Archive Mission" }).click();
@@ -280,6 +302,8 @@ test("an owner can archive a Mission into a read-only world, restore it, and kee
   await expect(page.getByLabel("Room name")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Archive room" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Layout unlocked" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /Workshop — 3 proposed Moves/ })).toBeVisible();
+  await expect(page.locator(".world-routes path.world-routes__active")).toHaveCount(0);
 
   const archivedWorkshop = page.getByRole("button", { name: /^Workshop\./ });
   const archivedPosition = await archivedWorkshop.evaluate((element) => ({
@@ -313,6 +337,7 @@ test("an owner can archive a Mission into a read-only world, restore it, and kee
   await expect(page.getByRole("button", { name: "Layout unlocked" })).toBeEnabled();
 
   await page.getByRole("button", { name: "Map" }).click();
+  await expect(page.locator(".world-routes path.world-routes__active")).toHaveCount(1);
   const restoredWorkshop = page.getByRole("button", { name: /^Workshop\./ });
   const restoredPosition = await restoredWorkshop.evaluate((element) => ({
     left: (element as HTMLElement).style.left,
@@ -473,6 +498,13 @@ test("an owner can create, link, advance, and reload durable Moves", async ({ pa
   await readyMove.focus();
   await expect(readyMove).toBeFocused();
   await page.keyboard.press("Enter");
+  await expect(board.getByText(`${updatedTitle} is now ready.`)).toBeVisible();
+  await board.getByRole("button", { name: `Mark ${updatedTitle} blocked` }).click();
+  await expect(board.getByText(`${updatedTitle} is now blocked.`)).toBeVisible();
+  await board.getByRole("button", { name: "Close Moves" }).click();
+  await expect(page.getByRole("button", { name: /Workshop — 4 blocked Moves/ })).toBeVisible();
+  await page.getByRole("button", { name: /Open Moves/ }).click();
+  await board.getByRole("button", { name: `Mark ${updatedTitle} ready` }).click();
   await expect(board.getByText(`${updatedTitle} is now ready.`)).toBeVisible();
   for (const state of ["in progress", "review", "completed"] as const) {
     const transition = board.getByRole("button", { name: `Mark ${updatedTitle} ${state}` });
@@ -906,8 +938,11 @@ test("a scoped observer receives a stable read-only Mission shell without privat
     await expect(observer.getByRole("heading", { name: "Company sprint" })).toBeVisible();
     await expect(observer.getByText("observer", { exact: true })).toBeVisible();
 
-    await expect(observer.getByRole("button", { name: /^Workshop\./ })).toBeVisible();
+    await expect(observer.getByRole("button", { name: /Workshop — 3 proposed Moves/ })).toBeVisible();
     await expect(observer.getByRole("button", { name: /Mission Core\./i })).toHaveCount(0);
+    await expect(observer.locator(".landmark")).toHaveCount(1);
+    await expect(observer.locator(".world-routes path")).toHaveCount(1);
+    await expect(observer.locator(".world-routes path.world-routes__active")).toHaveCount(1);
     await expect(observer.getByLabel("New room")).toHaveCount(0);
     await expect(observer.getByRole("button", { name: "Layout unlocked" })).toBeDisabled();
     await expect(observer.locator(".fracture-surface")).toHaveCount(0);

@@ -22,6 +22,12 @@ import type { AblyClientFactory } from "@/lib/realtime/ably-room-transport";
 
 type RoomId = string;
 
+type MoveSignal = {
+  total: number;
+  dominantState: string | null;
+  hasNonterminalMove: boolean;
+};
+
 type Room = {
   id: RoomId;
   name: string;
@@ -38,6 +44,7 @@ type Room = {
   layoutVersion?: number;
   currentVersion?: number;
   layout?: { x: number; y: number; width: number; height: number };
+  moveSignal: MoveSignal;
 };
 
 type Density = "focus" | "standard" | "compact";
@@ -61,6 +68,35 @@ const defaultPreferences: Preferences = {
   defaultView: "map",
 };
 
+const emptyMoveSignal: MoveSignal = { total: 0, dominantState: null, hasNonterminalMove: false };
+
+function moveStateLabel(state: string) {
+  if (state === "inProgress") return "in progress";
+  return state;
+}
+
+function moveSignalText(signal: MoveSignal) {
+  if (signal.total === 0) return "No Moves";
+  return `${signal.total} ${moveStateLabel(signal.dominantState ?? "unknown")} ${signal.total === 1 ? "Move" : "Moves"}`;
+}
+
+function roomMoveSignalLabel(room: Room) {
+  return `${room.name} — ${moveSignalText(room.moveSignal)}`;
+}
+
+function roomMoveSignal(roomId: Id<"rooms">, moves: WorkshopMove[] | undefined): MoveSignal {
+  const roomMoves = (moves ?? []).filter((move) => move.roomId === roomId);
+  if (roomMoves.length === 0) return emptyMoveSignal;
+  const statePriority = ["blocked", "inProgress", "review", "ready", "proposed", "completed", "cancelled", "archived"];
+  const normalizedStates = roomMoves.map((move) => move.state === "claimed" ? "inProgress" : move.state);
+  const dominantState = statePriority.find((state) => normalizedStates.includes(state)) ?? null;
+  return {
+    total: roomMoves.length,
+    dominantState,
+    hasNonterminalMove: roomMoves.some((move) => !["completed", "cancelled", "archived"].includes(move.state)),
+  };
+}
+
 const rooms: Room[] = [
   {
     id: "core",
@@ -73,6 +109,7 @@ const rooms: Room[] = [
     position: "core",
     x: 50,
     y: 46,
+    moveSignal: emptyMoveSignal,
   },
   {
     id: "workshop",
@@ -85,6 +122,7 @@ const rooms: Room[] = [
     position: "workshop",
     x: 74,
     y: 19,
+    moveSignal: emptyMoveSignal,
   },
   {
     id: "observatory",
@@ -97,6 +135,7 @@ const rooms: Room[] = [
     position: "observatory",
     x: 19,
     y: 47,
+    moveSignal: emptyMoveSignal,
   },
   {
     id: "branch",
@@ -109,6 +148,7 @@ const rooms: Room[] = [
     position: "branch",
     x: 84,
     y: 50,
+    moveSignal: emptyMoveSignal,
   },
   {
     id: "library",
@@ -121,6 +161,7 @@ const rooms: Room[] = [
     position: "library",
     x: 18,
     y: 82,
+    moveSignal: emptyMoveSignal,
   },
   {
     id: "surge",
@@ -133,6 +174,7 @@ const rooms: Room[] = [
     position: "surge",
     x: 61,
     y: 84,
+    moveSignal: emptyMoveSignal,
   },
 ];
 
@@ -143,7 +185,7 @@ function clamp(value: number, lower: number, upper: number) {
   return Math.min(upper, Math.max(lower, value));
 }
 
-function canvasRoom(record: { _id: Id<"rooms">; title: string; kind: string; layout: { x: number; y: number; width: number; height: number }; layoutVersion: number; currentVersion: number }): Room {
+function canvasRoom(record: { _id: Id<"rooms">; title: string; kind: string; layout: { x: number; y: number; width: number; height: number }; layoutVersion: number; currentVersion: number }, moveSignal: MoveSignal): Room {
   const fallback = rooms.find((room) => room.position === ({ missionCore: "core", workshop: "workshop", observatory: "observatory", branchLab: "branch", reviewDeck: "library", signalTower: "observatory", surgeHall: "surge" }[record.kind] ?? "core")) ?? rooms[0]!;
   const isCustom = record.kind === "branchLab" && record.title !== "Branch Lab";
   return {
@@ -155,6 +197,7 @@ function canvasRoom(record: { _id: Id<"rooms">; title: string; kind: string; lay
     layout: record.layout,
     layoutVersion: record.layoutVersion,
     currentVersion: record.currentVersion,
+    moveSignal,
     ...(isCustom ? { accent: "blue" as const, icon: "spark" as const, position: "custom" as const, description: "A room shaped for this Mission's next mode of work.", eyebrow: "Custom room", action: "Open room", custom: true } : {}),
   };
 }
@@ -216,7 +259,7 @@ function RoomLandmark({
       ref={roomRef}
       id={`room-${room.id}`}
       aria-pressed={selected}
-      aria-label={`${room.name}. ${room.description}`}
+      aria-label={`${room.name}. ${room.description} ${roomMoveSignalLabel(room)}.`}
       className={`landmark landmark--${room.position} landmark--${room.accent} ${selected ? "is-selected" : ""}`}
       style={{ left: `${room.x}%`, top: `${room.y}%` }}
       onClick={() => onSelect(room.id)}
@@ -250,7 +293,7 @@ function RoomLandmark({
       </span>
       <span className="landmark__copy">
         <strong>{room.name}</strong>
-        <small>{room.eyebrow}</small>
+        <small>{moveSignalText(room.moveSignal)}</small>
       </span>
     </button>
   );
@@ -496,7 +539,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   const [roomError, setRoomError] = useState<string | null>(null);
   const handleCreateMoveRequestHandled = useCallback(() => setCreateMoveRequest(null), [setCreateMoveRequest]);
   const handleCreateMoveRequestUnavailable = useCallback(() => setRoomError("That room is no longer available."), [setRoomError]);
-  const canvasRooms = roomRecords?.map(canvasRoom) ?? [];
+  const canvasRooms = roomRecords?.map((room) => canvasRoom(room, roomMoveSignal(room._id, missionMoves))) ?? [];
   const selectedRoomRecord = canvasRooms.find((room) => room.id === selectedRoomId);
   const selectedRoom = selectedRoomRecord ?? canvasRooms[0];
   const realtimeRoomReadiness = useQuery(
@@ -829,7 +872,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
             <ul>
               {visibleRooms.map((room) => (
                 <li key={room.id} className={selectedRoom.id === room.id ? "is-selected" : ""}>
-                  <button onClick={() => setSelectedRoomId(room.id)} type="button"><span className={`directory-icon directory-icon--${room.accent}`}><Icon name={room.icon} /></span><span><strong>{room.name}</strong><small>{room.description}</small></span></button>
+                  <button aria-label={`${room.description} ${roomMoveSignalLabel(room)}`} onClick={() => setSelectedRoomId(room.id)} type="button"><span className={`directory-icon directory-icon--${room.accent}`}><Icon name={room.icon} /></span><span><strong>{room.name}</strong><small>{room.description}</small><em>{moveSignalText(room.moveSignal)}</em></span></button>
                   <button className="directory-enter" disabled={!missionWritable && room.position !== "workshop"} onClick={() => enterRoom(room.id)} type="button">{room.action}</button>
                 </li>
               ))}
@@ -839,7 +882,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
           <div className={`world-map ${canvas.locked ? "is-locked" : ""}`} aria-label="Customizable spatial Mission canvas. Select a Room to inspect it; press Enter on the selected Room to enter it.">
             <div className="world-map__canvas" style={{ transform: `translate(${canvas.panX}%, ${canvas.panY}%) scale(${canvas.zoom})` }}>
               <svg className="world-routes" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-                {visibleRooms.filter((room) => room.id !== "core").map((room) => <path d={`M ${visibleRooms.find((candidate) => candidate.id === "core")?.x ?? 50} ${visibleRooms.find((candidate) => candidate.id === "core")?.y ?? 46} L ${room.x} ${room.y}`} key={room.id} />)}
+                {visibleRooms.filter((room) => room.id !== "core").map((room) => <path className={activeMission.lifecycle === "active" && room.moveSignal.hasNonterminalMove ? "world-routes__active" : undefined} d={`M ${visibleRooms.find((candidate) => candidate.id === "core")?.x ?? 50} ${visibleRooms.find((candidate) => candidate.id === "core")?.y ?? 46} L ${room.x} ${room.y}`} key={room.id} />)}
               </svg>
               {visibleRooms.map((room) => <RoomLandmark key={room.id} locked={canvas.locked || !canManageCanvas} navigationRooms={visibleRooms} onReposition={repositionRoom} room={room} selected={selectedRoom.id === room.id} onSelect={setSelectedRoomId} onEnter={enterRoom} />)}
               <CallSurface
@@ -868,7 +911,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
           <p className="eyebrow">{selectedRoom.eyebrow}</p>
           <h2 id="inspector-title">{selectedRoom.name}</h2>
           <p>{selectedRoom.description}</p>
-          <div className="inspector-status"><span>Presence not connected</span></div>
+          <div className="inspector-status"><span>Presence not connected</span><span aria-label={roomMoveSignalLabel(selectedRoom)}>{moveSignalText(selectedRoom.moveSignal)}</span></div>
           <section><h3>Room activity</h3><p>Live occupants are not represented until a realtime presence provider is connected.</p></section>
           <section><h3>Artifacts</h3><p>No durable Artifacts are linked to this room yet.</p></section>
           {missionWritable && (activeMission.role === "owner" || activeMission.role === "steward" || activeMission.role === "builder") ? <section className="custom-room-tools"><h3>Room controls</h3><label htmlFor="rename-room">Room name</label><input defaultValue={selectedRoom.name} id="rename-room" key={`${selectedRoom.id}-${selectedRoom.currentVersion}`} onBlur={(event) => void renameSelectedRoom(event.target.value)} /><button className="archive-room" onClick={() => {
