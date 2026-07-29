@@ -75,6 +75,57 @@ describe("durable room session factory", () => {
     expect(fakeTransport.unsubscribe).toHaveBeenCalledTimes(1);
   });
 
+  it("forwards only the exact bound scope through optional realtime callbacks", async () => {
+    const boundReadiness = readiness();
+    const fakeTransport = transport();
+    const onStateChange = vi.fn();
+    const onMessage = vi.fn();
+    const factory = createDurableRoomSessionFactory({
+      tokenProviderFactory: () => async () => token(3),
+      transportFactory: () => fakeTransport.adapter,
+      onStateChange,
+      onMessage,
+    });
+    const session = factory?.(boundReadiness);
+    await session?.start();
+    expect(onStateChange).toHaveBeenCalledWith(boundReadiness, expect.any(String));
+    const input = (fakeTransport.connect.mock.calls as unknown as Array<Array<{ onMessage: (message: RealtimeEnvelope) => void }>>)[0]?.[0];
+    const message = envelope(boundReadiness);
+    input?.onMessage(message);
+    expect(onMessage).toHaveBeenCalledWith(boundReadiness, message);
+
+    const invalid = factory?.({ ...boundReadiness, grantVersion: 0 });
+    expect(invalid).toBeUndefined();
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    await session?.stop();
+  });
+
+  it("contains synchronous and asynchronous presentation callback failures", async () => {
+    const boundReadiness = readiness();
+    const fakeTransport = transport();
+    const onStateChange = vi.fn(() => { throw new Error("state observer failed"); });
+    const onMessage = vi.fn(() => Promise.reject(new Error("message observer failed"))) as unknown as (
+      readiness: DurableRoomReadiness,
+      message: RealtimeEnvelope,
+    ) => void;
+    const factory = createDurableRoomSessionFactory({
+      tokenProviderFactory: () => async () => token(3),
+      transportFactory: () => fakeTransport.adapter,
+      onStateChange,
+      onMessage,
+    });
+    const session = factory?.(boundReadiness);
+
+    await expect(session?.start()).resolves.toBeUndefined();
+    const input = (fakeTransport.connect.mock.calls as unknown as Array<Array<{ onMessage: (message: RealtimeEnvelope) => void }>>)[0]?.[0];
+    const message = envelope(boundReadiness);
+    expect(() => input?.onMessage(message)).not.toThrow();
+    await Promise.resolve();
+    await expect(session?.stop()).resolves.toBeUndefined();
+    expect(onStateChange).toHaveBeenCalled();
+    expect(onMessage).toHaveBeenCalledWith(boundReadiness, message);
+  });
+
   it("fails closed before construction for invalid readiness, invalid factories, malformed outputs, and thrown factories", () => {
     const boundReadiness = readiness();
     const tokenProviderFactory = vi.fn(() => async () => token(3));

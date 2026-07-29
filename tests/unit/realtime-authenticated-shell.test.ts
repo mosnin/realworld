@@ -333,4 +333,41 @@ describe("authenticated Mission realtime shell", () => {
     expect(explicitSessionFactory).toHaveBeenCalledWith(first);
     expect(hostileRequester).not.toHaveBeenCalled();
   });
+
+  it("makes old same-scope presentation callbacks inert before lifecycle cleanup", async () => {
+    setEnvironment("development", "enabled");
+    const currentReadiness = readiness();
+    const requester = vi.fn(async () => issuedToken(currentReadiness));
+    const fake = fakeTransport();
+    const transportFactory = vi.fn(() => fake.adapter);
+    seams.publicationPolicy.mockReturnValue({ decide: vi.fn() });
+    seams.composition.mockImplementation((options: { sessionFactory: () => BrowserRoomSession | undefined }) => {
+      const session = options.sessionFactory();
+      return {
+        start: vi.fn(() => session?.start()),
+        stop: vi.fn(() => session?.stop()),
+      };
+    });
+    const firstState = vi.fn();
+    const sharedProps = {
+      readiness: currentReadiness,
+      membershipGrantVersion: 3,
+      expectedMissionId: "mission_a",
+      expectedRoomId: "room_a",
+      authenticatedTokenRequester: requester,
+      transportFactory,
+    };
+
+    AuthenticatedMissionRealtimeLifecycle({ ...sharedProps, onStateChange: firstState });
+    await vi.waitFor(() => expect(firstState).toHaveBeenCalledWith(currentReadiness, "live"));
+    const firstCallCount = firstState.mock.calls.length;
+
+    const secondState = vi.fn();
+    AuthenticatedMissionRealtimeLifecycle({ ...sharedProps, onStateChange: secondState });
+    await vi.waitFor(() => expect(secondState).toHaveBeenCalledWith(currentReadiness, "live"));
+
+    expect(firstState).toHaveBeenCalledTimes(firstCallCount);
+    expect(firstState).not.toHaveBeenCalledWith(currentReadiness, "stopped");
+    expect(fake.unsubscribe).toHaveBeenCalledTimes(1);
+  });
 });

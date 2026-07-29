@@ -241,6 +241,45 @@ describe("guarded Ably token issuer", () => {
     await expect(asOwner.action(api.realtime.issueTokenRequest, args)).rejects.toThrow("Not found");
   });
 
+  it("denies fresh issuance after a local membership revocation while an already-signed request remains bounded to its short TTL", async () => {
+    const { t, asOwner, missionId, workshopId } = await setup();
+    const args = { missionId, roomId: workshopId };
+    const issued = await withRealtimeEnv(
+      { environment: "preview", key: syntheticAblyKey },
+      () => asOwner.action(api.realtime.issueTokenRequest, args),
+    );
+
+    expect(issued.authorizationVersion).toBe(1);
+    expect(issued.tokenRequest.ttl).toBe(5 * 60 * 1000);
+    expect(issued.expiresAt).toBe(issued.tokenRequest.timestamp + issued.tokenRequest.ttl);
+
+    await t.run(async (ctx) => {
+      const mission = await ctx.db.get(missionId);
+      if (!mission) throw new Error("Test setup failed");
+      const membership = await ctx.db
+        .query("missionMembers")
+        .withIndex("by_mission_and_principal", (index) =>
+          index.eq("missionId", missionId).eq("principalId", mission.ownerPrincipalId))
+        .unique();
+      if (!membership) throw new Error("Test setup failed");
+      await ctx.db.patch(membership._id, {
+        state: "revoked",
+        grantVersion: membership.grantVersion + 1,
+        updatedAt: Date.now(),
+      });
+    });
+
+    await expect(withRealtimeEnv(
+      { environment: "preview", key: syntheticAblyKey },
+      () => asOwner.action(api.realtime.issueTokenRequest, args),
+    )).rejects.toThrow("Not found");
+
+    // A signed Ably TokenRequest cannot be retroactively invalidated by this
+    // Convex-only boundary. The tested containment is its fixed five-minute
+    // expiry; provider-side live-connection revocation needs separate evidence.
+    expect(issued.expiresAt - issued.tokenRequest.timestamp).toBeLessThanOrEqual(5 * 60 * 1000);
+  });
+
   it("fails closed for environment and key configuration before signing", async () => {
     const { asOwner, missionId, workshopId } = await setup();
     const args = { missionId, roomId: workshopId };

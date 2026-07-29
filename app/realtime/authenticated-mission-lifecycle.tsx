@@ -16,6 +16,7 @@ import {
   type DurableRoomTokenProviderFactory,
   type DurableRoomTransportFactory,
 } from "./durable-room-session-factory";
+import type { RealtimeEnvelope, RoomSessionState } from "@/lib/realtime/room-session";
 
 export type AuthenticatedMissionRealtimeLifecycleProps = Readonly<{
   /**
@@ -31,6 +32,8 @@ export type AuthenticatedMissionRealtimeLifecycleProps = Readonly<{
   membershipGrantVersion?: unknown;
   expectedMissionId?: unknown;
   expectedRoomId?: unknown;
+  onStateChange?: (scope: DurableRoomReadiness, state: RoomSessionState) => void;
+  onMessage?: (scope: DurableRoomReadiness, message: RealtimeEnvelope) => void;
 }>;
 
 export type { DurableRoomReadiness } from "./durable-room-session-factory";
@@ -65,6 +68,15 @@ function isDurableRoomReadiness(
     && readiness.roomState === "active";
 }
 
+function notifyActivePresentationCallback(active: () => boolean, callback: (() => unknown) | undefined) {
+  if (!active() || callback === undefined) return;
+  try {
+    void Promise.resolve(callback()).catch(() => undefined);
+  } catch {
+    // Presentation observers never control authenticated session lifecycle.
+  }
+}
+
 /**
  * Mount only beneath the authenticated Mission World. It is inert by default:
  * no DOM source or session factory is touched until both an exact development
@@ -79,6 +91,8 @@ export function AuthenticatedMissionRealtimeLifecycle({
   membershipGrantVersion,
   expectedMissionId,
   expectedRoomId,
+  onStateChange,
+  onMessage,
 }: AuthenticatedMissionRealtimeLifecycleProps) {
   const durableReadiness = isDurableRoomReadiness(readiness, membershipGrantVersion, expectedMissionId, expectedRoomId) ? readiness : undefined;
   const missionId = durableReadiness?.missionId;
@@ -100,9 +114,18 @@ export function AuthenticatedMissionRealtimeLifecycle({
       ? (candidate: DurableRoomReadiness) => createAuthenticatedRoomTokenProvider(candidate, authenticatedTokenRequester)
       : undefined;
     const resolvedTokenProviderFactory = tokenProviderFactory ?? bridgeTokenProviderFactory;
+    let active = true;
+    const guardedStateChange = (scope: DurableRoomReadiness, state: RoomSessionState) => {
+      notifyActivePresentationCallback(() => active, () => onStateChange?.(scope, state));
+    };
+    const guardedMessage = (scope: DurableRoomReadiness, message: RealtimeEnvelope) => {
+      notifyActivePresentationCallback(() => active, () => onMessage?.(scope, message));
+    };
     const resolvedSessionFactory = sessionFactory ?? createDurableRoomSessionFactory({
       tokenProviderFactory: resolvedTokenProviderFactory,
       transportFactory,
+      onStateChange: guardedStateChange,
+      onMessage: guardedMessage,
     });
     if (typeof resolvedSessionFactory !== "function") return;
 
@@ -115,8 +138,8 @@ export function AuthenticatedMissionRealtimeLifecycle({
     });
 
     void lifecycle.start();
-    return () => { void lifecycle.stop(); };
-  }, [authenticatedTokenRequester, grantVersion, missionId, roomId, sessionFactory, tokenProviderFactory, transportFactory]);
+    return () => { active = false; void lifecycle.stop(); };
+  }, [authenticatedTokenRequester, grantVersion, missionId, roomId, onMessage, onStateChange, sessionFactory, tokenProviderFactory, transportFactory]);
 
   return null;
 }

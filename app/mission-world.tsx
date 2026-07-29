@@ -9,6 +9,12 @@ import { SessionControl } from "@/app/auth/session-control";
 import { createBrowserAblyClientFactory } from "@/app/realtime/browser-ably-client-factory";
 import { createDevelopmentAblyTransportFactory } from "@/app/realtime/development-ably-transport-factory";
 import { AuthenticatedMissionRealtimeLifecycle } from "@/app/realtime/authenticated-mission-lifecycle";
+import {
+  participantRealtimeActivityCopy,
+  participantRealtimeState,
+  participantRealtimeStatusLabel,
+  type ParticipantRealtimeSnapshot,
+} from "@/app/realtime/participant-realtime-state";
 import { OwnerInvitePanel } from "@/app/invitations/owner-invite-panel";
 import { MissionControls } from "@/app/missions/mission-controls";
 import { ConstitutionControls } from "@/app/missions/constitution-controls";
@@ -20,6 +26,7 @@ import { PulseSurface } from "@/app/pulse/pulse-surface";
 import { CallsignSettings, CallsignSetupGate } from "@/app/profiles/callsign-controls";
 import { Icon, type IconName } from "@/app/ui/icons";
 import type { AblyClientFactory } from "@/lib/realtime/ably-room-transport";
+import type { RoomSessionState } from "@/lib/realtime/room-session";
 
 type RoomId = string;
 
@@ -400,6 +407,7 @@ function Workshop({
   onOpenProof,
   initialSelectedContextKey,
   onExit,
+  realtimeState,
 }: Readonly<{
   mission: { _id: Id<"missions">; role: string; lifecycle?: string };
   roomId: Id<"rooms">;
@@ -418,6 +426,7 @@ function Workshop({
   onOpenProof: (proofId: Id<"proofs">) => void;
   initialSelectedContextKey: string | null;
   onExit: () => void;
+  realtimeState: RoomSessionState;
 }>) {
   const [selectedContextKey, setSelectedContextKey] = useState<string | null>(initialSelectedContextKey);
   const mainContentRef = useRef<HTMLElement>(null);
@@ -525,7 +534,7 @@ function Workshop({
           <Icon name="arrow-left" /> Mission World
         </button>
         <span className="room-topbar__slash" aria-hidden="true">/</span>
-        <strong>{roomTitle}</strong>
+        <strong>{roomTitle}</strong><span>{participantRealtimeStatusLabel(realtimeState)}</span>
       </header>
       <div className="workshop-layout">
         <aside className="workshop-rail" aria-label="Room work context">
@@ -708,7 +717,11 @@ export function MissionWorld({ developmentAblyClientFactory, realtimeEnvironment
   const [canvas, setCanvas] = useState<CanvasState>(defaultCanvasState);
   const [newRoomName, setNewRoomName] = useState("");
   const [roomError, setRoomError] = useState<string | null>(null);
+  const [liveRoomState, setLiveRoomState] = useState<ParticipantRealtimeSnapshot | null>(null);
   const roomWorkExitFocusFrameRef = useRef<number | null>(null);
+  const handleRealtimeState = useCallback((scope: { missionId: string; roomId: string; grantVersion: number }, state: RoomSessionState) => {
+    setLiveRoomState({ missionId: scope.missionId, roomId: scope.roomId, grantVersion: scope.grantVersion, state });
+  }, []);
   const roomWorkExitFocusTargetRef = useRef<{ missionId: Id<"missions">; roomId: RoomId } | null>(null);
   const handleCreateMoveRequestHandled = useCallback(() => setCreateMoveRequest(null), [setCreateMoveRequest]);
   const handleCreateMoveRequestUnavailable = useCallback(() => setRoomError("That room is no longer available."), [setRoomError]);
@@ -1138,14 +1151,26 @@ export function MissionWorld({ developmentAblyClientFactory, realtimeEnvironment
     return <main id="main-content" className="foundation"><h1>This room is no longer available.</h1><p role="status">Your room access changed. Return to an available Mission room to continue.</p></main>;
   }
   const missionWritable = activeMission.lifecycle === "active";
+  const realtimeFeatureEnabled = realtimeEnvironment === "development"
+    || realtimeEnvironment === "test"
+    || realtimeEnvironment === "preview";
+  const currentLiveRoomState = participantRealtimeState({
+    enabled: realtimeFeatureEnabled,
+    missionLifecycle: activeMission.lifecycle,
+    missionId: activeMission._id,
+    roomId: selectedRoom.id,
+    grantVersion: activeMission.grantVersion,
+    readiness: realtimeRoomReadiness,
+    snapshot: liveRoomState,
+  });
 
   if (view === "workshop" && selectedRoomRecord !== undefined) {
-    return <><AuthenticatedMissionRealtimeLifecycle authenticatedTokenRequester={requestAuthenticatedRealtimeToken} expectedMissionId={activeMission._id} expectedRoomId={selectedRoomRecord.id} membershipGrantVersion={activeMission.grantVersion} readiness={realtimeRoomReadiness} transportFactory={developmentRealtimeTransportFactory} /><Workshop calls={missionCalls} fractures={isObserver ? [] : missionFractures} initialSelectedContextKey={workshopContextRequest?.roomId === selectedRoomRecord.id ? workshopContextRequest.key : null} key={selectedRoomRecord.id} mission={activeMission} moves={missionMoves} onAskForHelp={askForHelpFromWorkshop} onCreateFirstMove={createFirstMoveFromWorkshop} onExit={() => exitRoomWork(selectedRoomRecord.id)} onOpenCall={openCallFromWorkshop} onOpenFracture={openFractureFromWorkshop} onOpenMove={openMoveFromWorkshop} onOpenProof={openProofFromWorkshop} onReportFracture={reportFractureFromWorkshop} onSubmitProof={submitProofFromWorkshop} proofs={isObserver ? [] : missionProofs} roomId={selectedRoomRecord.id as Id<"rooms">} roomTitle={selectedRoomRecord.name} /></>;
+    return <><AuthenticatedMissionRealtimeLifecycle authenticatedTokenRequester={requestAuthenticatedRealtimeToken} expectedMissionId={activeMission._id} expectedRoomId={selectedRoomRecord.id} membershipGrantVersion={activeMission.grantVersion} onStateChange={handleRealtimeState} readiness={realtimeRoomReadiness} transportFactory={developmentRealtimeTransportFactory} /><Workshop calls={missionCalls} fractures={isObserver ? [] : missionFractures} initialSelectedContextKey={workshopContextRequest?.roomId === selectedRoomRecord.id ? workshopContextRequest.key : null} key={selectedRoomRecord.id} mission={activeMission} moves={missionMoves} onAskForHelp={askForHelpFromWorkshop} onCreateFirstMove={createFirstMoveFromWorkshop} onExit={() => exitRoomWork(selectedRoomRecord.id)} onOpenCall={openCallFromWorkshop} onOpenFracture={openFractureFromWorkshop} onOpenMove={openMoveFromWorkshop} onOpenProof={openProofFromWorkshop} onReportFracture={reportFractureFromWorkshop} onSubmitProof={submitProofFromWorkshop} proofs={isObserver ? [] : missionProofs} realtimeState={currentLiveRoomState} roomId={selectedRoomRecord.id as Id<"rooms">} roomTitle={selectedRoomRecord.name} /></>;
   }
 
   return (
     <div className="mission-world" aria-label="Realworld Mission World" data-accent={preferences.accent} data-density={preferences.density} data-decoration={preferences.reducedDecoration ? "reduced" : "standard"}>
-      <AuthenticatedMissionRealtimeLifecycle authenticatedTokenRequester={requestAuthenticatedRealtimeToken} expectedMissionId={activeMission._id} expectedRoomId={selectedRoom.id} membershipGrantVersion={activeMission.grantVersion} readiness={realtimeRoomReadiness} transportFactory={developmentRealtimeTransportFactory} />
+      <AuthenticatedMissionRealtimeLifecycle authenticatedTokenRequester={requestAuthenticatedRealtimeToken} expectedMissionId={activeMission._id} expectedRoomId={selectedRoom.id} membershipGrantVersion={activeMission.grantVersion} onStateChange={handleRealtimeState} readiness={realtimeRoomReadiness} transportFactory={developmentRealtimeTransportFactory} />
       <header className="world-topbar">
         <a className="brand" href="#core" aria-label="Realworld Mission World"><Icon name="spark" /> <span>Realworld</span></a>
         <nav aria-label="Primary navigation">
@@ -1291,12 +1316,12 @@ export function MissionWorld({ developmentAblyClientFactory, realtimeEnvironment
             </div>
           </div>
         )}
-        <aside className="world-inspector" aria-live="polite" aria-labelledby="inspector-title">
+        <aside className="world-inspector" aria-labelledby="inspector-title">
           <button className="inspector-close" aria-label="Clear room selection" onClick={() => setSelectedRoomId("core")} type="button"><Icon name="close" /></button>
           <p className="eyebrow">{selectedRoom.eyebrow}</p>
           <h2 id="inspector-title">{selectedRoom.name}</h2>
           <p>{selectedRoom.description}</p>
-          <div className="inspector-status"><span>Presence not connected</span><span aria-label={roomMoveSignalLabel(selectedRoom)}>{moveSignalText(selectedRoom.moveSignal)}</span></div>
+          <div className="inspector-status"><span>{participantRealtimeStatusLabel(currentLiveRoomState)}</span><span aria-label={roomMoveSignalLabel(selectedRoom)}>{moveSignalText(selectedRoom.moveSignal)}</span></div>
           <section className="latest-durable-move" aria-labelledby="latest-durable-move-heading">
             <h3 id="latest-durable-move-heading">Latest durable Move</h3>
             {missionMoves === undefined ? <p aria-live="polite">Loading durable Moves…</p> : latestSelectedRoomMove === undefined ? <p>No durable Moves in this room.</p> : <>
@@ -1304,7 +1329,7 @@ export function MissionWorld({ developmentAblyClientFactory, realtimeEnvironment
               <button className="secondary-button" onClick={() => inspectWorkshopContext(selectedRoom.id as Id<"rooms">, `move:${latestSelectedRoomMove._id}`)} type="button">Inspect room work</button>
             </>}
           </section>
-          <section><h3>Room activity</h3><p>Live occupants are not represented until a realtime presence provider is connected.</p></section>
+          <section><h3>Room activity</h3><p>{participantRealtimeActivityCopy(currentLiveRoomState, activeMission.lifecycle)}</p></section>
           <section><h3>Artifacts</h3><p>No durable Artifacts are linked to this room yet.</p></section>
           {missionWritable && (activeMission.role === "owner" || activeMission.role === "steward" || activeMission.role === "builder") ? <section className="custom-room-tools"><h3>Room controls</h3><label htmlFor="rename-room">Room name</label><input defaultValue={selectedRoom.name} id="rename-room" key={`${selectedRoom.id}-${selectedRoom.currentVersion}`} onBlur={(event) => void renameSelectedRoom(event.target.value)} /><button className="archive-room" onClick={() => {
             if (selectedRoom.currentVersion === undefined) return;

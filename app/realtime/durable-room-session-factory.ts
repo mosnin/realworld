@@ -2,6 +2,8 @@ import type { BrowserRoomSession } from "@/lib/realtime/browser-lifecycle";
 import {
   RealtimeRoomSession,
   type RealtimeRoomScope,
+  type RealtimeEnvelope,
+  type RoomSessionState,
   type RealtimeToken,
   type RealtimeTokenProvider,
   type RealtimeTransportAdapter,
@@ -28,6 +30,8 @@ export type DurableRoomSessionFactory = (readiness: DurableRoomReadiness) => Bro
 export type DurableRoomSessionFactoryOptions = Readonly<{
   tokenProviderFactory?: unknown;
   transportFactory?: unknown;
+  onStateChange?: (readiness: DurableRoomReadiness, state: RoomSessionState) => void;
+  onMessage?: (readiness: DurableRoomReadiness, message: RealtimeEnvelope) => void;
 }>;
 
 function isDurableRoomReadiness(value: unknown): value is DurableRoomReadiness {
@@ -71,6 +75,15 @@ function sameScope(left: RealtimeRoomScope, right: RealtimeRoomScope) {
   return left.missionId === right.missionId && left.roomId === right.roomId;
 }
 
+function notifyPresentationCallback(callback: (() => unknown) | undefined) {
+  if (callback === undefined) return;
+  try {
+    void Promise.resolve(callback()).catch(() => undefined);
+  } catch {
+    // Presentation observers never control transport lifecycle or cleanup.
+  }
+}
+
 /**
  * Binds one already-authorized durable room scope to the provider-independent
  * session kernel. Invalid factories or outputs return no session, allowing the
@@ -103,7 +116,12 @@ export function createDurableRoomSessionFactory(
           if (!isRealtimeToken(token, readiness.grantVersion)) throw new Error("Realtime token is invalid for this membership grant");
           return token;
         };
-        const session = new RealtimeRoomSession({ tokenProvider: boundTokenProvider, transport: validatedTransport });
+        const session = new RealtimeRoomSession({
+          tokenProvider: boundTokenProvider,
+          transport: validatedTransport,
+          onStateChange: (state) => notifyPresentationCallback(() => options.onStateChange?.(readiness, state)),
+          onMessage: (message) => notifyPresentationCallback(() => options.onMessage?.(readiness, message)),
+        });
         return {
           start: () => session.start(scope),
           stop: () => session.stop(),
