@@ -54,10 +54,12 @@ test("a participant can inspect and enter Workshop from the Mission World", asyn
 
   await expect(page.getByRole("heading", { name: "Company sprint" })).toBeVisible();
   await expect(page.getByText(/music studio|digital audio workstation/i)).toHaveCount(0);
-  await page.getByRole("button", { name: /Workshop\. 4 active people/i }).click();
+  await expect(page.getByLabel(/^Your callsign: /)).toBeVisible();
+  await expect(page.getByText(/Priya|Marco|SonicAgent|active people/i)).toHaveCount(0);
+  await page.getByRole("button", { name: /^Workshop\./ }).click();
   await expect(page.getByRole("heading", { name: "Workshop" })).toBeVisible();
   await page.getByRole("complementary", { name: "Workshop" }).getByRole("button", { name: "Enter Workshop" }).click();
-  await expect(page.getByRole("heading", { name: "Make room entry feel instantly useful" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "No durable Artifact is selected." })).toBeVisible();
   await page.getByRole("button", { name: "Mission World" }).click();
   await expect(page.getByRole("heading", { name: "Company sprint" })).toBeVisible();
 });
@@ -68,7 +70,7 @@ test("the room directory provides a non-spatial path to Workshop", async ({ page
   await page.getByRole("button", { name: "Room directory" }).click();
   await expect(page.getByRole("heading", { name: "Mission rooms" })).toBeVisible();
   await page.locator(".room-directory").getByRole("button", { name: "Enter Workshop" }).click();
-  await expect(page.getByRole("heading", { name: "Make room entry feel instantly useful" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "No durable Artifact is selected." })).toBeVisible();
 });
 
 test.describe("on a phone-sized Mission World", () => {
@@ -86,7 +88,7 @@ test.describe("on a phone-sized Mission World", () => {
     await expect(page.getByRole("heading", { name: "Mission rooms" })).toBeVisible();
 
     await page.locator(".room-directory").getByRole("button", { name: "Enter Workshop" }).click();
-    await expect(page.getByRole("heading", { name: "A room should answer one useful question immediately." })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "No durable Artifact is selected." })).toBeVisible();
 
     await page.getByRole("button", { name: "Mission World" }).click();
     await expect(page.getByRole("heading", { name: "Company sprint" })).toBeVisible();
@@ -96,12 +98,12 @@ test.describe("on a phone-sized Mission World", () => {
 test("keyboard users can move between spatial landmarks without pointer input", async ({ page }) => {
   await page.goto("/");
 
-  const workshop = page.getByRole("button", { name: /Workshop\. 4 active people/i });
+  const workshop = page.getByRole("button", { name: /^Workshop\./ });
   await workshop.focus();
   await page.keyboard.press("ArrowRight");
 
   await expect(page.getByRole("complementary", { name: "Review Deck" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Review Deck\. 3 active people/i })).toBeFocused();
+  await expect(page.getByRole("button", { name: /^Review Deck\./ })).toBeFocused();
 });
 
 test("view preferences persist density, accent, reduced decoration, and default room list", async ({ page }) => {
@@ -129,7 +131,7 @@ test("reduced-motion presentation retains a usable Mission World", async ({ page
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
 
-  await expect(page.getByRole("button", { name: /Workshop\. 4 active people/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Workshop\./ })).toBeVisible();
   await expect(page.getByRole("button", { name: "Room directory" })).toBeVisible();
 });
 
@@ -145,18 +147,18 @@ test("a participant can customize and persist a personal canvas layout", async (
   await nameInput.press("Tab");
   await expect(page.getByRole("heading", { name: "Launch Cabin" })).toBeVisible();
 
-  const customRoom = page.getByRole("button", { name: /Launch Cabin\. 0 active people/i });
+  const customRoom = page.getByRole("button", { name: /^Launch Cabin\./ });
   await customRoom.focus();
   await page.keyboard.press("Alt+ArrowRight");
   await page.getByRole("button", { name: "Zoom in" }).click();
   await page.getByRole("button", { name: "Layout unlocked" }).click();
   await page.reload();
 
-  await expect(page.getByRole("button", { name: /Launch Cabin\. 0 active people/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Launch Cabin\./ })).toBeVisible();
   await expect(page.getByRole("button", { name: "Layout locked" })).toBeVisible();
-  await page.getByRole("button", { name: /Launch Cabin\. 0 active people/i }).click();
+  await page.getByRole("button", { name: /^Launch Cabin\./ }).click();
   await page.getByRole("button", { name: "Archive room" }).click();
-  await expect(page.getByRole("button", { name: /Launch Cabin\. 0 active people/i })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Launch Cabin\./ })).toHaveCount(0);
 });
 
 test("an owner can archive a Mission into a read-only world, restore it, and keep it active", async ({ page }) => {
@@ -175,7 +177,7 @@ test("an owner can archive a Mission into a read-only world, restore it, and kee
   await expect(page.getByRole("button", { name: "Archive room" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Layout unlocked" })).toBeDisabled();
 
-  const archivedWorkshop = page.getByRole("button", { name: /Workshop\. 4 active people/i });
+  const archivedWorkshop = page.getByRole("button", { name: /^Workshop\./ });
   const archivedPosition = await archivedWorkshop.evaluate((element) => ({
     left: (element as HTMLElement).style.left,
     top: (element as HTMLElement).style.top,
@@ -200,7 +202,7 @@ test("an owner can archive a Mission into a read-only world, restore it, and kee
   await expect(page.getByRole("button", { name: "Layout unlocked" })).toBeEnabled();
 
   await page.getByRole("button", { name: "Map" }).click();
-  const restoredWorkshop = page.getByRole("button", { name: /Workshop\. 4 active people/i });
+  const restoredWorkshop = page.getByRole("button", { name: /^Workshop\./ });
   const restoredPosition = await restoredWorkshop.evaluate((element) => ({
     left: (element as HTMLElement).style.left,
     top: (element as HTMLElement).style.top,
@@ -225,7 +227,7 @@ test("an owner can create, switch, archive, and recover separate Mission worlds"
   await expect(missionSelector).toHaveValue(await missionSelector.inputValue());
   const firstMissionId = await missionSelector.inputValue();
   await expect(page.getByRole("heading", { name: "Company sprint" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Surge Hall\. 12 active people/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Surge Hall\./ })).toBeVisible();
 
   await page.getByRole("button", { name: "New Mission" }).click();
   const launcher = page.getByRole("dialog", { name: "Choose a work shape" });
@@ -235,13 +237,13 @@ test("an owner can create, switch, archive, and recover separate Mission worlds"
   await expect(page.getByRole("heading", { name: "Classroom project" })).toBeVisible();
   const secondMissionId = await missionSelector.inputValue();
   expect(secondMissionId).not.toBe(firstMissionId);
-  await expect(page.getByRole("button", { name: /Observatory\. 3 active people/i })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Surge Hall\. 12 active people/i })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Observatory\./ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Surge Hall\./ })).toHaveCount(0);
 
   await missionSelector.selectOption(firstMissionId);
   await expect(page.getByRole("heading", { name: "Company sprint" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Surge Hall\. 12 active people/i })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Observatory\. 3 active people/i })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Surge Hall\./ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Observatory\./ })).toHaveCount(0);
 
   await missionSelector.selectOption(secondMissionId);
   await expect(page.getByRole("heading", { name: "Classroom project" })).toBeVisible();
@@ -775,14 +777,13 @@ test("a scoped observer receives a stable read-only Mission shell without privat
     await expect(observer.getByRole("heading", { name: "Company sprint" })).toBeVisible();
     await expect(observer.getByText("observer", { exact: true })).toBeVisible();
 
-    await expect(observer.getByRole("button", { name: /Workshop\. 4 active people/i })).toBeVisible();
+    await expect(observer.getByRole("button", { name: /^Workshop\./ })).toBeVisible();
     await expect(observer.getByRole("button", { name: /Mission Core\./i })).toHaveCount(0);
     await expect(observer.getByLabel("New room")).toHaveCount(0);
     await expect(observer.getByRole("button", { name: "Layout unlocked" })).toBeDisabled();
     await expect(observer.locator(".fracture-surface")).toHaveCount(0);
     await expect(observer.locator(".proof-surface")).toHaveCount(0);
     await expect(observer.getByLabel("Mission activity Pulse")).toHaveCount(0);
-    await expect(observer.getByLabel(/Mission Momentum/)).toHaveCount(0);
 
     await observer.getByRole("button", { name: /Open Moves/ }).click();
     const moves = observer.getByRole("dialog", { name: "Turn intent into progress" });
@@ -795,11 +796,10 @@ test("a scoped observer receives a stable read-only Mission shell without privat
     await expect(calls.getByLabel("Mission Calls read-only")).toBeVisible();
     await calls.getByRole("button", { name: "Close Calls" }).click();
 
-    await observer.getByRole("button", { name: /Workshop\. 4 active people/i }).click();
+    await observer.getByRole("button", { name: /^Workshop\./ }).click();
     await observer.getByRole("button", { name: "Enter Workshop" }).click();
     await expect(observer.getByText("Read-only observer view", { exact: true })).toBeVisible();
-    await expect(observer.getByRole("button", { name: "Review changes" })).toHaveCount(0);
-    await expect(observer.getByRole("button", { name: "Prepare Proof" })).toHaveCount(0);
+    await expect(observer.getByText("Live presence is not connected to this room yet. Durable work appears in Pulse.")).toBeVisible();
     await expect(observer.getByLabel("Mission activity Pulse")).toHaveCount(0);
     await observer.getByRole("button", { name: "Mission World" }).click();
     await expect(observer.getByRole("heading", { name: "Company sprint" })).toBeVisible();
@@ -1092,7 +1092,7 @@ test.describe("a reactive scoped Mission canvas", () => {
     await expect(participant.getByRole("button", { name: /Mission Core\./i })).toHaveCount(0);
     await expect(participant.getByRole("button", { name: /Review Deck\./i })).toHaveCount(0);
 
-    const participantWorkshop = participant.getByRole("button", { name: /Workshop\. 4 active people/i });
+    const participantWorkshop = participant.getByRole("button", { name: /^Workshop\./ });
     await expect(participantWorkshop).toBeVisible();
     const initialParticipantPosition = await participantWorkshop.evaluate((element) => ({
       left: (element as HTMLElement).style.left,
@@ -1103,7 +1103,7 @@ test.describe("a reactive scoped Mission canvas", () => {
     await expect(invitations).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Layout unlocked" })).toBeVisible();
 
-    const ownerWorkshop = page.getByRole("button", { name: /Workshop\. 4 active people/i });
+    const ownerWorkshop = page.getByRole("button", { name: /^Workshop\./ });
     const initialOwnerPosition = await ownerWorkshop.evaluate((element) => ({
       left: (element as HTMLElement).style.left,
       top: (element as HTMLElement).style.top,
@@ -1128,7 +1128,7 @@ test.describe("a reactive scoped Mission canvas", () => {
 
     await participant.reload();
     await expect(participant.getByRole("heading", { name: "Company sprint" })).toBeVisible();
-    await expect.poll(async () => participant.getByRole("button", { name: /Workshop\. 4 active people/i }).evaluate((element) => ({
+    await expect.poll(async () => participant.getByRole("button", { name: /^Workshop\./ }).evaluate((element) => ({
       left: (element as HTMLElement).style.left,
       top: (element as HTMLElement).style.top,
     }))).toEqual(updatedOwnerPosition);
@@ -1164,8 +1164,8 @@ test.describe("a reactive scoped Mission canvas", () => {
       await builder.getByRole("link", { name: "Enter the Mission World" }).click();
 
       await expect(builder.getByText("builder", { exact: true })).toBeVisible();
-      const ownerWorkshop = page.getByRole("button", { name: /Workshop\. 4 active people/i });
-      const builderWorkshop = builder.getByRole("button", { name: /Workshop\. 4 active people/i });
+      const ownerWorkshop = page.getByRole("button", { name: /^Workshop\./ });
+      const builderWorkshop = builder.getByRole("button", { name: /^Workshop\./ });
       await expect(ownerWorkshop).toBeVisible();
       await expect(builderWorkshop).toBeVisible();
       await page.getByRole("button", { name: "Close invitations" }).click();
@@ -1212,7 +1212,7 @@ test.describe("a reactive scoped Mission canvas", () => {
 
       await builder.reload();
       await expect(builder.getByRole("heading", { name: "Company sprint" })).toBeVisible();
-      await expect.poll(async () => builder.getByRole("button", { name: /Workshop\. 4 active people/i }).evaluate((element) => ({
+      await expect.poll(async () => builder.getByRole("button", { name: /^Workshop\./ }).evaluate((element) => ({
         left: (element as HTMLElement).style.left,
         top: (element as HTMLElement).style.top,
       }))).toEqual(authoritativePosition);
@@ -1245,8 +1245,8 @@ test.describe("a reactive scoped Mission canvas", () => {
       await participant.getByRole("button", { name: "Join Mission" }).click();
       await participant.getByRole("link", { name: "Enter the Mission World" }).click();
 
-      const ownerWorkshop = page.getByRole("button", { name: /Workshop\. 4 active people/i });
-      const participantWorkshop = participant.getByRole("button", { name: /Workshop\. 4 active people/i });
+      const ownerWorkshop = page.getByRole("button", { name: /^Workshop\./ });
+      const participantWorkshop = participant.getByRole("button", { name: /^Workshop\./ });
       await expect(ownerWorkshop).toBeVisible();
       await expect(participantWorkshop).toBeVisible();
       await page.getByRole("button", { name: "Close invitations" }).click();
@@ -1289,7 +1289,7 @@ test.describe("a reactive scoped Mission canvas", () => {
 
       await participant.reload();
       await expect(participant.getByRole("heading", { name: "Company sprint" })).toBeVisible();
-      await expect.poll(async () => participant.getByRole("button", { name: /Workshop\. 4 active people/i }).evaluate((element) => ({
+      await expect.poll(async () => participant.getByRole("button", { name: /^Workshop\./ }).evaluate((element) => ({
         left: (element as HTMLElement).style.left,
         top: (element as HTMLElement).style.top,
       }))).toEqual(updatedOwnerPosition);

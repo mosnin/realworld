@@ -87,25 +87,12 @@ test("the authenticated Proof dialog has no serious or critical axe violations",
 test.describe("on an expanded desktop Mission World", () => {
   test.use({ viewport: { width: 1728, height: 1117 } });
 
-  test("the full Mission Momentum header has no serious or critical axe violations", async ({
+  test("the wide Mission header has no serious or critical axe violations", async ({
     page,
   }) => {
     await launchPrivateMission(page);
-    const momentum = page.getByLabel(/Mission Momentum: strong/);
     const newMission = page.getByRole("button", { name: "New Mission" });
-    await expect(momentum).toBeVisible();
     await expect(newMission).toBeVisible();
-    await expect
-      .poll(async () => {
-        const momentumBox = await momentum.boundingBox();
-        const newMissionBox = await newMission.boundingBox();
-        return (
-          momentumBox !== null &&
-          newMissionBox !== null &&
-          momentumBox.x + momentumBox.width <= newMissionBox.x
-        );
-      })
-      .toBe(true);
     await expect
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
       .toBe(true);
@@ -117,10 +104,9 @@ test.describe("on an expanded desktop Mission World", () => {
 test.describe("on a constrained desktop Mission World", () => {
   test.use({ viewport: { width: 1600, height: 1057 } });
 
-  test("the action rail stays readable without overlapping Mission Momentum", async ({ page }) => {
+  test("the action rail stays readable on a constrained desktop", async ({ page }) => {
     await launchPrivateMission(page);
 
-    await expect(page.getByLabel(/Mission Momentum: strong/)).toBeHidden();
     await expect(page.getByRole("button", { name: "New Mission" })).toBeVisible();
     await expect
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))

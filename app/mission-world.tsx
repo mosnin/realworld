@@ -27,11 +27,8 @@ type Room = {
   name: string;
   eyebrow: string;
   description: string;
-  active: number;
-  agents: number;
   accent: string;
   icon: IconName;
-  activity: string;
   action: string;
   position: string;
   x: number;
@@ -70,11 +67,8 @@ const rooms: Room[] = [
     name: "Mission Core",
     eyebrow: "Shared outcome",
     description: "Build Realworld into a production multiplayer work platform for humans and agents.",
-    active: 5,
-    agents: 2,
     accent: "blue",
     icon: "spark",
-    activity: "Priya and SonicAgent are choosing the next Move.",
     action: "Open Mission brief",
     position: "core",
     x: 50,
@@ -85,11 +79,8 @@ const rooms: Room[] = [
     name: "Workshop",
     eyebrow: "Artifact in motion",
     description: "Shape the working artifact, hand off a Move, and prepare a Proof.",
-    active: 4,
-    agents: 1,
     accent: "azure",
     icon: "workshop",
-    activity: "Priya is shaping the collaboration flow.",
     action: "Enter Workshop",
     position: "workshop",
     x: 74,
@@ -100,11 +91,8 @@ const rooms: Room[] = [
     name: "Research Observatory",
     eyebrow: "Evidence and questions",
     description: "Validate the assumptions behind the next release.",
-    active: 3,
-    agents: 1,
     accent: "teal",
     icon: "observatory",
-    activity: "SonicAgent is validating latency evidence.",
     action: "Explore evidence",
     position: "observatory",
     x: 19,
@@ -115,11 +103,8 @@ const rooms: Room[] = [
     name: "Branch Lab",
     eyebrow: "Parallel workstreams",
     description: "Compare two approaches before a durable merge.",
-    active: 5,
-    agents: 2,
     accent: "coral",
     icon: "branch",
-    activity: "Marco needs a decision on the sync branch.",
     action: "Compare branches",
     position: "branch",
     x: 84,
@@ -130,11 +115,8 @@ const rooms: Room[] = [
     name: "Artifact Library",
     eyebrow: "Reusable outputs",
     description: "Keep the useful things this Mission has already learned.",
-    active: 3,
-    agents: 1,
     accent: "amber",
     icon: "library",
-    activity: "A new interaction spec was added to the library.",
     action: "Browse artifacts",
     position: "library",
     x: 18,
@@ -145,11 +127,8 @@ const rooms: Room[] = [
     name: "Surge Hall",
     eyebrow: "Focused together",
     description: "A voluntary, time-boxed push with a clear shared outcome.",
-    active: 12,
-    agents: 3,
     accent: "violet",
     icon: "surge",
-    activity: "Surge opens in 01:24 with 12 people ready.",
     action: "Join Surge",
     position: "surge",
     x: 61,
@@ -176,11 +155,9 @@ function canvasRoom(record: { _id: Id<"rooms">; title: string; kind: string; lay
     layout: record.layout,
     layoutVersion: record.layoutVersion,
     currentVersion: record.currentVersion,
-    ...(isCustom ? { active: 0, agents: 0, accent: "blue" as const, icon: "spark" as const, position: "custom" as const, description: "A room shaped for this Mission's next mode of work.", eyebrow: "Custom room", activity: "Ready for its first Move.", action: "Open room", custom: true } : {}),
+    ...(isCustom ? { accent: "blue" as const, icon: "spark" as const, position: "custom" as const, description: "A room shaped for this Mission's next mode of work.", eyebrow: "Custom room", action: "Open room", custom: true } : {}),
   };
 }
-
-const people = ["Priya", "Marco", "Lina", "Aisha", "SonicAgent", "Ira", "Noah", "Tess"];
 
 function RoomLandmark({
   room,
@@ -239,7 +216,7 @@ function RoomLandmark({
       ref={roomRef}
       id={`room-${room.id}`}
       aria-pressed={selected}
-      aria-label={`${room.name}. ${room.active} active people, ${room.agents} agents. ${room.description}`}
+      aria-label={`${room.name}. ${room.description}`}
       className={`landmark landmark--${room.position} landmark--${room.accent} ${selected ? "is-selected" : ""}`}
       style={{ left: `${room.x}%`, top: `${room.y}%` }}
       onClick={() => onSelect(room.id)}
@@ -274,26 +251,22 @@ function RoomLandmark({
       <span className="landmark__copy">
         <strong>{room.name}</strong>
         <small>{room.eyebrow}</small>
-        <span className="landmark__presence">
-          <i aria-hidden="true" /> {room.active} active <b aria-hidden="true">·</b> {room.agents} agent{room.agents === 1 ? "" : "s"}
-        </span>
       </span>
     </button>
   );
 }
 
-function PersonToken({ name, index }: Readonly<{ name: string; index: number }>) {
-  const isAgent = name.endsWith("Agent");
+function CallsignBadge({ callsign }: Readonly<{ callsign: string }>) {
+  const initial = [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(callsign)][0]?.segment ?? callsign;
   return (
-    <span className={`person-token ${isAgent ? "person-token--agent" : ""}`} role="img" title={name} aria-label={name}>
-      {isAgent ? <Icon name="agent" /> : name.slice(0, 1)}
-      <i className={`person-token__dot person-token__dot--${index % 3}`} aria-hidden="true" />
+    <span className="person-token" role="img" title={`Your callsign: ${callsign}`} aria-label={`Your callsign: ${callsign}`}>
+      {initial.toLocaleUpperCase()}
     </span>
   );
 }
 
 function Workshop({ mission, onExit }: Readonly<{ mission: { _id: Id<"missions">; role: string }; onExit: () => void }>) {
-  const canAct = mission.role !== "observer";
+  const isObserver = mission.role === "observer";
   return (
     <div className="workshop-view" aria-labelledby="workshop-heading">
       <header className="room-topbar">
@@ -302,47 +275,28 @@ function Workshop({ mission, onExit }: Readonly<{ mission: { _id: Id<"missions">
         </button>
         <span className="room-topbar__slash" aria-hidden="true">/</span>
         <strong>Workshop</strong>
-        <span className="room-topbar__status"><i /> 4 active · 1 agent</span>
       </header>
       <div className="workshop-layout">
         <aside className="workshop-rail" aria-label="Workshop context">
-          <p className="eyebrow">Current Move</p>
+          <p className="eyebrow">Workshop context</p>
           <h1 id="workshop-heading">Make room entry feel instantly useful.</h1>
           <p>Turn the first room into a place where a team can produce a durable Artifact.</p>
-          <div className="rail-people">
-            <strong>In this room</strong>
-            <span>{people.slice(0, 5).map((person, index) => <PersonToken key={person} name={person} index={index} />)}</span>
-          </div>
-          <ol className="room-feed">
-            <li><b>Priya</b> made an interaction proposal</li>
-            <li><b>SonicAgent</b> is checking room states</li>
-            <li><b>Marco</b> asked for a review</li>
-          </ol>
+          <p>Live presence is not connected to this room yet. Durable work appears in Pulse.</p>
         </aside>
         <main className="artifact-canvas" id="main-content" tabIndex={-1}>
-          <div className="artifact-toolbar" aria-label="Artifact tools">
-            <span className="artifact-kind">Interaction brief</span>
-            {canAct ? <><button type="button">Share</button><button type="button">Versions</button></> : <span>Read-only observer view</span>}
-          </div>
+          <div className="artifact-toolbar" aria-label="Artifact context"><span className="artifact-kind">{isObserver ? "Read-only observer view" : "No Artifact selected"}</span></div>
           <article className="artifact-paper" aria-label="Room entry interaction brief">
-            <p className="eyebrow">Draft · 3 contributors</p>
-            <h2>A room should answer one useful question immediately.</h2>
+            <p className="eyebrow">Room brief</p>
+            <h2>No durable Artifact is selected.</h2>
             <p>
-              The Workshop opens to the active Artifact, the current Move, and the people or agents
-              who can help. Presence is room-scale by default. Saving stays explicit and attributable.
-            </p>
-            <blockquote>“Priya is shaping the collaboration flow.”</blockquote>
-            <p>
-              Next: make the entry action visible from both the map and the accessible room directory.
+              Create a Move, issue a Call, or open Pulse to orient the next piece of shared work.
             </p>
           </article>
         </main>
         <aside className="workshop-inspector" aria-label="Selected Move">
           <p className="eyebrow">Selected Move</p>
-          <h2>Review the room transition</h2>
-          <p>Evidence: experience specification, map interaction model, keyboard path.</p>
-          <div className="agent-status"><span aria-hidden="true"><Icon name="agent" /></span><div><strong>SonicAgent</strong><small>Waiting for review</small></div></div>
-          {canAct ? <><button className="primary-button" type="button">Review changes</button><button className="secondary-button" type="button">Prepare Proof</button></> : null}
+          <h2>Durable work appears here.</h2>
+          <p>Choose a durable Move or Call to inspect its accountable state.</p>
         </aside>
       </div>
       {mission.role === "observer" ? null : <PulseSurface mission={mission} />}
@@ -402,7 +356,6 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   const canManageCanvas = activeMission?.lifecycle === "active" && ["owner", "steward", "builder"].includes(activeMission.role);
   const roomRecords = useQuery(api.canvas.roomLayouts, activeMission === undefined ? "skip" : { missionId: activeMission._id });
   const missionMoves = useQuery(api.moves.listMissionMoves, activeMission === undefined ? "skip" : { missionId: activeMission._id });
-  const missionFractures = useQuery(api.fractures.listMissionFractures, activeMission === undefined || isObserver ? "skip" : { missionId: activeMission._id });
   const launch = useMutation(api.launch.createMissionFromTemplate);
   const createRoomMutation = useMutation(api.canvas.createRoom);
   const updateRoomLayout = useMutation(api.canvas.updateRoomLayout);
@@ -447,7 +400,6 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   );
   const selectedRoomHash = selectedRoom?.id;
   const visibleRooms = canvasRooms;
-  const activeFractureCount = missionFractures?.filter((fracture) => fracture.status === "open" || fracture.status === "investigating").length ?? 0;
 
   useEffect(() => {
     if (missions === undefined || selectionReady) return;
@@ -661,9 +613,6 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
             {missions.map((mission) => <option key={mission._id} value={mission._id}>{mission.title}{mission.lifecycle === "archived" ? " (archived)" : ""}</option>)}
           </select>
         </label>
-        {isObserver ? null : <div className="momentum" aria-label={`Mission Momentum: strong. ${activeFractureCount} active ${activeFractureCount === 1 ? "fracture" : "fractures"}. Surge opening in one minute and twenty-four seconds.`}>
-          <span className="momentum__mark"><Icon name="spark" /></span><strong>Mission Momentum</strong><span className="momentum__bars" aria-hidden="true"><i /><i /><i /><i /><i /></span><b>Strong</b><span>Fractures <em>{activeFractureCount}</em></span><span>Surge opening <time>01:24</time></span>
-        </div>}
         <button className="create-button" onClick={() => setNewMissionOpen(true)} type="button">
           <Icon name="plus" /> New Mission
         </button>
@@ -676,7 +625,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
         <button className="icon-button" aria-label="Search" type="button"><Icon name="search" /></button>
         <button className="icon-button" aria-label="Notifications" type="button"><Icon name="bell" /></button>
         <button className="icon-button" aria-expanded={preferencesOpen} aria-label="Open world preferences" onClick={() => setPreferencesOpen(true)} type="button"><Icon name="settings" /></button>
-        <PersonToken name="Priya" index={0} />
+        <CallsignBadge callsign={profile.displayName} />
         <SessionControl />
       </header>
 
@@ -701,8 +650,8 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
       <section className="mission-summary" aria-labelledby="mission-title">
         <p className="eyebrow">Mission</p>
         <h1 id="mission-title">{activeMission.title}</h1>
-        <p>{missionWritable ? "Give humans and autonomous agents shared Missions, live rooms, durable Artifacts, and the tools to accomplish ambitious work together." : "This Mission is archived and read-only. Its owner can restore it from Manage Mission."}</p>
-        <div className="mission-summary__facts"><span><i /> {missionWritable ? "Active" : "Archived"}</span><span>{activeMission.role}</span><span>Durable Mission</span><span>{missionWritable ? "Live projection" : "Read-only projection"}</span></div>
+        <p>{missionWritable ? "Give humans and autonomous agents shared Missions, durable rooms, accountable Artifacts, and the tools to accomplish ambitious work together." : "This Mission is archived and read-only. Its owner can restore it from Manage Mission."}</p>
+        <div className="mission-summary__facts"><span><i /> {missionWritable ? "Active" : "Archived"}</span><span>{activeMission.role}</span><span>Durable Mission</span><span>{missionWritable ? "Shared projection" : "Read-only projection"}</span></div>
         <ConstitutionControls mission={activeMission} />
         <MoveBoard
           key={activeMission._id}
@@ -729,11 +678,11 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
         <div className="contours" aria-hidden="true" />
         {showDirectory ? (
           <section className="room-directory" aria-labelledby="directory-heading">
-            <div><p className="eyebrow">Non-spatial alternative</p><h2 id="directory-heading">Mission rooms</h2><p>Every destination, live state, and safe action in reading order.</p></div>
+            <div><p className="eyebrow">Non-spatial alternative</p><h2 id="directory-heading">Mission rooms</h2><p>Every durable destination and safe action in reading order.</p></div>
             <ul>
               {visibleRooms.map((room) => (
                 <li key={room.id} className={selectedRoom.id === room.id ? "is-selected" : ""}>
-                  <button onClick={() => setSelectedRoomId(room.id)} type="button"><span className={`directory-icon directory-icon--${room.accent}`}><Icon name={room.icon} /></span><span><strong>{room.name}</strong><small>{room.description}</small><em>{room.active} active · {room.agents} agents</em></span></button>
+                  <button onClick={() => setSelectedRoomId(room.id)} type="button"><span className={`directory-icon directory-icon--${room.accent}`}><Icon name={room.icon} /></span><span><strong>{room.name}</strong><small>{room.description}</small></span></button>
                   <button className="directory-enter" disabled={!missionWritable} onClick={() => enterRoom(room.id)} type="button">{room.action}</button>
                 </li>
               ))}
@@ -744,7 +693,6 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
             <div className="world-map__canvas" style={{ transform: `translate(${canvas.panX}%, ${canvas.panY}%) scale(${canvas.zoom})` }}>
               <svg className="world-routes" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
                 {visibleRooms.filter((room) => room.id !== "core").map((room) => <path d={`M ${visibleRooms.find((candidate) => candidate.id === "core")?.x ?? 50} ${visibleRooms.find((candidate) => candidate.id === "core")?.y ?? 46} L ${room.x} ${room.y}`} key={room.id} />)}
-                <path className="world-routes__active" d={`M ${visibleRooms.find((room) => room.id === "core")?.x ?? 50} ${visibleRooms.find((room) => room.id === "core")?.y ?? 46} L ${visibleRooms.find((room) => room.id === "workshop")?.x ?? 74} ${visibleRooms.find((room) => room.id === "workshop")?.y ?? 19}`} />
               </svg>
               {visibleRooms.map((room) => <RoomLandmark key={room.id} locked={canvas.locked || !canManageCanvas} navigationRooms={visibleRooms} onReposition={repositionRoom} room={room} selected={selectedRoom.id === room.id} onSelect={setSelectedRoomId} onEnter={missionWritable ? enterRoom : () => undefined} />)}
               <CallSurface
@@ -773,16 +721,15 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
           <p className="eyebrow">{selectedRoom.eyebrow}</p>
           <h2 id="inspector-title">{selectedRoom.name}</h2>
           <p>{selectedRoom.description}</p>
-          <div className="inspector-status"><span><i /> {selectedRoom.active} active</span><span><Icon name="agent" /> {selectedRoom.agents} agent{selectedRoom.agents === 1 ? "" : "s"}</span></div>
-          <section><h3>In this room</h3><ul className="inspector-people"><li><PersonToken name="Priya" index={0} /> Priya <small>shaping flow</small></li><li><PersonToken name="SonicAgent" index={1} /> SonicAgent <small>running evals</small></li><li><PersonToken name="Marco" index={2} /> Marco <small>reviewing Proof</small></li></ul></section>
-          <section><h3>Recent artifacts</h3><ul className="artifact-list"><li>mission-world.tsx <small>UI component</small></li><li>realtime-room-protocol.md <small>systems contract</small></li><li>mission-kernel-contract.md <small>architecture</small></li></ul></section>
+          <div className="inspector-status"><span>Presence not connected</span></div>
+          <section><h3>Room activity</h3><p>Live occupants are not represented until a realtime presence provider is connected.</p></section>
+          <section><h3>Artifacts</h3><p>No durable Artifacts are linked to this room yet.</p></section>
           {missionWritable && (activeMission.role === "owner" || activeMission.role === "steward" || activeMission.role === "builder") ? <section className="custom-room-tools"><h3>Room controls</h3><label htmlFor="rename-room">Room name</label><input defaultValue={selectedRoom.name} id="rename-room" key={`${selectedRoom.id}-${selectedRoom.currentVersion}`} onBlur={(event) => void renameSelectedRoom(event.target.value)} /><button className="archive-room" onClick={() => {
             if (selectedRoom.currentVersion === undefined) return;
             setRoomError(null);
             void archiveRoomMutation({ roomId: selectedRoom.id as Id<"rooms">, expectedVersion: selectedRoom.currentVersion, idempotencyKey: crypto.randomUUID() }).then(() => setSelectedRoomId("")).catch(() => setRoomError("That room changed elsewhere. The live map has been refreshed."));
           }} type="button">Archive room</button></section> : null}
           <button className="primary-button" disabled={!missionWritable} onClick={() => enterRoom(selectedRoom.id)} type="button">{selectedRoom.action}</button>
-          <button className="secondary-button" type="button">Follow Priya</button>
         </aside>
       </main>
       {isObserver ? null : <PulseSurface mission={activeMission} />}
