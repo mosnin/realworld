@@ -12,6 +12,7 @@ type Mission = { _id: Id<"missions">; lifecycle: string; role: string };
 type RoomOption = { _id: Id<"rooms">; title: string; x: number; y: number };
 type MoveOption = { _id: Id<"moves">; title: string; roomId?: Id<"rooms"> };
 type CreateProofRequest = { roomId: Id<"rooms">; moveId: Id<"moves">; nonce: string };
+type InspectProofRequest = { proofId: Id<"proofs">; roomId: Id<"rooms">; nonce: string };
 
 type ProofCapabilities = {
   canEdit?: boolean;
@@ -32,6 +33,9 @@ export function ProofSurface({
   createProofRequest,
   onCreateProofRequestHandled,
   onCreateProofRequestUnavailable,
+  inspectProofRequest,
+  onInspectProofRequestHandled,
+  onInspectProofRequestUnavailable,
 }: Readonly<{
   mission: Mission;
   rooms: RoomOption[];
@@ -39,6 +43,9 @@ export function ProofSurface({
   createProofRequest?: CreateProofRequest | null;
   onCreateProofRequestHandled?: () => void;
   onCreateProofRequestUnavailable?: () => void;
+  inspectProofRequest?: InspectProofRequest | null;
+  onInspectProofRequestHandled?: () => void;
+  onInspectProofRequestUnavailable?: () => void;
 }>) {
   const proofs = useQuery(api.proofs.listMissionProofs, { missionId: mission._id });
   const createProof = useMutation(api.proofs.createProof);
@@ -143,9 +150,36 @@ export function ProofSurface({
 
   useLayoutEffect(() => {
     if (handoffFocusNonce === null || !open || pendingHandoffFocusRef.current !== handoffFocusNonce) return;
-    firstFieldRef.current?.focus();
+    const firstInteractive = panelRef.current?.querySelector<HTMLElement>("button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled])");
+    (firstFieldRef.current ?? firstInteractive)?.focus();
     pendingHandoffFocusRef.current = null;
   }, [handoffFocusNonce, open]);
+
+  useEffect(() => {
+    if (inspectProofRequest === undefined || inspectProofRequest === null || proofs === undefined) return;
+    const requestedProof = rooms.some((room) => room._id === inspectProofRequest.roomId)
+      ? proofs.find((proof) => proof._id === inspectProofRequest.proofId && proof.roomId === inspectProofRequest.roomId)
+      : undefined;
+    const frame = window.requestAnimationFrame(() => {
+      if (requestedProof !== undefined) {
+        openerRef.current = triggerRef.current;
+        setSelectedProofId(requestedProof._id);
+        setTitle(requestedProof.title);
+        setClaim(requestedProof.claim);
+        setEvidenceNote(requestedProof.evidenceNote);
+        setRoomId(requestedProof.roomId);
+        setLinkedMoveId(requestedProof.linkedMoveId ?? "");
+        setStatus(null);
+        pendingHandoffFocusRef.current = inspectProofRequest.nonce;
+        setHandoffFocusNonce(inspectProofRequest.nonce);
+        setOpen(true);
+      } else {
+        onInspectProofRequestUnavailable?.();
+      }
+      onInspectProofRequestHandled?.();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [inspectProofRequest, onInspectProofRequestHandled, onInspectProofRequestUnavailable, proofs, rooms]);
 
   function openComposer(event: React.MouseEvent<HTMLButtonElement>) {
     openerRef.current = event.currentTarget;

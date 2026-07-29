@@ -13,7 +13,7 @@ async function enterWorkshop(page: Page) {
 
 async function expectWorkshopContext(page: Page) {
   await expect(page.getByRole("heading", { name: "Durable work in Workshop." })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Select a Move, Call, or Fracture." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Select a Move, Call, Fracture, or Proof." })).toBeVisible();
   await expect(page.getByRole("article", { name: "Durable room context" })).toBeVisible();
   const availableWork = page.getByRole("list", { name: "Available durable work" });
   const firstContext = availableWork.getByRole("button").first();
@@ -96,9 +96,9 @@ test("an authenticated owner can launch an honest empty Blank canvas Workshop", 
 
   await enterWorkshop(page);
   await expect(page.getByRole("heading", { name: "Durable work in Workshop." })).toBeVisible();
-  await expect(page.getByText("No durable Moves, Calls, or Fractures are scoped to this room yet.")).toBeVisible();
+  await expect(page.getByText("No durable Moves, Calls, Fractures, or Proofs are scoped to this room yet.")).toBeVisible();
   await expect(page.getByRole("list", { name: "Available durable work" })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Select a Move, Call, or Fracture." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Select a Move, Call, Fracture, or Proof." })).toBeVisible();
   await expect(page.getByRole("button", { name: "View Workshop" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Ask for help" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Report a Fracture" })).toHaveCount(0);
@@ -133,7 +133,7 @@ test("an authenticated owner can launch an honest empty Blank canvas Workshop", 
   await expect(selectedFirstMove).toContainText("proposed");
 
   const workshopWork = page.getByRole("list", { name: "Available durable work" });
-  await expect(page.getByText("No durable Moves, Calls, or Fractures are scoped to this room yet.")).toHaveCount(0);
+  await expect(page.getByText("No durable Moves, Calls, Fractures, or Proofs are scoped to this room yet.")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Create first Move" })).toHaveCount(0);
   await expect(workshopWork.getByRole("button")).toHaveCount(1);
   await workshopWork.getByRole("button", { name: new RegExp(firstMoveTitle) }).click();
@@ -210,6 +210,25 @@ test("an authenticated owner can launch an honest empty Blank canvas Workshop", 
   await expect(firstProofDetails).toContainText("submitted");
   await proofDialog.getByRole("button", { name: "Close Proofs" }).click();
   await enterWorkshop(page);
+  await expect(workshopWork.getByRole("button")).toHaveCount(3);
+  await workshopWork.getByRole("button", { name: new RegExp(firstProofTitle) }).click();
+  const selectedFirstProof = page.getByLabel("Selected durable context");
+  await expect(selectedFirstProof).toContainText(firstProofTitle);
+  await expect(selectedFirstProof).toContainText(firstProofClaim);
+  await expect(selectedFirstProof).toContainText(firstProofEvidence);
+  await expect(selectedFirstProof).toContainText("submitted");
+  await expect(selectedFirstProof).toContainText(firstMoveTitle);
+  const openWorkshopProof = page.getByRole("button", { name: "Open Proof" });
+  await openWorkshopProof.focus();
+  await expect(openWorkshopProof).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(proofDialog.getByLabel("Proof title")).toBeFocused();
+  await expect(proofDialog.getByLabel(`Proof details for ${firstProofTitle}`)).toContainText(firstProofClaim);
+  await expect(proofDialog.getByLabel(`Proof details for ${firstProofTitle}`)).toContainText(firstProofEvidence);
+  await expect(proofDialog.getByLabel(`Proof details for ${firstProofTitle}`)).toContainText(`Linked Move: ${firstMoveTitle}`);
+  await proofDialog.getByRole("button", { name: "Close Proofs" }).click();
+  await expect(page.getByRole("button", { name: /Open Proofs/ })).toBeFocused();
+  await enterWorkshop(page);
   await workshopWork.getByRole("button", { name: new RegExp(firstMoveTitle) }).click();
   const reportFracture = page.getByRole("button", { name: "Report a Fracture" });
   await reportFracture.focus();
@@ -238,7 +257,7 @@ test("an authenticated owner can launch an honest empty Blank canvas Workshop", 
   await expect(firstFractureDetails).toContainText("open");
   await fractureDialog.getByRole("button", { name: "Close Fractures" }).click();
   await enterWorkshop(page);
-  await expect(workshopWork.getByRole("button")).toHaveCount(3);
+  await expect(workshopWork.getByRole("button")).toHaveCount(4);
   await workshopWork.getByRole("button", { name: new RegExp(firstFractureTitle) }).click();
   const selectedFirstFracture = page.getByLabel("Selected durable context");
   await expect(selectedFirstFracture).toContainText(firstFractureTitle);
@@ -301,9 +320,24 @@ test("an authenticated owner can launch an honest empty Blank canvas Workshop", 
   await callDialog.getByRole("button", { name: "Close Calls" }).click();
   await enterWorkshop(page);
   const reloadedWorkshopWork = page.getByRole("list", { name: "Available durable work" });
-  await expect(page.getByText("No durable Moves, Calls, or Fractures are scoped to this room yet.")).toHaveCount(0);
+  await expect(page.getByText("No durable Moves, Calls, Fractures, or Proofs are scoped to this room yet.")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Create first Move" })).toHaveCount(0);
-  await expect(reloadedWorkshopWork.getByRole("button")).toHaveCount(3);
+  await expect(reloadedWorkshopWork.getByRole("button")).toHaveCount(4);
+  await reloadedWorkshopWork.getByRole("button", { name: new RegExp(firstProofTitle) }).click();
+  const reloadedProofContext = page.getByLabel("Selected durable context");
+  await expect(reloadedProofContext).toContainText(firstProofTitle);
+  await expect(reloadedProofContext).toContainText(firstProofClaim);
+  await expect(reloadedProofContext).toContainText(firstProofEvidence);
+  await expect(reloadedProofContext).toContainText("submitted");
+  await expect(reloadedProofContext).toContainText(firstMoveTitle);
+  const reloadedOpenWorkshopProof = page.getByRole("button", { name: "Open Proof" });
+  await reloadedOpenWorkshopProof.focus();
+  await page.keyboard.press("Enter");
+  await expect(proofDialog.getByLabel(`Proof details for ${firstProofTitle}`)).toContainText(firstProofEvidence);
+  await expect(proofDialog.getByLabel(`Proof details for ${firstProofTitle}`)).toContainText(`Linked Move: ${firstMoveTitle}`);
+  await proofDialog.getByRole("button", { name: "Close Proofs" }).click();
+  await expect(page.getByRole("button", { name: /Open Proofs/ })).toBeFocused();
+  await enterWorkshop(page);
   await reloadedWorkshopWork.getByRole("button", { name: new RegExp(firstFractureTitle) }).click();
   const reloadedFractureContext = page.getByLabel("Selected durable context");
   await expect(reloadedFractureContext).toContainText(firstFractureDetail);
@@ -1038,6 +1072,21 @@ test("an owner can reject, resubmit, verify, and reload a durable room Proof", a
   await page.getByRole("button", { name: "Manage Mission" }).click();
   await page.getByRole("button", { name: "Archive Mission" }).click();
   await expect(page.getByRole("status", { name: "Archived Mission read-only" })).toBeVisible();
+  await enterWorkshop(page);
+  const archivedWorkshopProofs = page.getByRole("list", { name: "Available durable work" });
+  await archivedWorkshopProofs.getByRole("button", { name: new RegExp(updatedTitle) }).click();
+  const archivedOpenProof = page.getByRole("button", { name: "Open Proof" });
+  await archivedOpenProof.focus();
+  await expect(archivedOpenProof).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(proofDialog.getByRole("button", { name: "Close Proofs" })).toBeFocused();
+  await expect(proofDialog.getByLabel("Mission Proofs read-only")).toBeVisible();
+  await expect(proofDialog.getByLabel(`Proof details for ${updatedTitle}`)).toContainText(updatedClaim);
+  await expect(proofDialog.getByLabel(`Proof details for ${updatedTitle}`)).toContainText(updatedEvidence);
+  await expect(proofDialog.getByLabel("Proof title")).toHaveCount(0);
+  await expect(proofDialog.getByLabel(`Proof actions for ${updatedTitle}`)).toHaveCount(0);
+  await proofDialog.getByRole("button", { name: "Close Proofs" }).click();
+  await expect(page.getByRole("button", { name: /View Proofs/ })).toBeFocused();
   await page.getByRole("button", { name: /View Proofs/ }).click();
   const proofList = proofDialog.getByRole("list", { name: "Mission Proofs" });
   await proofList.getByRole("button", { name: new RegExp(updatedTitle) }).click();
@@ -1139,6 +1188,26 @@ test("an owner and scoped reviewer complete a reactive Proof handoff", async ({ 
     await expect(reviewerDetails.getByText("verified", { exact: true })).toBeVisible();
     await expect(reviewerDetails.getByText(/^Verified /)).toBeVisible();
     await expect(reviewerDialog.getByRole("button", { name: `Verify ${title}` })).toHaveCount(0);
+    await reviewerDialog.getByRole("button", { name: "Close Proofs" }).click();
+    await expect(reviewer.getByRole("button", { name: /View Proofs/ })).toBeFocused();
+    await enterWorkshop(reviewer);
+    await reviewerWork.getByRole("button", { name: new RegExp(title) }).click();
+    const reviewerProofContext = reviewer.getByLabel("Selected durable context");
+    await expect(reviewerProofContext).toContainText(title);
+    await expect(reviewerProofContext).toContainText(claim);
+    await expect(reviewerProofContext).toContainText(evidence);
+    await expect(reviewerProofContext).toContainText("verified");
+    const reviewerOpenProof = reviewer.getByRole("button", { name: "Open Proof" });
+    await reviewerOpenProof.focus();
+    await expect(reviewerOpenProof).toBeFocused();
+    await reviewer.keyboard.press("Enter");
+    await expect(reviewerDialog.getByRole("button", { name: "Close Proofs" })).toBeFocused();
+    await expect(reviewerDialog.getByLabel("Mission Proofs read-only")).toBeVisible();
+    await expect(reviewerDialog.getByLabel(`Proof details for ${title}`)).toContainText(evidence);
+    await expect(reviewerDialog.getByLabel("Proof title")).toHaveCount(0);
+    await expect(reviewerDialog.getByLabel(`Proof actions for ${title}`)).toHaveCount(0);
+    await reviewerDialog.getByRole("button", { name: "Close Proofs" }).click();
+    await expect(reviewer.getByRole("button", { name: /View Proofs/ })).toBeFocused();
 
     await expect(page.getByRole("button", { name: `Open Proof: ${title}, verified` })).toBeVisible({ timeout: 15_000 });
     await ownerDialog.getByRole("button", { name: "Close Proofs" }).click();
@@ -1173,6 +1242,9 @@ test("an owner and scoped reviewer complete a reactive Proof handoff", async ({ 
 test("a scoped observer receives a stable read-only Mission shell without private work feeds", async ({ browser, page }) => {
   const observerCallTitle = `Observer-visible Workshop Call ${Date.now()}`;
   const observerCallDetail = "A durable request the scoped observer may inspect but cannot join.";
+  const observerProofTitle = `Observer-withheld Workshop Proof ${Date.now()}`;
+  const observerProofClaim = "This proof exists for the Mission but is not observer context.";
+  const observerProofEvidence = "Only scoped collaborators may inspect this submitted proof.";
   await page.goto("/");
   await page.getByRole("button", { name: "Invite collaborators" }).click();
   const invitations = page.getByRole("dialog", { name: "Invite collaborators" });
@@ -1236,13 +1308,25 @@ test("a scoped observer receives a stable read-only Mission shell without privat
     await ownerCalls.getByRole("button", { name: "Issue Call", exact: true }).click();
     await expect(ownerCalls.getByText("Call issued.")).toBeVisible();
     await ownerCalls.getByRole("button", { name: "Close Calls" }).click();
+    await page.getByRole("button", { name: /Open Proofs/ }).click();
+    const ownerProofs = page.getByRole("dialog", { name: "Make the work verifiable" });
+    await ownerProofs.getByLabel("Proof title").fill(observerProofTitle);
+    await ownerProofs.getByLabel("Claim").fill(observerProofClaim);
+    await ownerProofs.getByLabel("Evidence note").fill(observerProofEvidence);
+    await ownerProofs.getByLabel("Room").selectOption({ label: "Workshop" });
+    await ownerProofs.getByRole("button", { name: "Submit Proof", exact: true }).click();
+    await expect(ownerProofs.getByText("Proof submitted.")).toBeVisible();
+    await ownerProofs.getByRole("button", { name: "Close Proofs" }).click();
+    await expect(page.getByRole("button", { name: `Open Proof: ${observerProofTitle}, submitted` })).toBeVisible();
     await expect(observer.getByRole("button", { name: `Open Call: ${observerCallTitle}, open` })).toBeVisible({ timeout: 15_000 });
+    await expect(observer.getByRole("button", { name: `Open Proof: ${observerProofTitle}, submitted` })).toHaveCount(0);
 
     await enterWorkshop(observer);
     const observerWork = await expectWorkshopContext(observer);
     await expect(observerWork.getByRole("button")).toHaveCount(4);
     await expect(observerWork.getByText("Mission Core", { exact: true })).toHaveCount(0);
     await expect(observerWork.getByText("Fracture", { exact: true })).toHaveCount(0);
+    await expect(observerWork.getByText("Proof", { exact: true })).toHaveCount(0);
     await expect(observer.getByRole("button", { name: "Ask for help" })).toHaveCount(0);
     await expect(observer.getByRole("button", { name: "Report a Fracture" })).toHaveCount(0);
     await expect(observer.getByRole("button", { name: "Submit Proof" })).toHaveCount(0);
