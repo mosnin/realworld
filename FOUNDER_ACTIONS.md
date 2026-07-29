@@ -12,11 +12,11 @@ Do not paste secrets into issues, commits, Notion, or chat. Add credentials only
 
 ## Next release gate: cloud development preview
 
-- [ ] In Convex, select or create one **development** deployment. Do not connect production yet.
-- [ ] Give the preview a stable Vercel origin or branch alias; Convex Auth's `SITE_URL` must not point at a disposable deployment URL.
-- [ ] Run the Convex Auth setup flow for that stable preview origin so the development deployment receives encrypted `SITE_URL`, `JWT_PRIVATE_KEY`, and `JWKS` values. Never paste those values into source, chat, or Notion.
-- [ ] In the Vercel project's **Preview** environment, set `NEXT_PUBLIC_CONVEX_URL` to that same Convex development deployment and set `NEXT_PUBLIC_APP_ENV=preview`.
-- [ ] Redeploy one preview, then verify account creation, sign-in, Mission launch, scoped invitation acceptance in a second browser session, and reload persistence.
+- [x] Created the Vercel-managed Convex development project `realworld-dev`, provisioned development deployment `hallowed-snail-690`, and pushed the current functions, schema, and indexes. Production remains disconnected.
+- [x] Assigned stable preview origin `https://realworld-cloud-preview-mosnins-projects.vercel.app`; Convex Auth does not depend on a disposable deployment URL.
+- [x] Ran the Convex Auth setup flow for that stable preview origin. The development deployment received encrypted `SITE_URL`, `JWT_PRIVATE_KEY`, and `JWKS` values; no secret values were copied into source or campaign records.
+- [x] Set Vercel **Preview** environment variables `NEXT_PUBLIC_CONVEX_URL` and `NEXT_PUBLIC_APP_ENV=preview`; the Vercel-managed `CONVEX_DEPLOY_KEY` remains Preview-only.
+- [x] Built a protected preview and verified cloud account creation, callsign setup, Blank canvas Mission launch, owner reload persistence, one-use Workshop-scoped reviewer invitation acceptance in an isolated second browser session, reviewer reload persistence, room containment, and owner-side join history on 2026-07-29.
 
 Already complete:
 

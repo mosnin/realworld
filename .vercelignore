@@ -1,0 +1,21 @@
+# Local dependencies and generated application output
+node_modules/
+.next/
+.next-e2e/
+out/
+
+# Local Convex deployment state
+.convex/
+
+# Test and coverage artifacts
+coverage/
+playwright-report/
+test-results/
+
+# Local-only configuration and editor metadata
+.env
+.env.local
+.env.*.local
+.vercel/
+*.tsbuildinfo
+.DS_Store
