@@ -420,22 +420,27 @@ function Workshop({
 }>) {
   const [selectedContextKey, setSelectedContextKey] = useState<string | null>(initialSelectedContextKey);
   const mainContentRef = useRef<HTMLElement>(null);
+  const loading = moves === undefined || calls === undefined || fractures === undefined || proofs === undefined;
+  const hasFocusedLoadedRoomRef = useRef(false);
   useEffect(() => {
+    if (loading || hasFocusedLoadedRoomRef.current) return;
     let frame: number | null = null;
-    const focusMain = () => {
-      frame = window.requestAnimationFrame(() => mainContentRef.current?.focus());
+    const focusLoadedRoom = () => {
+      frame = window.requestAnimationFrame(() => {
+        mainContentRef.current?.focus();
+        hasFocusedLoadedRoomRef.current = true;
+      });
     };
     if (document.readyState === "complete") {
-      focusMain();
+      focusLoadedRoom();
     } else {
-      window.addEventListener("load", focusMain, { once: true });
+      window.addEventListener("load", focusLoadedRoom, { once: true });
     }
     return () => {
-      window.removeEventListener("load", focusMain);
+      window.removeEventListener("load", focusLoadedRoom);
       if (frame !== null) window.cancelAnimationFrame(frame);
     };
-  }, []);
-  const loading = moves === undefined || calls === undefined || fractures === undefined || proofs === undefined;
+  }, [loading]);
   const availableContext: WorkshopContext[] = [
     ...(moves ?? []).filter((move) => move.roomId === roomId).map((move) => ({
       key: `move:${move._id}`,
