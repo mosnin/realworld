@@ -33,6 +33,11 @@ type CreateMoveRequest = {
   nonce: string;
 };
 
+type CreatedMove = {
+  roomId: Id<"rooms">;
+  moveId: Id<"moves">;
+};
+
 const transitions: Partial<Record<MoveState, MoveState[]>> = {
   proposed: ["ready", "cancelled"],
   ready: ["inProgress", "blocked", "cancelled"],
@@ -52,12 +57,14 @@ export function MoveBoard({
   createMoveRequest,
   onCreateMoveRequestHandled,
   onCreateMoveRequestUnavailable,
+  onViewCreatedMove,
 }: Readonly<{
   mission: Mission;
   rooms: RoomOption[];
   createMoveRequest?: CreateMoveRequest | null;
   onCreateMoveRequestHandled?: () => void;
   onCreateMoveRequestUnavailable?: () => void;
+  onViewCreatedMove?: (createdMove: CreatedMove) => void;
 }>) {
   const moves = useQuery(api.moves.listMissionMoves, { missionId: mission._id });
   const createMove = useMutation(api.moves.createMove);
@@ -79,6 +86,8 @@ export function MoveBoard({
   const [pendingIntent, setPendingIntent] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [handoffFocusNonce, setHandoffFocusNonce] = useState<string | null>(null);
+  const [firstMoveRoomId, setFirstMoveRoomId] = useState<Id<"rooms"> | null>(null);
+  const [createdFirstMove, setCreatedFirstMove] = useState<CreatedMove | null>(null);
   const canWrite =
     mission.lifecycle === "active" &&
     ["owner", "steward", "builder"].includes(mission.role);
@@ -89,6 +98,8 @@ export function MoveBoard({
     const frame = window.requestAnimationFrame(() => {
       if (requestedRoomIsAvailable) {
         setCreateRoomId(createMoveRequest.roomId);
+        setFirstMoveRoomId(createMoveRequest.roomId);
+        setCreatedFirstMove(null);
         pendingHandoffFocusRef.current = createMoveRequest.nonce;
         setHandoffFocusNonce(createMoveRequest.nonce);
         setOpen(true);
@@ -109,28 +120,30 @@ export function MoveBoard({
   function close() {
     pendingHandoffFocusRef.current = null;
     setHandoffFocusNonce(null);
+    setFirstMoveRoomId(null);
+    setCreatedFirstMove(null);
     setOpen(false);
     window.requestAnimationFrame(() => openerRef.current?.focus());
   }
 
-  async function runCommand(
+  async function runCommand<Result>(
     intent: string,
-    action: (idempotencyKey: string) => Promise<unknown>,
+    action: (idempotencyKey: string) => Promise<Result>,
     successMessage: string,
   ) {
-    if (pendingIntent !== null) return false;
+    if (pendingIntent !== null) return null;
     const idempotencyKey = commandKeys.current[intent] ?? crypto.randomUUID();
     commandKeys.current[intent] = idempotencyKey;
     setPendingIntent(intent);
     setStatus(null);
     try {
-      await action(idempotencyKey);
+      const result = await action(idempotencyKey);
       delete commandKeys.current[intent];
       setStatus(successMessage);
-      return true;
+      return result;
     } catch {
       setStatus("The Move could not change. Review the latest state and retry.");
-      return false;
+      return null;
     } finally {
       setPendingIntent(null);
     }
@@ -152,9 +165,13 @@ export function MoveBoard({
         }),
       "Move created.",
     );
-    if (succeeded) {
+    if (succeeded !== null) {
       setCreateTitle("");
       setCreateIntent("");
+      if (firstMoveRoomId === createRoomId) {
+        setCreatedFirstMove({ roomId: createRoomId, moveId: succeeded.moveId });
+        setFirstMoveRoomId(null);
+      }
     }
   }
 
@@ -173,7 +190,7 @@ export function MoveBoard({
         }),
       "Move details saved.",
     );
-    if (succeeded) setEditingId(null);
+    if (succeeded !== null) setEditingId(null);
   }
 
   async function transition(
@@ -281,6 +298,17 @@ export function MoveBoard({
           )}
 
           {status ? <p aria-live="polite">{status}</p> : null}
+          {createdFirstMove === null || onViewCreatedMove === undefined ? null : (
+            <button
+              onClick={() => {
+                setOpen(false);
+                onViewCreatedMove(createdFirstMove);
+              }}
+              type="button"
+            >
+              View Workshop
+            </button>
+          )}
           {moves === undefined ? (
             <p>Loading Moves…</p>
           ) : (

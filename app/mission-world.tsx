@@ -298,6 +298,7 @@ function Workshop({
   moves,
   calls,
   onCreateFirstMove,
+  initialSelectedContextKey,
   onExit,
 }: Readonly<{
   mission: { _id: Id<"missions">; role: string; lifecycle?: string };
@@ -306,9 +307,10 @@ function Workshop({
   moves: WorkshopMove[] | undefined;
   calls: WorkshopCall[] | undefined;
   onCreateFirstMove: () => void;
+  initialSelectedContextKey: string | null;
   onExit: () => void;
 }>) {
-  const [selectedContextKey, setSelectedContextKey] = useState<string | null>(null);
+  const [selectedContextKey, setSelectedContextKey] = useState<string | null>(initialSelectedContextKey);
   const loading = moves === undefined || calls === undefined;
   const availableContext: WorkshopContext[] = [
     ...(moves ?? []).filter((move) => move.roomId === roomId).map((move) => ({
@@ -487,6 +489,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   const [invitePanelOpen, setInvitePanelOpen] = useState(false);
   const [newMissionOpen, setNewMissionOpen] = useState(false);
   const [createMoveRequest, setCreateMoveRequest] = useState<{ roomId: Id<"rooms">; nonce: string } | null>(null);
+  const [workshopContextRequest, setWorkshopContextRequest] = useState<{ roomId: Id<"rooms">; key: string } | null>(null);
   const [loadedPreferencesMissionId, setLoadedPreferencesMissionId] = useState<Id<"missions"> | null>(null);
   const [canvas, setCanvas] = useState<CanvasState>(defaultCanvasState);
   const [newRoomName, setNewRoomName] = useState("");
@@ -592,11 +595,28 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
     setView("world");
   }
 
+  function viewCreatedMoveInWorkshop({ roomId, moveId }: { roomId: Id<"rooms">; moveId: Id<"moves"> }) {
+    if (!canvasRooms.some((room) => room.id === roomId)) {
+      setWorkshopContextRequest(null);
+      setView("world");
+      setRoomError("That room is no longer available.");
+      return;
+    }
+    setWorkshopContextRequest({ roomId, key: `move:${moveId}` });
+    setSelectedRoomId(roomId);
+    setView("workshop");
+    requestAnimationFrame(() => {
+      setWorkshopContextRequest(null);
+      document.getElementById("main-content")?.focus();
+    });
+  }
+
   function selectMission(missionId: Id<"missions">) {
     setSelectedMissionId(missionId);
     setSelectedRoomId("");
     setView("world");
     setCreateMoveRequest(null);
+    setWorkshopContextRequest(null);
     setInvitePanelOpen(false);
     setRoomError(null);
   }
@@ -717,7 +737,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   const missionWritable = activeMission.lifecycle === "active";
 
   if (view === "workshop" && selectedRoomRecord !== undefined) {
-    return <><AuthenticatedMissionRealtimeLifecycle authenticatedTokenRequester={requestAuthenticatedRealtimeToken} expectedMissionId={activeMission._id} expectedRoomId={selectedRoomRecord.id} membershipGrantVersion={activeMission.grantVersion} readiness={realtimeRoomReadiness} transportFactory={developmentRealtimeTransportFactory} /><Workshop calls={missionCalls} mission={activeMission} moves={missionMoves} onCreateFirstMove={createFirstMoveFromWorkshop} onExit={() => setView("world")} roomId={selectedRoomRecord.id as Id<"rooms">} roomTitle={selectedRoomRecord.name} /></>;
+    return <><AuthenticatedMissionRealtimeLifecycle authenticatedTokenRequester={requestAuthenticatedRealtimeToken} expectedMissionId={activeMission._id} expectedRoomId={selectedRoomRecord.id} membershipGrantVersion={activeMission.grantVersion} readiness={realtimeRoomReadiness} transportFactory={developmentRealtimeTransportFactory} /><Workshop calls={missionCalls} initialSelectedContextKey={workshopContextRequest?.roomId === selectedRoomRecord.id ? workshopContextRequest.key : null} mission={activeMission} moves={missionMoves} onCreateFirstMove={createFirstMoveFromWorkshop} onExit={() => setView("world")} roomId={selectedRoomRecord.id as Id<"rooms">} roomTitle={selectedRoomRecord.name} /></>;
   }
 
   return (
@@ -782,6 +802,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
           mission={activeMission}
           onCreateMoveRequestHandled={handleCreateMoveRequestHandled}
           onCreateMoveRequestUnavailable={handleCreateMoveRequestUnavailable}
+          onViewCreatedMove={viewCreatedMoveInWorkshop}
           rooms={roomRecords.map((room) => ({ _id: room._id, title: room.title }))}
         />
       </section>

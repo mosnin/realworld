@@ -87,6 +87,7 @@ test("an authenticated owner can launch an honest empty Blank canvas Workshop", 
   await expect(page.getByText("No durable Moves or Calls are scoped to this room yet.")).toBeVisible();
   await expect(page.getByRole("list", { name: "Available durable work" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Select a Move or Call." })).toBeVisible();
+  await expect(page.getByRole("button", { name: "View Workshop" })).toHaveCount(0);
 
   const createFirstMove = page.getByRole("button", { name: "Create first Move" });
   await createFirstMove.focus();
@@ -103,10 +104,19 @@ test("an authenticated owner can launch an honest empty Blank canvas Workshop", 
   await moveBoard.getByLabel("Move intent").fill(firstMoveIntent);
   await moveBoard.getByRole("button", { name: "Create Move" }).click();
   await expect(moveBoard.getByText("Move created.")).toBeVisible();
-  await moveBoard.getByRole("button", { name: "Close Moves" }).click();
-  await expect(page.getByRole("button", { name: /Open Moves \(1\)/ })).toBeFocused();
 
-  await enterWorkshop(page);
+  const viewWorkshop = page.getByRole("button", { name: "View Workshop" });
+  await expect(viewWorkshop).toBeVisible();
+  await viewWorkshop.focus();
+  await expect(viewWorkshop).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "Durable work in Workshop." })).toBeVisible();
+  await expect(page.locator("#main-content")).toBeFocused();
+  const selectedFirstMove = page.getByLabel("Selected durable context");
+  await expect(selectedFirstMove).toContainText(firstMoveTitle);
+  await expect(selectedFirstMove).toContainText(firstMoveIntent);
+  await expect(selectedFirstMove).toContainText("proposed");
+
   const workshopWork = page.getByRole("list", { name: "Available durable work" });
   await expect(page.getByText("No durable Moves or Calls are scoped to this room yet.")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Create first Move" })).toHaveCount(0);
@@ -437,6 +447,7 @@ test("an owner can create, link, advance, and reload durable Moves", async ({ pa
   await board.getByLabel("Room").selectOption({ label: "Workshop" });
   await board.getByRole("button", { name: "Create Move" }).click();
   await expect(board.getByText("Move created.")).toBeVisible();
+  await expect(board.getByRole("button", { name: "View Workshop" })).toHaveCount(0);
 
   const createdMove = board.getByRole("article", { name: `Move ${initialTitle}` });
   const editCreatedMove = createdMove.getByRole("button", { name: `Edit Move ${initialTitle}` });
