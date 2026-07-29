@@ -8,9 +8,10 @@ import { requireCompletedHumanProfile } from "./profiles";
 
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const roomTitles = { missionCore: "Mission Core", workshop: "Workshop", observatory: "Observatory", branchLab: "Branch Lab", reviewDeck: "Review Deck", signalTower: "Signal Tower", surgeHall: "Surge Hall" } as const;
+const missionTemplateKey = v.union(v.literal("blankCanvas"), v.literal("companySprint"), v.literal("classroomProject"), v.literal("contentProduction"), v.literal("openChallenge"));
 
 export const createMissionFromTemplate = mutation({
-  args: { templateKey: v.string(), slug: v.string(), title: v.string(), idempotencyKey: v.string(), correlationId: v.string() },
+  args: { templateKey: missionTemplateKey, slug: v.string(), title: v.string(), idempotencyKey: v.string(), correlationId: v.string() },
   returns: v.object({ missionId: v.id("missions"), eventId: v.id("missionEvents"), currentVersion: v.number() }),
   handler: async (ctx, args) => {
     if (!isMissionTemplateKey(args.templateKey) || !slugPattern.test(args.slug) || args.slug.length > 80 || args.title.trim().length === 0 || args.title.trim().length > 160) throw new Error("Invalid Mission launch");

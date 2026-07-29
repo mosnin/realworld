@@ -442,7 +442,7 @@ export type MissionWorldProps = Readonly<{
 }>;
 
 export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps = {}) {
-  const templateOptions = [{ key: "companySprint", label: "Company sprint" }, { key: "classroomProject", label: "Classroom project" }, { key: "contentProduction", label: "Content production" }, { key: "openChallenge", label: "Open challenge" }];
+  const templateOptions = [{ key: "companySprint", label: "Company sprint" }, { key: "classroomProject", label: "Classroom project" }, { key: "contentProduction", label: "Content production" }, { key: "openChallenge", label: "Open challenge" }, { key: "blankCanvas", label: "Blank canvas" }] as const;
   const missions = useQuery(api.missions.listMyMissions, {});
   const profile = useQuery(api.profiles.getMine, {});
   const [selectedMissionId, setSelectedMissionId] = useState<Id<"missions"> | null>(null);
@@ -588,7 +588,7 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
     setRoomError(null);
   }
 
-  async function launchMission(templateKey: string, title: string) {
+  async function launchMission(templateKey: (typeof templateOptions)[number]["key"], title: string) {
     if (launching !== null) return;
     setLaunching(templateKey);
     setLaunchError(null);

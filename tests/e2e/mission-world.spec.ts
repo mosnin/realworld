@@ -63,8 +63,33 @@ test("a new participant must complete and retains the callsign setup gate before
   await page.getByRole("textbox", { name: "Callsign", exact: true }).fill("Gate Runner");
   await page.getByRole("button", { name: "Save callsign" }).click();
   await expect(page.getByRole("heading", { name: "Start a Mission with a real work shape." })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("button", { name: "Launch Blank canvas" })).toBeVisible();
   await page.reload();
   await expect(page.getByRole("heading", { name: "Start a Mission with a real work shape." })).toBeVisible({ timeout: 15_000 });
+});
+
+test("an authenticated owner can launch an honest empty Blank canvas Workshop", async ({ page }) => {
+  await page.getByRole("button", { name: "New Mission" }).click();
+  const launcher = page.getByRole("dialog", { name: "Choose a work shape" });
+  await launcher.getByRole("button", { name: "Launch Blank canvas" }).click();
+
+  await expect(page.getByRole("heading", { name: "Blank canvas" })).toBeVisible();
+  await expect(page.locator(".landmark")).toHaveCount(2);
+  await expect(page.getByRole("button", { name: /^Mission Core\./ })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: /^Workshop\./ })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: /^(Review Deck|Observatory|Surge Hall)\./ })).toHaveCount(0);
+
+  await enterWorkshop(page);
+  await expect(page.getByRole("heading", { name: "Durable work in Workshop." })).toBeVisible();
+  await expect(page.getByText("No durable Moves or Calls are scoped to this room yet.")).toBeVisible();
+  await expect(page.getByRole("list", { name: "Available durable work" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Select a Move or Call." })).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Blank canvas" })).toBeVisible();
+  await enterWorkshop(page);
+  await expect(page.getByText("No durable Moves or Calls are scoped to this room yet.")).toBeVisible();
+  await expect(page.getByRole("list", { name: "Available durable work" })).toHaveCount(0);
 });
 
 test("a participant can inspect and enter Workshop from the Mission World", async ({ page }) => {

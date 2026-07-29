@@ -1,4 +1,5 @@
 export const missionTemplates = {
+  blankCanvas: { summary: "A blank Mission with only the durable rooms needed to begin.", rooms: ["missionCore", "workshop"], moves: [] },
   companySprint: { summary: "A focused team sprint with a clear delivery rhythm.", rooms: ["missionCore", "workshop", "reviewDeck", "surgeHall"], moves: ["Set the sprint outcome", "Ship the first working slice", "Review and publish Proof"] },
   classroomProject: { summary: "A structured learning project with research, making, and review.", rooms: ["missionCore", "observatory", "workshop", "reviewDeck"], moves: ["Frame the research question", "Build the shared artifact", "Peer review the evidence"] },
   contentProduction: { summary: "A collaborative production room for an attributable piece of work.", rooms: ["missionCore", "observatory", "workshop", "reviewDeck"], moves: ["Choose the audience promise", "Create the production draft", "Approve the final cut"] },

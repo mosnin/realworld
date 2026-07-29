@@ -8,7 +8,7 @@ Do not paste secrets into issues, commits, Notion, or chat. Add credentials only
 - [x] Confirm the working product name `Realworld`; a naming and trademark check can happen before public launch.
 - [ ] Choose the initial sign-in policy. Recommendation: invite-only workspaces with email/social sign-in, private Missions by default, and explicit publishing.
 - [ ] Set a monthly AI spend ceiling and a per-Mission default budget. Recommendation for private development: a hard global cap plus visible per-agent run budgets.
-- [ ] Decide whether a Mission may start with a genuinely blank Workshop. Recommendation: yes—offer **Blank canvas** beside the guided templates so empty-state behavior is a real product capability, not a hidden test-only seed path.
+- [x] Approved **Blank canvas** as a real Mission type beside the guided templates, so a Mission may begin with a genuinely empty Workshop through the normal product flow.
 
 ## Next release gate: cloud development preview
 

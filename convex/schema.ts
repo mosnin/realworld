@@ -68,7 +68,7 @@ export default defineSchema({
     // Legacy-only compatibility field. New Mission documents and event writes
     // omit it; canonical event ordering lives on the event index itself.
     eventSequence: v.optional(v.number()),
-    templateKey: v.optional(v.union(v.literal("companySprint"), v.literal("classroomProject"), v.literal("contentProduction"), v.literal("openChallenge"))),
+    templateKey: v.optional(v.union(v.literal("blankCanvas"), v.literal("companySprint"), v.literal("classroomProject"), v.literal("contentProduction"), v.literal("openChallenge"))),
     createdAt: v.number(),
     updatedAt: v.number(),
     schemaVersion: v.number(),
