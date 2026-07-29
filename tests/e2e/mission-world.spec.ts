@@ -1037,8 +1037,24 @@ test("a scoped observer receives a stable read-only Mission shell without privat
     await expect(observerWork.getByText("Mission Core", { exact: true })).toHaveCount(0);
     await expect(observer.getByRole("button", { name: "Ask for help" })).toHaveCount(0);
     await expect(observer.getByLabel("Mission activity Pulse")).toHaveCount(0);
-    await page.getByRole("button", { name: /^Workshop\./ }).click();
+    const ownerWorkshop = page.getByRole("button", { name: /^Workshop\./ });
+    const conflictMessage = "That room changed elsewhere. The live map has been refreshed.";
+    await ownerWorkshop.click();
     await page.getByRole("button", { name: "Archive room" }).click();
+    let archiveOutcome: "archived" | "conflict" | null = null;
+    await expect.poll(async () => {
+      const [workshopCount, conflictCount] = await Promise.all([
+        ownerWorkshop.count(),
+        page.getByText(conflictMessage).count(),
+      ]);
+      archiveOutcome = workshopCount === 0 ? "archived" : conflictCount > 0 ? "conflict" : null;
+      return archiveOutcome;
+    }, { timeout: 15_000 }).not.toBeNull();
+    if (archiveOutcome === "conflict") {
+      await expect(ownerWorkshop).toBeVisible();
+      await ownerWorkshop.click();
+      await page.getByRole("button", { name: "Archive room" }).click();
+    }
     await expect(page.getByRole("button", { name: /^Workshop\./ })).toHaveCount(0);
     await expect(observer.getByRole("heading", { name: "This room is no longer available." })).toBeVisible({ timeout: 15_000 });
     await expect(observer.getByRole("list", { name: "Available durable work" })).toHaveCount(0);
