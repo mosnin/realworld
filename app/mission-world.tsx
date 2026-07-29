@@ -419,7 +419,22 @@ function Workshop({
   onExit: () => void;
 }>) {
   const [selectedContextKey, setSelectedContextKey] = useState<string | null>(initialSelectedContextKey);
-  const focusMainOnMount = useCallback((node: HTMLElement | null) => node?.focus(), []);
+  const mainContentRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    let frame: number | null = null;
+    const focusMain = () => {
+      frame = window.requestAnimationFrame(() => mainContentRef.current?.focus());
+    };
+    if (document.readyState === "complete") {
+      focusMain();
+    } else {
+      window.addEventListener("load", focusMain, { once: true });
+    }
+    return () => {
+      window.removeEventListener("load", focusMain);
+      if (frame !== null) window.cancelAnimationFrame(frame);
+    };
+  }, []);
   const loading = moves === undefined || calls === undefined || fractures === undefined || proofs === undefined;
   const availableContext: WorkshopContext[] = [
     ...(moves ?? []).filter((move) => move.roomId === roomId).map((move) => ({
@@ -528,7 +543,7 @@ function Workshop({
             )}
           </section>
         </aside>
-        <main className="artifact-canvas" id="main-content" ref={focusMainOnMount} tabIndex={-1}>
+        <main className="artifact-canvas" id="main-content" ref={mainContentRef} tabIndex={-1}>
           <div className="artifact-toolbar" aria-label="Durable room context"><span className="artifact-kind">Read-only room context</span></div>
           <article className="artifact-paper" aria-label={selectedContext === null ? "Durable room context" : "Selected durable context"}>
             {selectedContext === null ? <>
