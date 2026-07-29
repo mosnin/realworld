@@ -946,9 +946,7 @@ test("a durable Workshop Move appears in Pulse and remains readable after reload
 
   const pulse = page.getByLabel("Mission activity Pulse");
   const openPulse = pulse.getByRole("button", { name: /Open Mission Pulse/ });
-  await openPulse.focus();
-  await expect(openPulse).toBeFocused();
-  await page.keyboard.press("Enter");
+  await openPulse.press("Enter");
   const activity = pulse.getByLabel("Recent durable Mission activity");
   const moveEvent = activity.getByRole("button", { name: /Move created/ });
   await expect(moveEvent).toBeVisible();
@@ -959,8 +957,7 @@ test("a durable Workshop Move appears in Pulse and remains readable after reload
   await page.reload();
   const reloadedPulse = page.getByLabel("Mission activity Pulse");
   const reopenPulse = reloadedPulse.getByRole("button", { name: /Open Mission Pulse/ });
-  await reopenPulse.focus();
-  await page.keyboard.press("Enter");
+  await reopenPulse.press("Enter");
   const reloadedActivity = reloadedPulse.getByLabel("Recent durable Mission activity");
   const reloadedMoveEvent = reloadedActivity.getByRole("button", { name: /Move created/ });
   await expect(reloadedMoveEvent).toBeVisible();

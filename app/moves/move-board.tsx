@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery } from "convex/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
@@ -66,6 +66,7 @@ export function MoveBoard({
   const commandKeys = useRef<Record<string, string>>({});
   const openerRef = useRef<HTMLButtonElement>(null);
   const createTitleRef = useRef<HTMLInputElement>(null);
+  const pendingHandoffFocusRef = useRef<string | null>(null);
   const [open, setOpen] = useState(false);
   const [createTitle, setCreateTitle] = useState("");
   const [createIntent, setCreateIntent] = useState("");
@@ -77,6 +78,7 @@ export function MoveBoard({
   const [editDependencies, setEditDependencies] = useState<Id<"moves">[]>([]);
   const [pendingIntent, setPendingIntent] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [handoffFocusNonce, setHandoffFocusNonce] = useState<string | null>(null);
   const canWrite =
     mission.lifecycle === "active" &&
     ["owner", "steward", "builder"].includes(mission.role);
@@ -87,8 +89,9 @@ export function MoveBoard({
     const frame = window.requestAnimationFrame(() => {
       if (requestedRoomIsAvailable) {
         setCreateRoomId(createMoveRequest.roomId);
+        pendingHandoffFocusRef.current = createMoveRequest.nonce;
+        setHandoffFocusNonce(createMoveRequest.nonce);
         setOpen(true);
-        window.requestAnimationFrame(() => createTitleRef.current?.focus());
       } else {
         onCreateMoveRequestUnavailable?.();
       }
@@ -97,7 +100,15 @@ export function MoveBoard({
     return () => window.cancelAnimationFrame(frame);
   }, [canWrite, createMoveRequest, onCreateMoveRequestHandled, onCreateMoveRequestUnavailable, rooms]);
 
+  useLayoutEffect(() => {
+    if (handoffFocusNonce === null || !open || pendingHandoffFocusRef.current !== handoffFocusNonce) return;
+    createTitleRef.current?.focus();
+    pendingHandoffFocusRef.current = null;
+  }, [handoffFocusNonce, open]);
+
   function close() {
+    pendingHandoffFocusRef.current = null;
+    setHandoffFocusNonce(null);
     setOpen(false);
     window.requestAnimationFrame(() => openerRef.current?.focus());
   }

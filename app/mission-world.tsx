@@ -491,6 +491,8 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
   const [canvas, setCanvas] = useState<CanvasState>(defaultCanvasState);
   const [newRoomName, setNewRoomName] = useState("");
   const [roomError, setRoomError] = useState<string | null>(null);
+  const handleCreateMoveRequestHandled = useCallback(() => setCreateMoveRequest(null), [setCreateMoveRequest]);
+  const handleCreateMoveRequestUnavailable = useCallback(() => setRoomError("That room is no longer available."), [setRoomError]);
   const canvasRooms = roomRecords?.map(canvasRoom) ?? [];
   const selectedRoomRecord = canvasRooms.find((room) => room.id === selectedRoomId);
   const selectedRoom = selectedRoomRecord ?? canvasRooms[0];
@@ -778,8 +780,8 @@ export function MissionWorld({ developmentAblyClientFactory }: MissionWorldProps
           createMoveRequest={createMoveRequest}
           key={activeMission._id}
           mission={activeMission}
-          onCreateMoveRequestHandled={() => setCreateMoveRequest(null)}
-          onCreateMoveRequestUnavailable={() => setRoomError("That room is no longer available.")}
+          onCreateMoveRequestHandled={handleCreateMoveRequestHandled}
+          onCreateMoveRequestUnavailable={handleCreateMoveRequestUnavailable}
           rooms={roomRecords.map((room) => ({ _id: room._id, title: room.title }))}
         />
       </section>
